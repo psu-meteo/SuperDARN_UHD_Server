@@ -49,7 +49,7 @@ sem_list = []
 swing = SWING0
 
 
-class cudamsg_handler(obj):
+class cudamsg_handler(object):
     def __init__(self, serversock, gpu):
         self.sock = serversock
         self.status = 0
@@ -120,16 +120,18 @@ def shm_namer(antenna, side, swing, direction = 'rx'):
     name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
     return name
 
-def create_shm(antenna, swing, side, direction = 'rx')
-    memory = posix_ipc.SharedMemory(shm_namer(ant, side, swing, direction), posix_ipc.O_CREATE, size=shm_size])
+def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
+    name = shm_namer(antenna, side, swing, direction)
+    memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=shm_size)
     mapfile = mmap.mmap(memory.fd, memory.size)
     memory.close_fd()
     shm_list.append(name)
     return mapfile
 
 def create_semaphore(antenna, side, swing, direction):
+    name = sem_namer(antenna, side, swing, direction)
     sem_list.append(name)
-    sem = posix_ipc.SharedMemory(shm_namer(antenna, side, swing, direction), posix_ipc.O_CREATE, size=shm_size])
+    sem = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT)
     return sem
 
 def sigint_handler(signum, frame):
@@ -146,9 +148,20 @@ def sigint_handler(signum, frame):
 # class to contain references to gpu-side information
 # handle launching signal processing kernels
 # and host/gpu communication and initialization
-class ProcessingGPU(obj):
-    MAXSTREAMS = 2
+class ProcessingGPU(object):
+    
     def __init__(self):
+        MAXSTREAMS = 2
+        NFREQS = 1
+        NTAPS0 = 50
+        NTAPS1 = 200
+        NRFSAMPS_RX = 10000
+        NIFSAMPS_RX = 1000
+        NBBSAMPS_RX = 20
+        NANTS = 1
+        NRFSAMPS_TX = 10000
+        NBBSAMPS_TX = 200
+
         # allocate memory on cpu, compile functions
         self.rx_filtertap_s0 = np.float32(np.zeros([NFREQS, NTAPS0, 2]))
         self.rx_filtertap_s1 = np.float32(np.zeros([NFREQS, NTAPS1, 2]))
@@ -157,8 +170,8 @@ class ProcessingGPU(obj):
         self.rx_samples_if = np.float32(np.zeros([NANTS, NFREQS, NIFSAMPS_RX]))
         self.rx_samples_bb = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_RX]))
     
-        self.tx_bb_indata = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_TX])
-        self.tx_rf_outdata = np.uint16(np.zeros([NANTS, NFREQS, NRFSAMPS_TX])
+        self.tx_bb_indata = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_TX]))
+        self.tx_rf_outdata = np.uint16(np.zeros([NANTS, NFREQS, NRFSAMPS_TX]))
 
         self.cu_rx_filtertaps0 = cuda.mem_alloc_like(self.rx_filtertap_s0)
         self.cu_rx_filtertaps1 = cuda.mem_alloc_like(self.rx_filtertap_s1)
@@ -225,8 +238,8 @@ class ProcessingGPU(obj):
     def generate_bbtx(self, seqbuf, trise):
         bb_vec = np.complex64(np.zeros(seqbuf.shape))
         pdb.set_trace() 
-        bb_vec((seqbuf & X_BIT) & (seqbuf & P_BIT)) = -1
-        bb_vec((seqbuf & X_BIT) & (seqbuf & P_BIT)) = 1 
+        bb_vec[(seqbuf & X_BIT) & (seqbuf & P_BIT)] = -1
+        bb_vec[(seqbuf & X_BIT) & (seqbuf & P_BIT)] = 1 
         '''
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
     std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
@@ -277,7 +290,7 @@ class ProcessingGPU(obj):
         cuda.memcpy_htod(self.txfreq_rads, mixer_freqs)
 
     def _set_phasedelays(fc, fsamp, nchannels, tdelay):
-        phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * tdelay[i] * fc[i]] for i in range(nchannels)], 2 * np.pi)) 
+        phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * tdelay[i] * fc[i] for i in range(nchannels)], 2 * np.pi)) 
         cuda.memcpy_htod(self.txphasedelay_rads, phase_delays)
  
     def _rect_filter_s0():
@@ -328,13 +341,11 @@ def main():
     for ant in antennas:
         rx_shm_list[SIDEA].append(create_shm(ant, SIDEA, SWING0, direction = RXDIR))
         rx_shm_list[SIDEA].append(create_shm(ant, SIDEA, SWING1, direction = RXDIR))
+        tx_shm_list.append(create_shm(shm_namer(ant, SIDEA, SWING0, direction = TXDIR)))
 
-        tx_shm_list.append(create_shm(shm_namer(ant, SIDEA, SWING0, direction = TXDIR))
-
-        rx_semaphore_list[SIDEA].append(posix_ipc.Semaphore(semaphore_namer(ant, SIDEA, SWING0, direction = RXDIR), posix_ipc.O_CREX))
-        rx_semaphore_list[SIDEA].append(posix_ipc.Semaphore(semaphore_namer(ant, SIDEA, SWING1, direction = RXDIR), posix_ipc.O_CREX))
-
-        tx_semaphore_list.append(posix_ipc.Semaphore(semaphore_namer(ant, SIDEA, SWING0, direction = SWING0), posix_ipc.O_CREX))
+        rx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING0, direction = RXDIR))
+        rx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING1, direction = RXDIR))
+        tx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING1, direction = TXDIR))
 
     signal.signal(signal.SIGINT, sigint_handler)       
 

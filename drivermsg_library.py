@@ -9,9 +9,9 @@ CUDA_SETUP = 's'
 CUDA_PROCESS = 'p'
 CUDA_GET_DATA = 'g'
 
-class driver_command(obj):
+class driver_command(object):
     # class to help manage sending data 
-    class socket_data(obj):
+    class socket_data(object):
         def __init__(self, data, dtype, name, nitems = 1):
             # if data is numpy array, do something
             # otherwise
@@ -39,7 +39,7 @@ class driver_command(obj):
         for item in self.queue:
             item.transmit(sock)
 
-    def receive(self, sock)
+    def receive(self, sock):
         for item in self.queue:
             self.payload[item.name] = item.receive(sock)
 
