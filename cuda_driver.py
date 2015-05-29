@@ -35,6 +35,11 @@ TXDIR = 'tx'
 HOST = '127.0.0.1'
 PORT = 40500
 
+X_BIT = 0x04
+TR_BIT = 0x02
+S_BIT = 0x80
+P_BIT = 0x10
+
 rx_shm_list = [[],[]]
 tx_shm_list = []
 rx_semaphore_list = [[],[]] # [side][swing]
@@ -237,10 +242,13 @@ class ProcessingGPU(object):
         return self.tx_rf_outdata
    
     def generate_bbtx(self, seqbuf, trise):
+        # TODO: make sure whatever is calling this uses the right type..
+        seqbuf = np.uint8(seqbuf)
         bb_vec = np.complex64(np.zeros(seqbuf.shape))
-        pdb.set_trace() 
-        bb_vec[(seqbuf & X_BIT) & (seqbuf & P_BIT)] = -1
-        bb_vec[(seqbuf & X_BIT) & (seqbuf & P_BIT)] = 1 
+        tx_mask = np.bool_(seqbuf & X_BIT) 
+        phase_mask = np.bool_(seqbuf & P_BIT)
+        bb_vec[tx_mask & ~phase_mask] = 1 
+        bb_vec[tx_mask & phase_mask] = -1
         '''
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
     std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
@@ -284,7 +292,7 @@ class ProcessingGPU(object):
     }
 
         '''
-        self.cu_tx_bb_indata = bb_vec
+        self.tx_bb_indata = bb_vec
 
     def _set_mixerfreqs(fc, fsamp, nchannels):
         mixer_freqs = np.float64([2 * np.pi * (f - fc[i]) / fsamp for i in range(nchannels)])
