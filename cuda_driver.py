@@ -149,7 +149,6 @@ def sigint_handler(signum, frame):
 # handle launching signal processing kernels
 # and host/gpu communication and initialization
 class ProcessingGPU(object):
-    
     def __init__(self):
         MAXSTREAMS = 2
         NFREQS = 1
@@ -161,6 +160,8 @@ class ProcessingGPU(object):
         NANTS = 1
         NRFSAMPS_TX = 10000
         NBBSAMPS_TX = 200
+        DMRATE0 = NRFSAMPS_RX / NIFSAMPS_RX
+        DMRATE1 = NIFSAMPS_RX / NBBSAMPS_RX
 
         # allocate memory on cpu, compile functions
         self.rx_filtertap_s0 = np.float32(np.zeros([NFREQS, NTAPS0, 2]))
@@ -191,19 +192,19 @@ class ProcessingGPU(object):
         
         with open('tx_cuda.cu', 'r') as f:
             self.cu_tx = pycuda.compiler.SourceModule(f.read())
-            self.cu_tx_interpolate_and_multiply = self.cu_rx.get_function('interpolate_and_multiply')
+            self.cu_tx_interpolate_and_multiply = self.cu_tx.get_function('interpolate_and_multiply')
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
-            self.cu_txoffsets_rads = self.cu_rx.get_global('txphasedelay_rads')[0]
+            self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
 
-        self.tx_block = (NRFSAMPLES / NBBSAMPLES, NFREQS, 1)
-        self.tx_grid = (NBBSAMPLES, NANTS, 1)
+        self.tx_block = (NRFSAMPS_TX / NBBSAMPS_TX, NFREQS, 1)
+        self.tx_grid = (NBBSAMPS_TX, NANTS, 1)
 
         self.rx_grid_0 = (NRFSAMPS_RX / DMRATE0, NANTS, 1)
-        self.rx_grid_1 = (NBBSAMPS, NANTS, 1)
+        self.rx_grid_1 = (NBBSAMPS_RX, NANTS, 1)
         self.rx_block_0 = (NTAPS0 / 2, NFREQS, 1)
-        self.rx_block_1 = (NBBSAMPS)
+        self.rx_block_1 = (NBBSAMPS_RX)
         
-        self.streams = [drv.Stream() for i in range(MAXSTREAMS)]
+        self.streams = [cuda.Stream() for i in range(MAXSTREAMS)]
     
     # transfer samples from shared memory to gpu
     def rxsamples_shm_to_gpu(self, shm):

@@ -1,9 +1,7 @@
 // CUDA function for transmit beamforming 
-#include <complex>
 #include <math.h>
-#include <stdio.h>
+#include <stdint.h>
 #include <complex.h>
-
 // threadIdx.x - time
 // blockDim.x - number of times (bb?)
 // threadIdx.y - frequency
@@ -13,11 +11,12 @@
 
 #define MAXFREQS 4
 #define MAXANTS 32
-__device__ __constant__ double txfreq_rads[MAXFREQS]
-__device__ __constant__ float txphasedelay_rads[MAXANTS]
+
+__device__ __constant__ double txfreq_rads[MAXFREQS];
+__device__ __constant__ float txphasedelay_rads[MAXANTS];
 
 
- void interpolate_and_multiply(
+__global__ void interpolate_and_multiply(
     float* indata,
     int16_t** outdata,
     double* radfreqs,

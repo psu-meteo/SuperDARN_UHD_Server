@@ -1,8 +1,5 @@
 #include <math.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <boost/math/special_functions/bessel.hpp>
+#include <stdint.h>
 #include "assert.h"
 
 #define MAXFREQS 4
