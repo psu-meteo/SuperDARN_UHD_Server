@@ -8,6 +8,11 @@ import numpy as np
 import pdb
 import struct
 import socket
+import argparse
+import mmap
+
+import posix_ipc
+
 from drivermsg_library import *
 from socket_utils import *
 # see posix_ipc python library
@@ -39,7 +44,19 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 GPS_MSG_ERROR = 'X'
 
 
+ARBYSERVER_PORT = 55401
+CUDADRIVER_SOCK = 5000
+USRPDRIVER_SOCK = 5001
+
+
 sequence_list = []
+ 
+def _open_shm(shm_name, shm_size):
+    posix_ipc.unlink_shared_memory(shmname)
+    shm = posix_ipc.SharedMemory(shmname, posix_ipc.O_CREAT | posix_ipc.O_RDWR, posix_ipc.S_IWUSR | posix_ipc.S_IWUSR, size=shm_size)
+    shm_mmap = mmap.mmap(shm.fd, shm.size)
+    shm.close_fd()
+    return shm_mmap
 
 class sequence(object):
     def __init__(self, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_samples, pulse_offsets_vector, priority):
@@ -56,8 +73,10 @@ class sequence(object):
 
 
 class dmsg_handler(object):
-    def __init__(self, sock):
-        self.sock = sock
+    def __init__(self, arbysock, usrpsocks, cudasocks):
+        self.arbysock = arbysock
+        self.usrpsocks = usrpsocks 
+        self.cudasocks = cudasocks 
         self.status = 0;
 
     def process(self):
@@ -815,69 +834,58 @@ dmsg_handlers = {\
     GPS_MSG_ERROR : gps_msg_error_handler}
 
 def main():
-    # read in config information
-    # initialize shared memory buffers
-    #   tx pulse
-    #   rx samples
-
+    # TODO: read in config information
     
     # open USRPs drvers and initialize them
-    usrps = [] # list of usrps
-    usrp_computers = [] # computers to talk to for cuda
+    usrp_drivers = ['kodiak-usrp'] # computers to talk to for cuda
+    usrp_driver_socks = []
+
+    cuda_drivers = ['kodiak-usrp'] # computers with cuda drivers
+    cuda_driver_socks = []
+
+    arby_server = 'kodiak-usrp' # hostname arby server..
 
     # open arby server socket
+    arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    arbysock.connect((arby_server, ARBYSERVER_PORT))
     
+    # connect cuda_driver servers
+    for d in usrp_drivers:
+        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        usrpsock.connect(d, USRPDRIVER_SOCK)
+        usrp_driver_socks.append(usrpsock)
+
+    # connect to usrp_driver servers
+    for c in cuda_drivers:
+        cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        usrpsock.connect(c, CUDADRIVER_SOCK)
+        cuda_driver_socks.append(cudasock)
+    
+    
+    # create shm to share rx samples with arby_server
+    shm_size = MAX_SAMPLES * 4
+   
+    main_arby_shm = []
+    for ant in range(MAIN_ANTENNAS):
+        main_arby_shm.append([])
+        for chan in range(MAX_CHANNELS):
+            shm_name = 'receiver_main_%d_%d_%d'.format(ant, chan, 0)
+            main_arby_shm[-1].append(_open_shm(shm_name, shm_size))
+
+    back_arby_shm = []
+    for ant in range(BACK_ANTENNAS):
+        back_arby_shm.append([])
+        for chan in range(MAX_CHANNELS):
+            shm_name = 'receiver_back_%d_%d_%d'.format(ant, chan, 0)
+            back_arby_shm[-1].append(_open_shm(shm_name, shm_size))
+
+    # TODO: init ready 
+
     while (True):
-        dmsg = getDriverMsg(sock)
-        handler = dmsg_handlers[dmsg.cmd](sock)
+        dmsg = getDriverMsg(arbysock)
+        handler = dmsg_handlers[dmsg.cmd](arbysock, usrpsocks, cudasocks)
         handler.process()
         handler.respond()
-
-
-
-        
-
-    # server to manage usrp drivers
-    #  - initialize and synchronize drivers
-    #  - handle and translate arbyserver commands
-    #  - fetch downconverted samples from cuda_driver(s)
-    #  - return shared memory baseband samples to arby_server
-
-    # shared memory is with arby_server
-    # populate with information from cuda_driver
-    '''
-    for(r=0;r<MAX_RADARS;r++){
-        for(c=0;c<MAX_CHANNELS;c++){
-            ready_index[r][c]=-1;
-
-            sprintf(shm_device,"/receiver_main_%d_%d_%d",r,c,0);
-            shm_unlink(shm_device);
-            shm_fd=shm_open(shm_device,O_RDWR|O_CREAT,S_IRUSR | S_IWUSR);
-            if (ftruncate(shm_fd,MAX_SAMPLES*4) != 0){
-                std::cerr << "ftruncate error!!\n";
-            }
-            shared_main_addresses[r][c][0]=(uint32_t *)mmap(0,MAX_SAMPLES*4,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
-            close(shm_fd);
-
-            sprintf(shm_device,"/receiver_back_%d_%d_%d",r,c,0);
-            shm_unlink(shm_device);
-            shm_fd=shm_open(shm_device,O_RDWR|O_CREAT,S_IRUSR | S_IWUSR);
-            if (ftruncate(shm_fd,MAX_SAMPLES*4) != 0){
-                std::cerr << "ftruncate error!!\n";
-            }
-            shared_back_addresses[r][c][0]=(uint32_t *)mmap(0,MAX_SAMPLES*4,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
-            close(shm_fd);
-            /*
-            // For testing..
-            for (i=0;i<MAX_SAMPLES;i++) {
-                shared_main_addresses[r][c][0][i]=i;
-                shared_back_addresses[r][c][0][i]=i;
-            }*/
-        }
-    }
-    '''    
-
-    pass
 
 if __name__ == '__main__':
     main()
