@@ -41,7 +41,7 @@ GPS_MSG_ERROR = 'X'
 
 sequence_list = []
 
-class sequence(obj):
+class sequence(object):
     def __init__(self, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_samples, pulse_offsets_vector, priority):
         self.txfreq = txfreq
         self.rxfreq = rxfreq
@@ -55,7 +55,7 @@ class sequence(obj):
         # self.tr_times = self._make_tr_times()
 
 
-class dmsg_handler(obj):
+class dmsg_handler(object):
     def __init__(self, sock):
         self.sock = sock
         self.status = 0;
@@ -99,7 +99,7 @@ class dmsg_handler(obj):
         return recv_dtype(sock, dtype, nitems) 
 
 class register_seq_handler(dmsg_handler):
-    def process:
+    def process(self):
         crtlprm = self._recv_ctrlprm()
         r = client.radar - 1
         c = client.channel - 1
@@ -118,33 +118,34 @@ class register_seq_handler(dmsg_handler):
         # new_seq_id=-1;
 
 class ctrlprog_ready_handler(dmsg_handler):
-    def process:
+    def process(self):
         crtlprm = self._recv_ctrlprm()
         r = client.radar - 1
         c = client.channel - 1
-        
+
+
         #rx.ready_client(&client);
         #tx.ready_client(&client);
-    '''
-        if ((ready_index[r][c]>=0) && (ready_index[r][c] <maxclients) ) {
-            clients[ready_index[r][c]]=client;
-        }
-        else {
-            clients[numclients]=client;
-            ready_index[r][c]=numclients;
-            numclients=(numclients+1);
-        }
-    '''
+        '''
+            if ((ready_index[r][c]>=0) && (ready_index[r][c] <maxclients) ) {
+                clients[ready_index[r][c]]=client;
+            }
+            else {
+                clients[numclients]=client;
+                ready_index[r][c]=numclients;
+                numclients=(numclients+1);
+            }
+        '''
         #index=client.current_pulseseq_index;
 
         #tx.unpack_pulseseq(index);
 
-        if numclients >= MAXCLIENTS: 
+        if numclients >= MAXCLIENTS:
             msg.status = -2;
             numclients = numclients % MAXCLIENTS;
-
+        
 class ctrlprog_end_handler(dmsg_handler):
-    def process:
+    def process(self):
         crtlprm = self._recv_ctrlprm()
         r = client.radar - 1
         c = client.channel - 1
@@ -153,11 +154,11 @@ class ctrlprog_end_handler(dmsg_handler):
 
 
 class wait_handler(dmsg_handler):
-    def process:
+    def process(self):
         pass
 
 class pretrigger_handler(dmsg_handler):
-    def process:
+    def process(self):
         # setup for next trigger\n";
         new_seq_id = -1;
         new_beam = client.tbeam;
@@ -204,17 +205,17 @@ class pretrigger_handler(dmsg_handler):
         new_seq_id = -1
         old_beam = new_beam
 
-'''
-        send_data(msgsock, &bad_transmit_times.length, sizeof(bad_transmit_times.length));
-        send_data(msgsock, bad_transmit_times.start_usec, sizeof(uint32_t)*bad_transmit_times.length
-        send_data(msgsock, bad_transmit_times.duration_usec, sizeof(uint32_t)*bad_transmit_times.len
-        send_data(msgsock, &msg, sizeof(struct DriverMsg));
-'''
+        '''
+                send_data(msgsock, &bad_transmit_times.length, sizeof(bad_transmit_times.length));
+                send_data(msgsock, bad_transmit_times.start_usec, sizeof(uint32_t)*bad_transmit_times.length
+                send_data(msgsock, bad_transmit_times.duration_usec, sizeof(uint32_t)*bad_transmit_times.len
+                send_data(msgsock, &msg, sizeof(struct DriverMsg));
+        '''
         pass
 
 class trigger_handler(dmsg_handler):
-    def process:
-'''
+    def process(self):
+        '''
              gettimeofday(&t0,NULL);
                     if (verbose > 1 ) std::cout << "Setup for trigger\n";
                     if (verbose>1) std::cout << std::endl;
@@ -283,7 +284,7 @@ class trigger_handler(dmsg_handler):
 
 
 class posttrigger_handler(dmsg_handler):
-    def process:
+    def process(self):
         numclients = 0
 
         #tx.clear_channel_list(); clear list of tx_freqs and time_delays (time delay between adjacent antennas)
@@ -291,8 +292,8 @@ class posttrigger_handler(dmsg_handler):
         #ready_index[r][c]=-1;
 
 class recv_get_data_handler(dmsg_handler):
-    def process:
-'''
+    def process(self):
+        '''
                         if (verbose>1) std::cout << "RECV_GET_DATA: Waiting on all threads.." << std::endl;
 
                         gettimeofday(&t6,NULL);
@@ -543,13 +544,13 @@ class recv_get_data_handler(dmsg_handler):
                             }
                         }
 
-'''
+        '''
         pass
 
 
 class clrfreq_handler(dmsg_handler):
-    def process:
-       '''
+    def process(self):
+        '''
                        tx_threads.join_all();
                         receive_threads.join_all();
                         rx_process_threads.join_all();
@@ -745,15 +746,15 @@ class clrfreq_handler(dmsg_handler):
                         if (verbose > 1) printf("DIO clrfreq end\n");
                         break;
 
-''' 
+        ''' 
         pass
 
 class rxfe_reset_handler(dmsg_handler):
-    def process:
+    def process(self):
         kodiak_set_rxfe(usrp, default_rf_settings);
 
 class settings_handler(dmsg_handler):
-    def process:
+    def process(self):
         ifmode = self._recv_dtype(np.uint32)
         rf_settings = self.recv_dtype(np.uint32, 8)
         if_settings = self.recv_dtype(np.uint32, 8)
@@ -797,7 +798,7 @@ dmsg_handlers = {\
     CTRLPROG_READY : ctrlprog_ready_handler, \
     CTRLPROG_END : ctrlprog_end_handler, \
     WAIT : wait_handler, \
-    PRETRIGGER : pretrigger_handler, \ 
+    PRETRIGGER : pretrigger_handler, \
     TRIGGER : trigger_handler,\
     GPS_TRIGGER : gpstrigger_handler,\
     POST_TRIGGER: posttrigger_handler,\
@@ -844,7 +845,7 @@ def main():
 
     # shared memory is with arby_server
     # populate with information from cuda_driver
-'''
+    '''
     for(r=0;r<MAX_RADARS;r++){
         for(c=0;c<MAX_CHANNELS;c++){
             ready_index[r][c]=-1;
@@ -874,7 +875,7 @@ def main():
             }*/
         }
     }
-'''    
+    '''    
 
     pass
 

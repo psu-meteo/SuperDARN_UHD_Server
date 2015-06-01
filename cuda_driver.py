@@ -127,7 +127,7 @@ def shm_namer(antenna, side, swing, direction = 'rx'):
 
 def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
     name = shm_namer(antenna, side, swing, direction)
-    memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=shm_size)
+    memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=int(shm_size))
     mapfile = mmap.mmap(memory.fd, memory.size)
     memory.close_fd()
     shm_list.append(name)
@@ -171,22 +171,27 @@ class ProcessingGPU(object):
         self.rx_filtertap_s0 = np.float32(np.zeros([NFREQS, NTAPS0, 2]))
         self.rx_filtertap_s1 = np.float32(np.zeros([NFREQS, NTAPS1, 2]))
     
-        self.rx_samples_rf = np.float32(np.zeros([NANTS, NFREQS, NRFSAMPS_RX]))
         self.rx_samples_if = np.float32(np.zeros([NANTS, NFREQS, NIFSAMPS_RX]))
         self.rx_samples_bb = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_RX]))
     
         self.tx_bb_indata = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_TX]))
-        self.tx_rf_outdata = np.uint16(np.zeros([NANTS, NRFSAMPS_TX]))
 
+        # allocate page-locked memory on host for rf samples to decrease transfer time
+        self.tx_rf_outdata = cuda.pagelocked_empty((NANTS, NRFSAMPS_TX), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((NANTS, NFREQS, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+    
+        # point GPU to page-locked memory for rf rx and tx samples
+        self.cu_rx_samples_rf = np.intp(self.tx_rf_outdata.base.get_device_pointer())
+        self.cu_tx_rf_outdata = np.intp(self.rx_samples_rf.base.get_device_pointer())
+
+        # allocate memory on GPU
         self.cu_rx_filtertaps0 = cuda.mem_alloc_like(self.rx_filtertap_s0)
         self.cu_rx_filtertaps1 = cuda.mem_alloc_like(self.rx_filtertap_s1)
 
-        self.cu_rx_samples_rf = cuda.mem_alloc_like(self.rx_samples_rf)
         self.cu_rx_samples_if = cuda.mem_alloc_like(self.rx_samples_if)
         self.cu_rx_samples_bb = cuda.mem_alloc_like(self.rx_samples_bb)
     
         self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
-        self.cu_tx_rf_outdata = cuda.mem_alloc_like(self.tx_rf_outdata)
         
         with open('rx_cuda.cu', 'r') as f:
             self.cu_rx = pycuda.compiler.SourceModule(f.read())
@@ -217,14 +222,15 @@ class ProcessingGPU(object):
     def rxsamples_shm_to_gpu(self, shm):
         shm.seek(0)
         cuda.memcpy_dtoh_async(self.cu_rx_samples_rf, shm, stream = self.streams[swing])
-
+        shm.flush()
                
     # kick off async data processing
     def rxsamples_process(self):
         self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_0, stream = self.streams[swing])
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_1, stream = self.streams[swing])
 
-    def pull_rxdata(self):
+    def pull_rxdata(self)
+        self.streams[swing].synchronize()
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb
 
@@ -234,8 +240,12 @@ class ProcessingGPU(object):
 
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
-        cuda.memcpy_dtoh(self.tx_rf_outdata, self.cu_tx_rf_outdata)
-        return self.tx_rf_outdata
+        # TODO: add stream.synchronize() before copying samples
+
+    def txsamples_host_to_shm(self, shm):
+        shm.seek(0)
+        shm.write(self.tx_rf_outdata)
+        shm.flush()
    
     def generate_bbtx(self, seqbuf, trise):
         # TODO: make sure whatever is calling this uses the right type..
@@ -245,6 +255,7 @@ class ProcessingGPU(object):
         phase_mask = np.bool_(seqbuf & P_BIT)
         bb_vec[tx_mask & ~phase_mask] = 1 
         bb_vec[tx_mask & phase_mask] = -1
+        # TODO: add back in matched filtering code
 
         '''
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);

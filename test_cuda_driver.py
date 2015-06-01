@@ -10,9 +10,11 @@ import pdb
 class GPUTestCases(unittest.TestCase):
     def setUp(self):
         self.rxshm = cuda_driver.create_shm(0, 0, 0, 100, 'rx')
-    
+        self.txshm = cuda_driver.create_shm(0, 0, 0, 2e6, 'tx')
+
     def tearDown(self):
         posix_ipc.unlink_shared_memory(cuda_driver.shm_namer(0, 0, 0, 'rx'))
+        posix_ipc.unlink_shared_memory(cuda_driver.shm_namer(0, 0, 0, 'tx'))
 
     def test_init(self):
         gpu = cuda_driver.ProcessingGPU()
@@ -47,7 +49,8 @@ class GPUTestCases(unittest.TestCase):
 
         gpu.generate_bbtx(seqbuf, trise)
         gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
-
+        gpu.txsamples_host_to_shm(self.txshm)
+        pdb.set_trace()
 
         
 if __name__ == '__main__':
