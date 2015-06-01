@@ -140,7 +140,6 @@ def create_semaphore(antenna, side, swing, direction):
     return sem
 
 def sigint_handler(signum, frame):
-    pdb.set_trace()
     for shm in shm_list:
         posix_ipc.unlink_shared_memory(shm)
 
@@ -177,7 +176,7 @@ class ProcessingGPU(object):
         self.rx_samples_bb = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_RX]))
     
         self.tx_bb_indata = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_TX]))
-        self.tx_rf_outdata = np.uint16(np.zeros([NANTS, NFREQS, NRFSAMPS_TX]))
+        self.tx_rf_outdata = np.uint16(np.zeros([NANTS, NRFSAMPS_TX]))
 
         self.cu_rx_filtertaps0 = cuda.mem_alloc_like(self.rx_filtertap_s0)
         self.cu_rx_filtertaps1 = cuda.mem_alloc_like(self.rx_filtertap_s1)
@@ -201,25 +200,22 @@ class ProcessingGPU(object):
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
 
-        self.tx_block = (NRFSAMPS_TX / NBBSAMPS_TX, NFREQS, 1)
-        self.tx_grid = (NBBSAMPS_TX, NANTS, 1)
+        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), NFREQS, 1))
+        self.tx_grid = self._intify((NBBSAMPS_TX, NANTS, 1))
 
-        self.rx_grid_0 = (NRFSAMPS_RX / DMRATE0, NANTS, 1)
-        self.rx_grid_1 = (NBBSAMPS_RX, NANTS, 1)
-        self.rx_block_0 = (NTAPS0 / 2, NFREQS, 1)
-        self.rx_block_1 = (NBBSAMPS_RX)
+        self.rx_grid_0 = self._intify((NRFSAMPS_RX / DMRATE0, NANTS, 1))
+        self.rx_grid_1 = self._intify((NBBSAMPS_RX, NANTS, 1))
+        self.rx_block_0 = self._intify((NTAPS0 / 2, NFREQS, 1))
+        self.rx_block_1 = self._intify((1,NBBSAMPS_RX))
         
         self.streams = [cuda.Stream() for i in range(MAXSTREAMS)]
-    
+   
+    def _intify(self, tup):
+        return tuple([int(v) for v in tup])
+
     # transfer samples from shared memory to gpu
     def rxsamples_shm_to_gpu(self, shm):
         shm.seek(0)
-        #shm.read(rx_samples_rf.nbytes())
-        #sample_str = rx_shm_list[SIDEA][SWING0].
-
-        #.seek(0)
-        #c = mapfile.read_byte()
-
         cuda.memcpy_dtoh_async(self.cu_rx_samples_rf, shm, stream = self.streams[swing])
 
                
@@ -232,13 +228,13 @@ class ProcessingGPU(object):
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb
 
-    def interpolate_and_multiply(self, bbvec, fc, fsamp, nchannels, tdelay):
+    def interpolate_and_multiply(self, fc, fsamp, nchannels, tdelay):
         self._set_mixerfreqs(fc, fsamp, nchannels)
         self._set_phasedelays(fc, fsamp, nchannels, tdelay)
 
-        cuda.memcpy_htod(self.cu_tx_bb_indata, bbvec)
-        self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, self.cu_txfreqs_rads, self.cu_txoffsets_rads, block = self.tx_block, grid = self.tx_grid)
-        cuda.memcpy_dtoh(self.cu_tx_rf_outdata, self.tx_rf_outdata)
+        cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
+        self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
+        cuda.memcpy_dtoh(self.tx_rf_outdata, self.cu_tx_rf_outdata)
         return self.tx_rf_outdata
    
     def generate_bbtx(self, seqbuf, trise):
@@ -249,6 +245,7 @@ class ProcessingGPU(object):
         phase_mask = np.bool_(seqbuf & P_BIT)
         bb_vec[tx_mask & ~phase_mask] = 1 
         bb_vec[tx_mask & phase_mask] = -1
+
         '''
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
     std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
@@ -294,13 +291,13 @@ class ProcessingGPU(object):
         '''
         self.tx_bb_indata = bb_vec
 
-    def _set_mixerfreqs(fc, fsamp, nchannels):
-        mixer_freqs = np.float64([2 * np.pi * (f - fc[i]) / fsamp for i in range(nchannels)])
-        cuda.memcpy_htod(self.txfreq_rads, mixer_freqs)
+    def _set_mixerfreqs(self, fc, fsamp, nchannels):
+        mixer_freqs = np.float64([2 * np.pi * (fsamp - fc[i]) / fsamp for i in range(nchannels)])
+        cuda.memcpy_htod(self.cu_txfreq_rads, mixer_freqs)
 
-    def _set_phasedelays(fc, fsamp, nchannels, tdelay):
+    def _set_phasedelays(self, fc, fsamp, nchannels, tdelay):
         phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * tdelay[i] * fc[i] for i in range(nchannels)], 2 * np.pi)) 
-        cuda.memcpy_htod(self.txphasedelay_rads, phase_delays)
+        cuda.memcpy_htod(self.cu_txoffsets_rads, phase_delays)
  
     def _rect_filter_s0():
         self.rx_filtertaps0[:,:,:] = 0

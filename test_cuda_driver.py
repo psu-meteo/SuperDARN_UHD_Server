@@ -32,6 +32,23 @@ class GPUTestCases(unittest.TestCase):
         gpu.generate_bbtx(seqbuf, trise)
         self.assertTrue(np.array_equal(seqbuf > 0, gpu.tx_bb_indata > 0))
 
+    def test_tx_upsample(self):
+        gpu = cuda_driver.ProcessingGPU()
 
+        trise = 0
+        # TODO: where is center frequency of USRP sampling set?
+
+        fc = [10e6]
+        fsamp = 20e6
+        nchannels = 1
+        tdelay = [0]
+        seqbuf = np.zeros(100)
+        seqbuf[50] = cuda_driver.X_BIT
+
+        gpu.generate_bbtx(seqbuf, trise)
+        gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
+
+
+        
 if __name__ == '__main__':
     unittest.main()

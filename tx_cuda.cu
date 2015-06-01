@@ -16,11 +16,13 @@ __device__ __constant__ double txfreq_rads[MAXFREQS];
 __device__ __constant__ float txphasedelay_rads[MAXANTS];
 
 
+__device__ size_t outdata_idx(void) {
+    return blockIdx.y * blockDim.x * gridDim.x + blockDim.x*blockIdx.x+threadIdx.x;
+}
+
 __global__ void interpolate_and_multiply(
     float* indata,
-    int16_t** outdata,
-    double* radfreqs,
-    float* phase_delays
+    int16_t* outdata
 ){
     /*Declare shared memory array for samples.
     Vectors are written into this array, one for each
@@ -37,8 +39,8 @@ __global__ void interpolate_and_multiply(
     inc_q = (indata[2*blockIdx.x+3] - indata[2*blockIdx.x+1]) / blockDim.x;
 
     /*Calculate the sample's phase value due to NCO mixing and beamforming*/
-    float phase = fmod((double)(blockDim.x*blockIdx.x + threadIdx.x)*radfreqs[threadIdx.y], 2*M_PI) +
-        blockIdx.y*phase_delays[threadIdx.y];
+    float phase = fmod((double)(blockDim.x*blockIdx.x + threadIdx.x)*txfreq_rads[threadIdx.y], 2*M_PI) +
+        blockIdx.y*txphasedelay_rads[threadIdx.y];
 
     /*Calculate the output sample vectors, one for each freq/beam channel*/
     unsigned int localInx = threadIdx.y*blockDim.x+threadIdx.x;
@@ -51,15 +53,14 @@ __global__ void interpolate_and_multiply(
 
     /* Now linearly combine all freq/beam channels into a single vector*/
     __syncthreads();
-    unsigned int outInx = blockDim.x*blockIdx.x+threadIdx.x; // number of t
+    size_t outidx = outdata_idx();
     if(threadIdx.y == 0){
         for (unsigned int i=1; i<blockDim.y; i++){
             irf_samples[threadIdx.x] += irf_samples[threadIdx.x + i*blockDim.x];
             qrf_samples[threadIdx.x] += qrf_samples[threadIdx.x + i*blockDim.x];
         }
-        outdata[blockIdx.y][2*outInx] = (int16_t) (0.95*32768*irf_samples[threadIdx.x]);
-        outdata[blockIdx.y][2*outInx+1] = (int16_t) (0.95*32768*qrf_samples[threadIdx.x]);
+        outdata[outidx] = (int16_t) (0.95*32768*irf_samples[threadIdx.x]);
+        outdata[outidx+1] = (int16_t) (0.95*32768*qrf_samples[threadIdx.x]);
     }
-
 }
 
