@@ -43,11 +43,9 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 #GPS_SET_TRIGGER_RATE = 'R'
 GPS_MSG_ERROR = 'X'
 
-
 ARBYSERVER_PORT = 55401
 CUDADRIVER_SOCK = 5000
 USRPDRIVER_SOCK = 5001
-
 
 sequence_list = []
  
@@ -71,12 +69,13 @@ class sequence(object):
         # self.bb_vec = self._make_bb_vec()
         # self.tr_times = self._make_tr_times()
 
-
 class dmsg_handler(object):
-    def __init__(self, arbysock, usrpsocks, cudasocks):
+    def __init__(self, arbysock, usrpsocks, cudasocks, main_arby_shms, back_arby_shms):
         self.arbysock = arbysock
         self.usrpsocks = usrpsocks 
         self.cudasocks = cudasocks 
+        self.main_arby_shms = main_arby_shms
+        self.back_arby_shms = back_arby_shms
         self.status = 0;
 
     def process(self):
@@ -129,7 +128,6 @@ class register_seq_handler(dmsg_handler):
         tx_tsg_step = self._recv_dtype(np.int32)
 
         # tx.allocate_pulseseq_mem(index);
-        
         tx_tsg_rep = self._recv_dtype(np.uint8, tx_tsg_len)
         tx_tsg_code = self._recv_dtype(np.uint8, tx_tsg_len)
 
@@ -146,14 +144,14 @@ class ctrlprog_ready_handler(dmsg_handler):
         #rx.ready_client(&client);
         #tx.ready_client(&client);
         '''
-            if ((ready_index[r][c]>=0) && (ready_index[r][c] <maxclients) ) {
-                clients[ready_index[r][c]]=client;
-            }
-            else {
-                clients[numclients]=client;
-                ready_index[r][c]=numclients;
-                numclients=(numclients+1);
-            }
+        if ((ready_index[r][c]>=0) && (ready_index[r][c] <maxclients) ) {
+            clients[ready_index[r][c]]=client;
+        }
+        else {
+            clients[numclients]=client;
+            ready_index[r][c]=numclients;
+            numclients=(numclients+1);
+        }
         '''
         #index=client.current_pulseseq_index;
 
@@ -197,17 +195,18 @@ class pretrigger_handler(dmsg_handler):
             # tx.allocate_rf_vec_mem();
             # tx.zero_rf_vec(iradar);
             # tx_process_gpu new samples
-            '''    tx_process_gpu(
-                        tx.get_bb_vec_ptr(iradar),
-                        tx.get_rf_vec_ptrs(iradar),
-                        tx.get_num_bb_samples(),
-                        tx.get_num_rf_samples(),
-                        usrp->get_tx_freq(),
-                        TXRATE,
-                        tx.get_freqs(iradar), // List of center frequencies for this radar
-                        tx.get_time_delays(iradar),
-                        tx.get_num_channels(iradar), // Number of channels for this radar
-                        tx.get_num_ants_per_radar()); //number of antennas per radar
+            '''    
+            tx_process_gpu(
+            tx.get_bb_vec_ptr(iradar),
+            tx.get_rf_vec_ptrs(iradar),
+            tx.get_num_bb_samples(),
+            tx.get_num_rf_samples(),
+            usrp->get_tx_freq(),
+            TXRATE,
+            tx.get_freqs(iradar), // List of center frequencies for this radar
+            tx.get_time_delays(iradar),
+            tx.get_num_channels(iradar), // Number of channels for this radar
+            tx.get_num_ants_per_radar()); //number of antennas per radar
             }'''
 
         if new_seq_id != old_seq_id:
@@ -225,12 +224,11 @@ class pretrigger_handler(dmsg_handler):
         old_beam = new_beam
 
         '''
-                send_data(msgsock, &bad_transmit_times.length, sizeof(bad_transmit_times.length));
-                send_data(msgsock, bad_transmit_times.start_usec, sizeof(uint32_t)*bad_transmit_times.length
-                send_data(msgsock, bad_transmit_times.duration_usec, sizeof(uint32_t)*bad_transmit_times.len
-                send_data(msgsock, &msg, sizeof(struct DriverMsg));
+        send_data(msgsock, &bad_transmit_times.length, sizeof(bad_transmit_times.length));
+        send_data(msgsock, bad_transmit_times.start_usec, sizeof(uint32_t)*bad_transmit_times.length
+        send_data(msgsock, bad_transmit_times.duration_usec, sizeof(uint32_t)*bad_transmit_times.len
+        send_data(msgsock, &msg, sizeof(struct DriverMsg));
         '''
-        pass
 
 class trigger_handler(dmsg_handler):
     def process(self):
@@ -311,258 +309,98 @@ class posttrigger_handler(dmsg_handler):
         #ready_index[r][c]=-1;
 
 class recv_get_data_handler(dmsg_handler):
-    def process(self):
+    def dump_raw(self):
+        pass
         '''
-                        if (verbose>1) std::cout << "RECV_GET_DATA: Waiting on all threads.." << std::endl;
+        TODO: port to python..
+        int32_t nants = rx.get_num_ants_per_radar();
+        int32_t ctrlprmsize = sizeof(ControlPRM);
+        int32_t seqbufsize = tx.get_seqbuf_len(client.current_pulseseq_index);
+        int64_t usrp_intsec = start_time.get_full_secs();
+        double usrp_fracsec = start_time.get_frac_secs();
+        std::vector<uint8_t> seqbuf = tx.get_seq_buf(client.current_pulseseq_index);
+        struct timeval tdumpstart, tdumpend;
+        gettimeofday(&tdumpstart,NULL);
+        struct sockaddr_in serv_addr;
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(55501);
+        serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        rawsock=socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-                        gettimeofday(&t6,NULL);
-                        tx_threads.join_all();
+        if(connect(rawsock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            printf("raw data socket connection failed..\n");
+        }
+        // send number of antennas  
+        send_data(rawsock, &nants, sizeof(int32_t));
+        // send size of ctrlprm
+        send_data(rawsock, &ctrlprmsize, sizeof(int32_t));
+        // send ctrlprm struct
+        send_data(rawsock, &client, ctrlprmsize);
+        // send time when packets sent to usrp 
+        send_data(rawsock, &t1, 2 * sizeof(int64_t));
+        // send integer and fractional usrp time of start of pulse
+        send_data(rawsock, &usrp_intsec, sizeof(int64_t));
+        send_data(rawsock, &usrp_fracsec, sizeof(double));
+        // send number of samples
+        send_int32(rawsock, rx.get_num_bb_samples());
+        // send samples
+        for(int32_t iant = 0; iant < nants; iant++) {
+            send_data(rawsock, bb_vec_ptrs[iant], client.number_of_samples  * 2 * sizeof(int
+        }
+        // send length of seq_buf
+        send_data(rawsock, &seqbufsize, sizeof(int32_t));
+        // send seq_buf
+        send_data(rawsock, &(seqbuf[0]), seqbufsize * sizeof(uint8_t));
+        send_int32(rawsock, STATE_TIME);
+        send_int32(rawsock, RX_OFFSET);
+        send_int32(rawsock, DDS_OFFSET);
+        send_int32(rawsock, TX_OFFSET);
 
-                        rx_process_threads.join_all();
+        close(rawsock);
+        printf("RAW DATA DUMP COMPLETE..\n");
+        gettimeofday(&tdumpend,NULL);
+        int64_t tdump = 1000000 * (tdumpend.tv_sec - tdumpstart.tv_sec) + (tdumpend.tv_usec
+        std::cout << "raw data transmission time (us) : " << tdump << "\n";
+        '''
 
-                        receive_threads.join_all();
-                        gettimeofday(&t0,NULL);
-                        //rx_thread_status=-1;
+    def process(self):
+        cmd = usrp_ready_data_command(self.usrpsocks)
+        cmd.transmit()
+        self._recv_ctrlprm()
 
-                        elapsed=(t6.tv_sec-t1.tv_sec)*1E6;
-                        elapsed+=(t6.tv_usec-t1.tv_usec);
-                        if (verbose)std::cout << "Rx thread elapsed: " <<
-                            elapsed << " usec" << std::endl;
-                        elapsed=(t6.tv_sec-t0.tv_sec)*1E6;
+        #r=client.radar-1;
+        #c=client.channel-1;
 
+        # TODO: check rx status, set self.status flag
+        # e.g, no channels is 10? any nonzero is bad GET_DATA
+        
+        
+        # send_data(msgsock, &rx_status_flag, sizeof(rx_status_flag));
+        # do rx beamforming
 
+        iseq++;
+        
+        # TODO: for each channel/antenna?
+        transmit_dtype(self.arbysock, np.int32(2)) # shared memory flag (TODO: ???)
+        transmit_dtype(self.arbysock, np.int32(0)) # frame offset (no header)
+        transmit_dtype(self.arbysock, np.int32(0)) # dma_buffer? (1 for yes)
+        transmit_dtype(self.arbysock, np.int32(NRBB_SAMPLES)) # (TODO: ???)
+        transmit_dtype(self.arbysock, np.int32(NRBB_SAMPLES)) # (TODO: ??? send again?)
+        transmit_dtype(self.arbysock, np.uint32(samples), NRBB_SAMPLES) # TODO: send main data
+        transmit_dtype(self.arbysock, np.uint32(samples), NRBB_SAMPLES) # TODO: send back data
 
-                        if (rx_thread_status!=0){
-                            std::cerr << "Error, bad status from Rx thread!!\n";
-                            rx_status_flag=1;
-                        }
-                        else {
-                            rx_status_flag=0;
-                            if (verbose>1) printf("Status okay!!\n");
-                        }
-                        //rx_status_flag=-5;
-
-                        recv_data(msgsock, &client,sizeof(struct ControlPRM));
-                        r=client.radar-1;
-                        c=client.channel-1;
-
-                        if (rx.get_num_channels(r) == 0){
-                            std::cerr << "No channels for this radar.\n";
-                            rx_status_flag=10;
-                        }
-                        //nclients = 0;
-                        //for (r=0;r<MAX_RADARS;r++){
-                        //    for (c=0;c<MAX_CHANNELS;c++){
-                        //        if (ready_index[r][c] >=0){
-                        //            nclients += 1;
-                        //        }
-                        //    }
-                        //}
-                        if (rx_status_flag != 0){
-                            std::cerr << "Bad GET_DATA status!! " << rx_status_flag << "\t" << "radar: " << client.r
-                        }
-                        send_data(msgsock, &rx_status_flag, sizeof(rx_status_flag));
-                        printf("Sent status flag\n");
-
-                        if (verbose>1)std::cout << "Client asking for rx samples (Radar,Channel): " <<
-                            client.radar << " " << client.channel << std::endl;
-                        get_data_t0 = usrp->get_time_now();
-                        r = client.radar-1; c = client.channel-1;
-
-                        if (verbose > 2){
-                            std::cout << "radar: " << r << " channel: " << c << "\n";
-                            std::cout << "bb_dptr: " << rx.get_bb_dptr(r) << std::endl;
-                            std::cout << "rf dptr: " << rx.get_rf_dptr(r) << std::endl;
-                            std::cout << "nrf_samples: " << rx.get_num_rf_samples() << std::endl;
-                            std::cout << "nbb_samples: " << rx.get_num_bb_samples() << std::endl;
-                            std::cout << "nchannels: " << rx.get_num_channels(r) << std::endl;
-                            std::cout << "nants per radar: " << rx.get_num_ants_per_radar() << std::endl;
-                            std::cout << "high sample rate: " << (float) RXRATE << std::endl;
-                            std::cout << "low sample rate: " << (float) client.baseband_samplerate << std::endl;
-                            std::cout << "frequency offsets: \n";
-                            for (size_t i=0; i<rx.get_num_channels(r); i++){
-                                std::cout << "\t" << (rx.get_freqs(r))[i]/1e3 << " khz"<< std::endl;
-                            }
-                        }
-                        if (verbose>1) std::cout << "About to enter rx_process_gpu()\n";
-                        if (rx_status_flag==0){
-                            rx_process_threads.create_thread(boost::bind(rx_process_gpu,
-                                        rx.get_rf_dptr(r),
-                                        rx.get_bb_dptr(r),
-                                        rx.get_num_rf_samples(),
-                                        rx.get_num_bb_samples(),
-                                        rx.get_num_channels(r),
-                                        rx.get_num_ants_per_radar(),
-                                        (float) RXRATE,
-                                        (float) client.baseband_samplerate,
-                                        rx.get_freqs(r)));
-
-                            /*if (1) {
-                              rx_process_threads.create_thread(boost::bind(rx_txpulse_process_gpu,
-                              rx.get_rf_dptr(r),
-                              rx.get_num_rf_samples(),
-                              rx.get_num_channels(r),
-                              rx.get_num_ants_per_radar(),
-                              (uint32_t) 2000,
-                              (float) RXRATE,
-                              rx.get_freqs(r)));
-                              }*/
-                            if (double_buf==0) rx_process_threads.join_all();
-
-                            if (verbose>1) printf("double_buf: %d\n", double_buf);
-                            if (verbose>1) printf("iseq: %i\n", iseq);
-                            if (verbose>1)std::cout << "set_bb_vec_ptrs: " << r << " " << c << std::endl;
-
-                            /* Set the pointers to vectors of baseband samples
-                             * If double_buf flag is non-zero, then the function will create
-                             * pointers to the samples created by the LAST pulse sequence.
-                             * This allows the driver to collect samples for the current pulse
-                             * sequence and process samples for the previous pulse sequence 
-                             * simultaneously*/
-                            rx.set_bb_vec_ptrs(r,c, &bb_vec_ptrs,double_buf);
-
-                            beamform_main.resize(rx.get_num_ants_per_radar(), 1);
-                            beamform_back.resize(rx.get_num_ants_per_radar(), 1);
-
-                            // TODO: expand for number of channels
-                            if(DUMP_RAW) {
-                                printf("STARTING RAW DATA DUMP..\n");
-
-                                int32_t nants = rx.get_num_ants_per_radar();
-                                int32_t ctrlprmsize = sizeof(ControlPRM);
-                                int32_t seqbufsize = tx.get_seqbuf_len(client.current_pulseseq_index);
-                                int64_t usrp_intsec = start_time.get_full_secs();
-                                double usrp_fracsec = start_time.get_frac_secs();
-                                std::vector<uint8_t> seqbuf = tx.get_seq_buf(client.current_pulseseq_index);
-                                struct timeval tdumpstart, tdumpend;
-                                gettimeofday(&tdumpstart,NULL);
-                                struct sockaddr_in serv_addr;
-                                serv_addr.sin_family = AF_INET;
-                                serv_addr.sin_port = htons(55501);
-                                serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-                                rawsock=socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-                                if(connect(rawsock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-                                    printf("raw data socket connection failed..\n");
-                                }
-                                // send number of antennas  
-                                send_data(rawsock, &nants, sizeof(int32_t));
-                                // send size of ctrlprm
-                                send_data(rawsock, &ctrlprmsize, sizeof(int32_t));
-                                // send ctrlprm struct
-                                send_data(rawsock, &client, ctrlprmsize);
-                                // send time when packets sent to usrp 
-                                send_data(rawsock, &t1, 2 * sizeof(int64_t));
-                                // send integer and fractional usrp time of start of pulse
-                                send_data(rawsock, &usrp_intsec, sizeof(int64_t));
-                                send_data(rawsock, &usrp_fracsec, sizeof(double));
-                                // send number of samples
-                                send_int32(rawsock, rx.get_num_bb_samples());
-                                // send samples
-                                for(int32_t iant = 0; iant < nants; iant++) {
-                                    send_data(rawsock, bb_vec_ptrs[iant], client.number_of_samples  * 2 * sizeof(int
-                                }
-                                // send length of seq_buf
-                                send_data(rawsock, &seqbufsize, sizeof(int32_t));
-                                // send seq_buf
-                                send_data(rawsock, &(seqbuf[0]), seqbufsize * sizeof(uint8_t));
-                                send_int32(rawsock, STATE_TIME);
-                                send_int32(rawsock, RX_OFFSET);
-                                send_int32(rawsock, DDS_OFFSET);
-                                send_int32(rawsock, TX_OFFSET);
-
-                                close(rawsock);
-                                printf("RAW DATA DUMP COMPLETE..\n");
-                                gettimeofday(&tdumpend,NULL);
-                                int64_t tdump = 1000000 * (tdumpend.tv_sec - tdumpstart.tv_sec) + (tdumpend.tv_usec
-                                std::cout << "raw data transmission time (us) : " << tdump << "\n";
-
-                            }
-
-                            rx_beamform(
-                                    shared_main_addresses[r][c][0],
-                                    shared_back_addresses[r][c][0],
-                                    &bb_vec_ptrs,
-                                    rx.get_num_ants_per_radar(),
-                                    0,
-                                    //1,
-                                    //1,
-                                    rx.get_num_bb_samples(),
-                                    &beamform_main,
-                                    &beamform_back);
-
-
-                            gettimeofday(&t1,NULL);
-                            gettimeofday(&t6,NULL);
-                            elapsed=(t6.tv_sec-t1.tv_sec)*1E6;
-                            elapsed+=(t6.tv_usec-t1.tv_usec);
-                            if (verbose > 1) {
-                                std::cout << "Data sent: Elapsed Microseconds: " << elapsed << "\n";
-                            }
-
-                            iseq++;
-
-                            if(verbose > 1 ){
-                                std::cout << "Radar: " << client.radar <<
-                                    "\tChannel: " << client.channel << std::endl;
-                                std::cout << "r: " << r << "\tc: " << c << std::endl;
-                            }
-                            shm_memory=1; // Flag used to indicate to client if shared memory (mmap()) is used.
-                            shm_memory=2; // Flag used to indicate to client if shared memory (mmap()) is used.
-                            send_data(msgsock, &shm_memory, sizeof(int32_t));
-                            printf("GET_DATA: shm_mem: %i\n", shm_memory);
-                            frame_offset=0;  // The GC316 cards normally produce rx data w/ a header of length 2 sam
-                            send_data(msgsock, &frame_offset, sizeof(int32_t));
-                            printf("GET_DATA: frame_offset: %i\n", frame_offset);
-                            dma_buffer=0; // Flag used to indicate to client if DMA tranfer is used. 1 for yes.
-                            send_data(msgsock, &dma_buffer, sizeof(int32_t));
-                            printf("GET_DATA: dma_buffer: %i\n", dma_buffer);
-                            //nrx_samples=client.number_of_samples;
-                            send_data(msgsock, &client.number_of_samples, sizeof(int32_t));
-                            printf("GET_DATA: num samples: %i\n", client.number_of_samples);
-
-
-                            if (shm_memory==2){
-                                printf("Sending data. %i\n", client.number_of_samples);
-                                send_data(msgsock, shared_main_addresses[r][c][0], sizeof(uint32_t)*client.number_of
-                                printf("Sent main data %lu\n", sizeof(uint32_t)*client.number_of_samples);
-                                send_data(msgsock, shared_back_addresses[r][c][0], sizeof(uint32_t)*client.number_of
-                                printf("Sent back data %lu\n", sizeof(uint32_t)*client.number_of_samples);
-                            }
-
-
-                            if(IMAGING==0){
-                                if(verbose > 1 ) std::cout << "Using shared memory addresses..: " <<
-                                    shared_main_addresses[r][c][0] << "\t" << shared_back_addresses[r][c][0] << std:
-                            }
-                            if (verbose>1)std::cout << "Send data to client successful" << std::endl;
-                            msg.status = rx_status_flag;
-                        }
-                        send_data(msgsock, &msg, sizeof(struct DriverMsg));
-                        printf("Sent DriverMsg %lu\n", sizeof(struct DriverMsg));
-                        rx_status_flag=0;
-                        gettimeofday(&t6,NULL);
-                        elapsed=(t6.tv_sec-t0.tv_sec)*1E6;
-                        elapsed+=(t6.tv_usec-t0.tv_usec);
-                        if (verbose > 1) {
-                            std::cout << "Data sent: Elapsed Microseconds: " << elapsed << "\n";
-                        }
-
-                        if(verbose>1)std::cout << "Ending RECV_GET_DATA. Elapsed time: " << std::endl;
-                        gettimeofday(&t6,NULL);
-                        elapsed=(t6.tv_sec-t0.tv_sec)*1E6;
-                        elapsed+=(t6.tv_usec-t0.tv_usec);
-                        if (verbose > 1) {
-                            std::cout << "RECV_GET_DATA Elapsed Microseconds: " << elapsed << "\n";
-                        }
-
-                        if(PROFILE_EXIT) {
-                            profile_pulsecount++;
-                            if (profile_pulsecount >= PROFILE_EXIT) {
-                                return 0;
-                            }
-                        }
-
+        if (DUMP_RAW):
+            self.dump_raw()
+        '''
+        /* Set the pointers to vectors of baseband samples
+        * If double_buf flag is non-zero, then the function will create
+        * pointers to the samples created by the LAST pulse sequence.
+        * This allows the driver to collect samples for the current pulse
+        * sequence and process samples for the previous pulse sequence 
+        * simultaneously*/
+        rx.set_bb_vec_ptrs(r,c, &bb_vec_ptrs,double_buf);
+        beamform_main.resize(rx.get_num_ants_per_radar(), 1);
+        beamform_back.resize(rx.get_num_ants_per_radar(), 1);
         '''
         pass
 
@@ -570,7 +408,7 @@ class recv_get_data_handler(dmsg_handler):
 class clrfreq_handler(dmsg_handler):
     def process(self):
         '''
-                       tx_threads.join_all();
+                        tx_threads.join_all();
                         receive_threads.join_all();
                         rx_process_threads.join_all();
 
@@ -637,7 +475,7 @@ class clrfreq_handler(dmsg_handler):
                         pwr.clear();
                         pwr2.clear();
                         pwr.resize(N,0);
-                                                                    tx_threads.join_all();
+                        tx_threads.join_all();
                         receive_threads.join_all();
                         rx_process_threads.join_all();
 
@@ -883,7 +721,7 @@ def main():
 
     while (True):
         dmsg = getDriverMsg(arbysock)
-        handler = dmsg_handlers[dmsg.cmd](arbysock, usrpsocks, cudasocks)
+        handler = dmsg_handlers[dmsg.cmd](arbysock, usrpsocks, cudasocks, main_arby_shms, back_arby_shms)
         handler.process()
         handler.respond()
 
