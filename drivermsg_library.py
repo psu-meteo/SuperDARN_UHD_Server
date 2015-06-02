@@ -89,6 +89,6 @@ class usrp_trigger_pulse_command(driver_command):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
 
 class usrp_ready_data_command(driver_command):
-    def __init__(self, usrps):
+    def __init__(self, usrps, channel):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
-                                                    
+        self.queue(channel, np.int32, 'channel')

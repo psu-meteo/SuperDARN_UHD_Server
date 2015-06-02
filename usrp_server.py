@@ -43,18 +43,26 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 #GPS_SET_TRIGGER_RATE = 'R'
 GPS_MSG_ERROR = 'X'
 
+CMD_ERROR = 10
+
 ARBYSERVER_PORT = 55401
 CUDADRIVER_SOCK = 5000
 USRPDRIVER_SOCK = 5001
 
 sequence_list = []
- 
-def _open_shm(shm_name, shm_size):
-    posix_ipc.unlink_shared_memory(shmname)
-    shm = posix_ipc.SharedMemory(shmname, posix_ipc.O_CREAT | posix_ipc.O_RDWR, posix_ipc.S_IWUSR | posix_ipc.S_IWUSR, size=shm_size)
-    shm_mmap = mmap.mmap(shm.fd, shm.size)
-    shm.close_fd()
-    return shm_mmap
+old_seq_id = 0
+old_beam = -1
+iseq = 0
+
+def hash_sequence_list(sequence_list):
+    return ''.join[s.__hash__() for s in sequence_list]
+
+def getDriverMsg(arbysock):
+    msgtype = recv_dtype(arbysock, np.int32)
+    msgstatus = recv_dtype(arbysock, np.int32)
+    cmd = {'cmd':msgtype, 'status':msgstatus}
+    return cmd
+
 
 class sequence(object):
     def __init__(self, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_samples, pulse_offsets_vector, priority):
@@ -67,15 +75,22 @@ class sequence(object):
         self.pulse_offsets_vector = pulse_offsets_vector
         self.priority = priority
         # self.bb_vec = self._make_bb_vec()
-        # self.tr_times = self._make_tr_times()
+        # self.tr_times = self._make_tr_times() 
+    def __key(self):
+        return (self.txfreq, self.rxfreq, self.txrate, self.rxrate, self.npulses, self.num_requested_samples, self.pulse_offsets_vector)
+
+    def __eq__(self, x, y):
+        return type(x) == type(y) and x.__key() == y.__key()
+
+    def __hash__(self):
+        return hash(self.__key())
+
 
 class dmsg_handler(object):
-    def __init__(self, arbysock, usrpsocks, cudasocks, main_arby_shms, back_arby_shms):
+    def __init__(self, arbysock, usrpsocks, cudasocks):
         self.arbysock = arbysock
         self.usrpsocks = usrpsocks 
         self.cudasocks = cudasocks 
-        self.main_arby_shms = main_arby_shms
-        self.back_arby_shms = back_arby_shms
         self.status = 0;
 
     def process(self):
@@ -140,7 +155,6 @@ class ctrlprog_ready_handler(dmsg_handler):
         r = client.radar - 1
         c = client.channel - 1
 
-
         #rx.ready_client(&client);
         #tx.ready_client(&client);
         '''
@@ -176,51 +190,16 @@ class wait_handler(dmsg_handler):
 
 class pretrigger_handler(dmsg_handler):
     def process(self):
-        # setup for next trigger\n";
-        new_seq_id = -1;
-        new_beam = client.tbeam;
-        for i in range(numclients):
-            r = clients[i].radar - 1;
-            c = clients[i].channel - 1;
-            new_seq_id += r*1000 + c*100 + clients[i].current_pulseseq_index+1
-    
-        #  tx.make_bb_vecs(clients[0].trise);
+        # setup for next trigger
+        seq_id = hash_sequence_list(sequence_list)
         
         # provide fresh samples to usrp_driver.cpp shared memory if beam or sequence has changed
-        if (new_seq_id != old_seq_id) or (new_beam != old_beam):
+        if (seq_id != old_seq_id) or (self.beam != old_beam):
             iseq = 0
-            # send USRP_SETUP commands to all USRPs
-            
+            cmd = usrp_setup_command(self.usrpsocks, self.channel) # txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):
+            cmd.transmit()
 
-            # tx.allocate_rf_vec_mem();
-            # tx.zero_rf_vec(iradar);
-            # tx_process_gpu new samples
-            '''    
-            tx_process_gpu(
-            tx.get_bb_vec_ptr(iradar),
-            tx.get_rf_vec_ptrs(iradar),
-            tx.get_num_bb_samples(),
-            tx.get_num_rf_samples(),
-            usrp->get_tx_freq(),
-            TXRATE,
-            tx.get_freqs(iradar), // List of center frequencies for this radar
-            tx.get_time_delays(iradar),
-            tx.get_num_channels(iradar), // Number of channels for this radar
-            tx.get_num_ants_per_radar()); //number of antennas per radar
-            }'''
-
-        if new_seq_id != old_seq_id:
-            # setup usrp if new sequence
-            # set rx/tx frequency, rate, 
-            # tx.make_tr_times(&bad_transmit_times);
-            pass
-
-        if new_seq_id < 0:
-            old_seq_id = -10
-        else:
-            old_seq_id = new_seq_id
-
-        new_seq_id = -1
+        old_seq_id = seq_id
         old_beam = new_beam
 
         '''
@@ -232,72 +211,9 @@ class pretrigger_handler(dmsg_handler):
 
 class trigger_handler(dmsg_handler):
     def process(self):
-        '''
-             gettimeofday(&t0,NULL);
-                    if (verbose > 1 ) std::cout << "Setup for trigger\n";
-                    if (verbose>1) std::cout << std::endl;
-                    msg.status=0;
-
-                    if(configured) {
-                        //First make sure sure we're done receiving the last pulse sequence
-                        if (verbose > 1) std::cout << "Waiting on thread.." << std::endl;
-                        receive_threads.join_all();
-
-                        if (verbose > 1){
-                            std::cout << "client baseband sample rate: " << client.baseband_samplerate << std::e
-                            std::cout << "nsamples, rx: " << rx.get_num_rf_samples() << std::endl;
-                            std::cout << "nsamples, tx: " << tx.get_num_rf_samples() << std::endl;
-                            std::cout << "Usrp sample rate: " << RXRATE << std::endl;
-
-                        }
-
-                        //Start the receive stream thread
-                        if(verbose>1) std::cout << "About to start rx thread..\n";
-                        rx_thread_status=0;
-                        gettimeofday(&t0,NULL);
-
-                        tx.set_rf_vec_ptrs(&tx_vec_ptrs);
-                        rx.set_rf_vec_ptrs(&rx_vec_ptrs);
-                        /* Toggle the swing buffer for the NEXT pulse sequence
-                         * The rx_data::get_num_samples(), get_rf_dptr(), get_bb_dptr(), get_num_channels(), etc
-                         * commands still point to the CURRENT pulse sequence */
-                        rx.toggle_swing_buffer();
-
-                        start_time = usrp->get_time_now() + 0.01;
-
-                        gettimeofday(&t1,NULL);
-                        receive_threads.create_thread(boost::bind(recv_and_hold,
-                                    &bad_transmit_times,
-                                    usrp,
-                                    rx_stream,
-                                    rx_vec_ptrs,
-                                    rx.get_num_rf_samples(),
-                                    start_time,
-                                    &rx_thread_status));
-
-                        if(verbose>1) std::cout << "About to start tx thread..\n";
-                        //call function to start tx stream simultaneously with rx stream
-                        tx_threads.create_thread(boost::bind(tx_worker,
-                                    tx_stream,
-                                    tx_vec_ptrs,
-                                    tx.get_num_rf_samples(),
-                                    start_time+20e-6));
-                    }
-                    /* 
-                       if(verbose>1) std::cout << "About to join tx thread..\n";
-                       tx_threads.join_all();
-                       if(verbose>1) std::cout << "About to join rx thread..\n";
-                       receive_threads.join_all();
-                       */
-
-                    send_data(msgsock, &msg, sizeof(struct DriverMsg));
-
-                    gettimeofday(&t6,NULL);
-                    elapsed=(t6.tv_sec-t0.tv_sec)*1E6;
-                    elapsed+=(t6.tv_usec-t0.tv_usec);
-        '''
-        pass
-
+        if len(sequences):
+            cmd = usrp_trigger_pulse_command(self.usrpsocks)
+            cmd.transmit()
 
 
 class posttrigger_handler(dmsg_handler):
@@ -311,6 +227,7 @@ class posttrigger_handler(dmsg_handler):
 class recv_get_data_handler(dmsg_handler):
     def dump_raw(self):
         pass
+
         '''
         TODO: port to python..
         int32_t nants = rx.get_num_ants_per_radar();
@@ -364,246 +281,91 @@ class recv_get_data_handler(dmsg_handler):
         '''
 
     def process(self):
-        cmd = usrp_ready_data_command(self.usrpsocks)
-        cmd.transmit()
         self._recv_ctrlprm()
 
-        #r=client.radar-1;
-        #c=client.channel-1;
-
-        # TODO: check rx status, set self.status flag
-        # e.g, no channels is 10? any nonzero is bad GET_DATA
+        if not len(sequence_length):
+            self.status = CMD_ERROR
         
-        
-        # send_data(msgsock, &rx_status_flag, sizeof(rx_status_flag));
-        # do rx beamforming
+        transmit_dtype(self.arbysock, self.status) 
 
-        iseq++;
-        
-        # TODO: for each channel/antenna?
-        transmit_dtype(self.arbysock, np.int32(2)) # shared memory flag (TODO: ???)
-        transmit_dtype(self.arbysock, np.int32(0)) # frame offset (no header)
-        transmit_dtype(self.arbysock, np.int32(0)) # dma_buffer? (1 for yes)
-        transmit_dtype(self.arbysock, np.int32(NRBB_SAMPLES)) # (TODO: ???)
-        transmit_dtype(self.arbysock, np.int32(NRBB_SAMPLES)) # (TODO: ??? send again?)
-        transmit_dtype(self.arbysock, np.uint32(samples), NRBB_SAMPLES) # TODO: send main data
-        transmit_dtype(self.arbysock, np.uint32(samples), NRBB_SAMPLES) # TODO: send back data
+        if not self.status: 
+            cmd = usrp_ready_data_command(self.usrpsocks, self.channel)
+            cmd.transmit()
+            # TODO: check for off-by-one error in self.channel
+            iseq++;
+            
+            # TODO: for each channel/antenna?
+            transmit_dtype(self.arbysock, np.int32(2)) # shared memory configuration flag
+            transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
+            transmit_dtype(self.arbysock, np.int32(0)) # buffer number
+            transmit_dtype(self.arbysock, np.int32(self.number_of_samples)) # number of baseband samples
+            
+            # TODO: grab samples over socket 
+            # TODO: do rx beamforming
 
-        if (DUMP_RAW):
+            # send samples over socket for self.channel on main and back array
+            transmit_dtype(self.arbysock, np.uint32(samples), self.number_of_samples) # TODO: send main data for channel
+            transmit_dtype(self.arbysock, np.uint32(samples), self.number_of_samples) # TODO: send back data for channel
+           
+            if (DUMP_RAW):
             self.dump_raw()
-        '''
-        /* Set the pointers to vectors of baseband samples
-        * If double_buf flag is non-zero, then the function will create
-        * pointers to the samples created by the LAST pulse sequence.
-        * This allows the driver to collect samples for the current pulse
-        * sequence and process samples for the previous pulse sequence 
-        * simultaneously*/
-        rx.set_bb_vec_ptrs(r,c, &bb_vec_ptrs,double_buf);
-        beamform_main.resize(rx.get_num_ants_per_radar(), 1);
-        beamform_back.resize(rx.get_num_ants_per_radar(), 1);
-        '''
-        pass
-
+            
 
 class clrfreq_handler(dmsg_handler):
     def process(self):
+        self._recv_clrfrqprm()
+        self._rect_ctrlprm()
+        nave = 0
+        usable_bandwidth = clrfreq_parameters.end - clrfreq_parameters.start
+        usable_bandwidth = np.floor(usable_bandwidth/2) * 2
+
+
+        N = int(pow(2,np.ceil(np.log10(1.25*usable_bandwidth) / log10(2))))
+
+        if(N > 1024){
+            N=512;
+            usable_bandwidth=300;
+            start=(int)(center-usable_bandwidth/2+0.49999);
+            end=(int)(center+usable_bandwidth/2+0.49999);
+        }
+        
         '''
-                        tx_threads.join_all();
-                        receive_threads.join_all();
-                        rx_process_threads.join_all();
+        for(int chan = 0; chan < nrx_antennas; chan++) {
+            usrp->set_rx_freq(1e3*center, chan);
+            usrp->set_rx_rate(1e6, chan);
+            if(verbose>-1) std::cout << "Actual RX rate for clr freq search: " << N << " kHz\n";
+        }
 
-                        if(verbose > 1) std::cout << "Doing clear frequency search!!!" << std::endl;
-                        recv_data(msgsock, &clrfreq_parameters,sizeof(struct CLRFreqPRM));
-                        recv_data(msgsock, &client,sizeof(struct ControlPRM));
-                        //printf("RECV_CLRFREQ for radar %i channel %i",client.radar, client.channel);
-                        if (verbose) printf("Doing clear frequency search for radar %d, channel %d\n",client.radar,c
-                        nave=0;
-                        usable_bandwidth=clrfreq_parameters.end-clrfreq_parameters.start;
-                        center=(clrfreq_parameters.start+clrfreq_parameters.end)/2;
-                        if(verbose > -1 ){
-                            printf("  requested values\n");
-                            printf("    start: %d\n",clrfreq_parameters.start);
-                            printf("    end: %d\n",clrfreq_parameters.end);
-                            printf("    center: %d\n",center);
-                            printf("    bandwidth: %lf in Khz\n",(float)usable_bandwidth);
-                            printf("    nave:  %d %d\n",nave,clrfreq_parameters.nave);
-                        }
-                        usable_bandwidth=floor(usable_bandwidth/2)*2;
-                        /*
-                         *  Set up fft variables
-                         */
-                        N=(int)pow(2,ceil(log10(1.25*(float)usable_bandwidth)/log10(2)));
-                        if(N>1024){
-                            N=512;
-                            usable_bandwidth=300;
-                            start=(int)(center-usable_bandwidth/2+0.49999);
-                            end=(int)(center+usable_bandwidth/2+0.49999);
-                        }
-                        /* 1 kHz fft bins*/
+        /* set up search parameters search_bandwidth > usable_bandwidth */
+        search_bandwidth=N;
+        //search_bandwidth=800;            
+        start=(int)(center-search_bandwidth/2.0+0.49999);
+        end=(int)(center+search_bandwidth/2+0.49999);
+        unusable_sideband=(search_bandwidth-usable_bandwidth)/2;
+        clrfreq_parameters.start=start;
+        clrfreq_parameters.end=end;
 
-                        //Set the rx center frequency
-                        //Set the rx sample rate
-                        for(int chan = 0; chan < nrx_antennas; chan++) {
-                            usrp->set_rx_freq(1e3*center, chan);
-                            usrp->set_rx_rate(1e6, chan);
-                            //N = (int) (usrp->get_rx_rate() / 1000);
-                            if(verbose>-1) std::cout << "Actual RX rate for clr freq search: " << N << " kHz\n";
-                        }
+        pwr.clear();
+        pwr2.clear();
+        pwr.resize(N,0);
+        pwr2.resize(usable_bandwidth,0);
 
-                        /* set up search parameters search_bandwidth > usable_bandwidth */
-                        search_bandwidth=N;
-                        //search_bandwidth=800;            
-                        start=(int)(center-search_bandwidth/2.0+0.49999);
-                        end=(int)(center+search_bandwidth/2+0.49999);
-                        unusable_sideband=(search_bandwidth-usable_bandwidth)/2;
-                        clrfreq_parameters.start=start;
-                        clrfreq_parameters.end=end;
-                        if(verbose > 1 ){
-                            printf("  search values\n");
-                            printf("  start: %d %d\n",start,clrfreq_parameters.start);
-                            printf("  end: %d %d\n",end,clrfreq_parameters.end);
-                            printf("  center: %d\n",center);
-                            printf("  search_bandwidth: %lf in Khz\n",search_bandwidth);
-                            printf("  usable_bandwidth: %d in Khz\n",usable_bandwidth);
-                            printf("  unusable_sideband: %lf in Khz\n",unusable_sideband);
-                            printf("  N: %d\n",N);
-                            printf("Malloc fftw_complex arrays %d\n",N);
-                        }
+        rx_clrfreq_rval= recv_clr_freq(
+                usrp,
+                rx_stream,
+                center,
+                usable_bandwidth,
+                (int) client.filter_bandwidth/1e3,
+                clrfreq_parameters.nave,
+                10,
+                &pwr2.front());
 
-                        //if(pwr!=NULL) {free(pwr);pwr=NULL;}
-                        //pwr = (double*) malloc(N*sizeof(double));
-                        pwr.clear();
-                        pwr2.clear();
-                        pwr.resize(N,0);
-                        tx_threads.join_all();
-                        receive_threads.join_all();
-                        rx_process_threads.join_all();
 
-                        if(verbose > 1) std::cout << "Doing clear frequency search!!!" << std::endl;
-                        recv_data(msgsock, &clrfreq_parameters,sizeof(struct CLRFreqPRM));
-                        recv_data(msgsock, &client,sizeof(struct ControlPRM));
-                        //printf("RECV_CLRFREQ for radar %i channel %i",client.radar, client.channel);
-                        if (verbose) printf("Doing clear frequency search for radar %d, channel %d\n",client.radar,c
-                        nave=0;
-                        usable_bandwidth=clrfreq_parameters.end-clrfreq_parameters.start;
-                        center=(clrfreq_parameters.start+clrfreq_parameters.end)/2;
-                        if(verbose > -1 ){
-                            printf("  requested values\n");
-                            printf("    start: %d\n",clrfreq_parameters.start);
-                            printf("    end: %d\n",clrfreq_parameters.end);
-                            printf("    center: %d\n",center);
-                            printf("    bandwidth: %lf in Khz\n",(float)usable_bandwidth);
-                            printf("    nave:  %d %d\n",nave,clrfreq_parameters.nave);
-                        }
-                        usable_bandwidth=floor(usable_bandwidth/2)*2;
-                        /*
-                         *  Set up fft variables
-                         */
-                        N=(int)pow(2,ceil(log10(1.25*(float)usable_bandwidth)/log10(2)));
-                        if(N>1024){
-                            N=512;
-                            usable_bandwidth=300;
-                            start=(int)(center-usable_bandwidth/2+0.49999);
-                            end=(int)(center+usable_bandwidth/2+0.49999);
-                        }
-                        /* 1 kHz fft bins*/
-
-                        //Set the rx center frequency
-                        //Set the rx sample rate
-                        for(int chan = 0; chan < nrx_antennas; chan++) {
-                            usrp->set_rx_freq(1e3*center, chan);
-                            usrp->set_rx_rate(1e6, chan);
-                            //N = (int) (usrp->get_rx_rate() / 1000);
-                            if(verbose>-1) std::cout << "Actual RX rate for clr freq search: " << N << " kHz\n";
-                        }
-
-                        /* set up search parameters search_bandwidth > usable_bandwidth */
-                        search_bandwidth=N;
-                        //search_bandwidth=800;            
-                        start=(int)(center-search_bandwidth/2.0+0.49999);
-                        end=(int)(center+search_bandwidth/2+0.49999);
-                        unusable_sideband=(search_bandwidth-usable_bandwidth)/2;
-                        clrfreq_parameters.start=start;
-                        clrfreq_parameters.end=end;
-                        if(verbose > 1 ){
-                            printf("  search values\n");
-                            printf("  start: %d %d\n",start,clrfreq_parameters.start);
-                            printf("  end: %d %d\n",end,clrfreq_parameters.end);
-                            printf("  center: %d\n",center);
-                            printf("  search_bandwidth: %lf in Khz\n",search_bandwidth);
-                            printf("  usable_bandwidth: %d in Khz\n",usable_bandwidth);
-                            printf("  unusable_sideband: %lf in Khz\n",unusable_sideband);
-                            printf("  N: %d\n",N);
-                            printf("Malloc fftw_complex arrays %d\n",N);
-                        }
-
-                        //if(pwr!=NULL) {free(pwr);pwr=NULL;}
-                        //pwr = (double*) malloc(N*sizeof(double));
-                        pwr.clear();
-                        pwr2.clear();
-                        pwr.resize(N,0);
-                                             
-                        pwr2.resize(usable_bandwidth,0);
-                        //for(int i=0;i<N;i++)
-                        //  pwr[i]=0.;
-                        //if(pwr2!=NULL) {free(pwr2);pwr2=NULL;}
-                        //pwr2 = (double*) malloc(N*sizeof(double));
-
-                        if(verbose>1)std::cout << "starting clr freq search\n";
-                        std::cout << "beam direction: " << client.tbeam << std::endl;
-                        std::cout << "beam direction: " << client.filter_bandwidth << std::endl;
-
-                        //usrp->set_rx_freq(1e3*center);
-                        //usrp->set_rx_rate(1e3*center);
-                        rx_clrfreq_rval= recv_clr_freq(
-                                usrp,
-                                rx_stream,
-                                center,
-                                usable_bandwidth,
-                                (int) client.filter_bandwidth/1e3,
-                                clrfreq_parameters.nave,
-                                10,
-                                &pwr2.front());
-
-                        //pwr2 = &pwr[(int)unusable_sideband];
-
-                        if(verbose > 0 ) printf("Send clrfreq data back\n");
-                        send_data(msgsock, &clrfreq_parameters, sizeof(struct CLRFreqPRM));
-                        send_data(msgsock, &usable_bandwidth, sizeof(int));
-                        if(verbose > 1 ) {
-                            printf("  final values\n");
-                            printf("  start: %d\n",clrfreq_parameters.start);
-                            printf("  end: %d\n",clrfreq_parameters.end);
-                            printf("  nave: %d\n",clrfreq_parameters.nave);
-                            printf("  usable_bandwidth: %d\n",usable_bandwidth);
-                        }
-                        //for (int i=0; i<usable_bandwidth; i++){
-                        //    std::cout << pwr2[i] << std::endl;
-                        //}
-                        send_data(msgsock, &pwr2.front(), sizeof(double)*usable_bandwidth);
-                        send_data(msgsock, &msg, sizeof(struct DriverMsg));
-
-                        //clr_fd = fopen("/tmp/clr_data.txt","a+");
-                        //for(int i=0;i<usable_bandwidth;i++){
-                        //    printf("%4d: %8d %8.3lf\n",i,(int)(unusable_sideband+start+i),pwr2[i]);
-                        //    fprintf(clr_fd,"%4d %8d %8.3lf\n",i,(int)(unusable_sideband+start+i),pwr2[i]);
-                        //  }
-                        //fclose(clr_fd);
-
-                        //if(pwr!=NULL) {free(pwr);pwr=NULL;}
-                        /* The following free causes crash because pwr2 is in use by the arby_server.
-                           Does arby_server free() this pointer?  Or is this a memory leak? (AFM)*/
-                        //if(pwr2!=NULL) {free(pwr2);pwr2=NULL;}
-                        if (verbose > 1) printf("DIO clrfreq setup\n");
-
-                        // TODO: configure RXFE for clear frequency search
-                        //      - select beam based on &client 
-                        //      - select for non-imaging:
-
-                        if (verbose > 1) printf("DIO clrfreq end\n");
-                        break;
-
-        ''' 
+        send_data(msgsock, &clrfreq_parameters, sizeof(struct CLRFreqPRM));
+        send_data(msgsock, &usable_bandwidth, sizeof(int));
+        send_data(msgsock, &pwr2.front(), sizeof(double)*usable_bandwidth);
+        send_data(msgsock, &msg, sizeof(struct DriverMsg));
+        '''
         pass
 
 class rxfe_reset_handler(dmsg_handler):
@@ -699,29 +461,10 @@ def main():
         usrpsock.connect(c, CUDADRIVER_SOCK)
         cuda_driver_socks.append(cudasock)
     
-    
-    # create shm to share rx samples with arby_server
-    shm_size = MAX_SAMPLES * 4
-   
-    main_arby_shm = []
-    for ant in range(MAIN_ANTENNAS):
-        main_arby_shm.append([])
-        for chan in range(MAX_CHANNELS):
-            shm_name = 'receiver_main_%d_%d_%d'.format(ant, chan, 0)
-            main_arby_shm[-1].append(_open_shm(shm_name, shm_size))
-
-    back_arby_shm = []
-    for ant in range(BACK_ANTENNAS):
-        back_arby_shm.append([])
-        for chan in range(MAX_CHANNELS):
-            shm_name = 'receiver_back_%d_%d_%d'.format(ant, chan, 0)
-            back_arby_shm[-1].append(_open_shm(shm_name, shm_size))
-
     # TODO: init ready 
-
     while (True):
         dmsg = getDriverMsg(arbysock)
-        handler = dmsg_handlers[dmsg.cmd](arbysock, usrpsocks, cudasocks, main_arby_shms, back_arby_shms)
+        handler = dmsg_handlers[dmsg['cmd']](arbysock, usrpsocks, cudasocks)
         handler.process()
         handler.respond()
 
