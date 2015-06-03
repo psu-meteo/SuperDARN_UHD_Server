@@ -12,7 +12,7 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-
+#include <signal.h>
 #include <iostream>
 #include <complex>
 
@@ -207,6 +207,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     
+    signal(SIGINT, siginthandler);
+
     // open shared rx sample shared memory buffers created by cuda_driver.py
     shm_arr[SWING0][SIDEA] = open_sample_shm(ant, SIDEA, SWING0, shm_size);
     //shm_arr[SWING0][SIDEB] = open_sample_shm(ant, SIDEB, SWING0, shm_size);
@@ -284,9 +286,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 rf_settings.att2 = (att >> 1) & 0x01;
                 rf_settings.att3 = (att >> 2) & 0x01;
                 rf_settings.att4 = (att >> 3) & 0x01;
-
-                // get rf_settings over the wire
-                //kodiak_set_rxfe(usrp, rf_settings);
+                kodiak_set_rxfe(usrp, rf_settings);
                 break;
 
             case TRIGGER_PULSE:
@@ -325,8 +325,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         // create state machine to test triggering, simulating commands
     }
     
-    //  rc = munmap(pSharedMemory, (size_t)params.size)
-    // rc = sem_close(the_semaphore); 
-    //close(msgsock);
     return 0;
+}
+
+void siginthandler(int sigint)
+{
+    // rc = munmap(pSharedMemory, (size_t)params.size)
+    // rc = sem_close(the_semaphore); 
+    // close(msgsock);
+    exit(1);
 }

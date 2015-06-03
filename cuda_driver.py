@@ -229,7 +229,7 @@ class ProcessingGPU(object):
         self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_0, stream = self.streams[swing])
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_1, stream = self.streams[swing])
 
-    def pull_rxdata(self)
+    def pull_rxdata(self):
         self.streams[swing].synchronize()
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb

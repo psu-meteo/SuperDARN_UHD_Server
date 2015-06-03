@@ -10,6 +10,8 @@ import struct
 import socket
 import argparse
 import mmap
+import sys
+import warnings
 
 import posix_ipc
 
@@ -42,12 +44,9 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 #GPS_TRIGGER_NOW = 'n'
 #GPS_SET_TRIGGER_RATE = 'R'
 GPS_MSG_ERROR = 'X'
+CLEAN_EXIT = 'x'
 
 CMD_ERROR = 10
-
-ARBYSERVER_PORT = 55401
-CUDADRIVER_SOCK = 5000
-USRPDRIVER_SOCK = 5001
 
 sequence_list = []
 old_seq_id = 0
@@ -55,7 +54,7 @@ old_beam = -1
 iseq = 0
 
 def hash_sequence_list(sequence_list):
-    return ''.join[s.__hash__() for s in sequence_list]
+    return ''.join([s.__hash__() for s in sequence_list])
 
 def getDriverMsg(arbysock):
     msgtype = recv_dtype(arbysock, np.int32)
@@ -188,6 +187,17 @@ class wait_handler(dmsg_handler):
     def process(self):
         pass
 
+class exit_handler(dmsg_handler):
+    def process(self):
+        # clean up and exit
+        self.arbysock.close()
+        for sock in self.usrpsocks:
+            sock.close()
+        for sock in self.cudasocks:
+            sock.close()
+        # TODO: clean up shared memory
+        sys.exit(0)
+
 class pretrigger_handler(dmsg_handler):
     def process(self):
         # setup for next trigger
@@ -292,7 +302,7 @@ class recv_get_data_handler(dmsg_handler):
             cmd = usrp_ready_data_command(self.usrpsocks, self.channel)
             cmd.transmit()
             # TODO: check for off-by-one error in self.channel
-            iseq++;
+            iseq += 1
             
             # TODO: for each channel/antenna?
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory configuration flag
@@ -308,7 +318,7 @@ class recv_get_data_handler(dmsg_handler):
             transmit_dtype(self.arbysock, np.uint32(samples), self.number_of_samples) # TODO: send back data for channel
            
             if (DUMP_RAW):
-            self.dump_raw()
+                self.dump_raw()
             
 
 class clrfreq_handler(dmsg_handler):
@@ -322,13 +332,11 @@ class clrfreq_handler(dmsg_handler):
 
         N = int(pow(2,np.ceil(np.log10(1.25*usable_bandwidth) / log10(2))))
 
-        if(N > 1024){
-            N=512;
-            usable_bandwidth=300;
-            start=(int)(center-usable_bandwidth/2+0.49999);
-            end=(int)(center+usable_bandwidth/2+0.49999);
-        }
-        
+        if N > 1024:
+            N = 512
+            usable_bandwidth = 300
+            start = int(center-usable_bandwidth/2+0.49999)
+            end = int(center+usable_bandwidth/2+0.49999)
         '''
         for(int chan = 0; chan < nrx_antennas; chan++) {
             usrp->set_rx_freq(1e3*center, chan);
@@ -431,37 +439,41 @@ dmsg_handlers = {\
     GPS_GET_SOFT_TIME : gps_get_soft_time_handler,\
     GPS_GET_EVENT_TIME : gps_get_event_time_handler,\
     GPS_SCHEDULE_SINGLE_SCAN : gps_schedule_single_scan_handler,\
-    GPS_MSG_ERROR : gps_msg_error_handler}
+    GPS_MSG_ERROR : gps_msg_error_handler,\
+    CLEAN_EXIT : exit_handler}
 
 def main():
     # TODO: read in config information
     
     # open USRPs drvers and initialize them
-    usrp_drivers = ['kodiak-usrp'] # computers to talk to for cuda
+    usrp_drivers = ['localhost'] # computers to talk to for cuda
     usrp_driver_socks = []
 
-    cuda_drivers = ['kodiak-usrp'] # computers with cuda drivers
+    cuda_drivers = ['localhost'] # computers with cuda drivers
     cuda_driver_socks = []
 
-    arby_server = 'kodiak-usrp' # hostname arby server..
+    arby_server = 'localhost' # hostname arby server..
 
     # open arby server socket
-    arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    arbysock.connect((arby_server, ARBYSERVER_PORT))
-    
-    # connect cuda_driver servers
-    for d in usrp_drivers:
-        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect(d, USRPDRIVER_SOCK)
-        usrp_driver_socks.append(usrpsock)
+    try:
+        arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        arbysock.connect((arby_server, ARBYSERVER_PORT))
+    except ConnectionRefusedError: 
+        warnings.warn("Arby Server connection failed")
+
 
     # connect to usrp_driver servers
+    for d in usrp_drivers:
+        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        usrpsock.connect((d, USRPDRIVER_PORT))
+        usrp_driver_socks.append(usrpsock)
+    
+    # connect cuda_driver servers
     for c in cuda_drivers:
         cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect(c, CUDADRIVER_SOCK)
+        cudasock.connect((c, CUDADRIVER_PORT))
         cuda_driver_socks.append(cudasock)
-    
-    # TODO: init ready 
+
     while (True):
         dmsg = getDriverMsg(arbysock)
         handler = dmsg_handlers[dmsg['cmd']](arbysock, usrpsocks, cudasocks)

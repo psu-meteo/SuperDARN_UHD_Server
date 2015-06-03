@@ -9,6 +9,13 @@ CUDA_SETUP = 's'
 CUDA_PROCESS = 'p'
 CUDA_GET_DATA = 'g'
 
+
+ARBYSERVER_PORT = 55421
+CUDADRIVER_PORT = 55420
+USRPDRIVER_PORT = 55422
+
+
+
 class driver_command(object):
     # class to help manage sending data 
     class socket_data(object):
