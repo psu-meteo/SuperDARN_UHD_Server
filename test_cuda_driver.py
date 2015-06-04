@@ -50,7 +50,6 @@ class GPUTestCases(unittest.TestCase):
         gpu.generate_bbtx(seqbuf, trise)
         gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
         gpu.txsamples_host_to_shm(self.txshm)
-        pdb.set_trace()
 
         
 if __name__ == '__main__':

@@ -10,4 +10,4 @@ def recv_dtype(sock, dtype, nitems = 1):
 
 
 def transmit_dtype(sock, data):
-    dstr = sock.send(data.tostring())
+    dstr = sock.sendall(data.tostring())

@@ -12,7 +12,7 @@ import argparse
 import mmap
 import sys
 import warnings
-
+import time
 import posix_ipc
 
 from drivermsg_library import *
@@ -96,7 +96,7 @@ class dmsg_handler(object):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
     def respond(self):
-        self.sock.send(np.int32(self.status).tostring())
+        self.arbysock.sendall(np.int32(self.status).tostring())
 
     def _recv_ctrlprm(self):
         self.radar = self._recv_dtype(np.int32)
@@ -196,6 +196,7 @@ class exit_handler(dmsg_handler):
         for sock in self.cudasocks:
             sock.close()
         # TODO: clean up shared memory
+        print('received exit command, cleaning up..')
         sys.exit(0)
 
 class pretrigger_handler(dmsg_handler):
@@ -459,24 +460,38 @@ def main():
         arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         arbysock.connect((arby_server, ARBYSERVER_PORT))
     except ConnectionRefusedError: 
-        warnings.warn("Arby Server connection failed")
+        warnings.warn("Arby server connection failed")
+        sys.exit(1)
 
-
+    time.sleep(.05)
     # connect to usrp_driver servers
-    for d in usrp_drivers:
-        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect((d, USRPDRIVER_PORT))
-        usrp_driver_socks.append(usrpsock)
-    
-    # connect cuda_driver servers
-    for c in cuda_drivers:
-        cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        cudasock.connect((c, CUDADRIVER_PORT))
-        cuda_driver_socks.append(cudasock)
+    try:
+        for d in usrp_drivers:
+            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            usrpsock.connect((d, USRPDRIVER_PORT))
+            usrp_driver_socks.append(usrpsock)
+    except ConnectionRefusedError: 
+        warnings.warn("USRP server connection failed")
+        sys.exit(1)
 
-    while (True):
+
+    time.sleep(.05)
+    # connect cuda_driver servers
+    try:
+        for c in cuda_drivers:
+            cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            cudasock.connect((c, CUDADRIVER_PORT))
+            cuda_driver_socks.append(cudasock)
+    except ConnectionRefusedError: 
+        warnings.warn("cuda server connection failed")
+        sys.exit(1)
+
+    
+    print('waiting for command from arbyserver')
+    while True:
         dmsg = getDriverMsg(arbysock)
-        handler = dmsg_handlers[dmsg['cmd']](arbysock, usrpsocks, cudasocks)
+        print('got {} command, processing arbyserver'.format(dmsg['cmd']))
+        handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks)
         handler.process()
         handler.respond()
 
