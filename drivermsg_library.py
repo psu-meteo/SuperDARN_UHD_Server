@@ -9,12 +9,11 @@ CUDA_SETUP = 's'
 CUDA_PROCESS = 'p'
 CUDA_GET_DATA = 'g'
 
+NO_COMMAND = ''
 
 ARBYSERVER_PORT = 55421
 CUDADRIVER_PORT = 55420
 USRPDRIVER_PORT = 55422
-
-
 
 class driver_command(object):
     # class to help manage sending data 
@@ -42,13 +41,52 @@ class driver_command(object):
         self.queue.append(socket_data(data, dtype, name))
 
     def transmit(self, sock):
-        transmit_dtype(sock, np.uint8(self.command))
+        if self.command != NO_COMMAND:
+            transmit_dtype(sock, np.uint8(self.command))
+
         for item in self.queue:
             item.transmit(sock)
 
     def receive(self, sock):
         for item in self.queue:
             self.payload[item.name] = item.receive(sock)
+
+class server_ctrlprm(driver_command):
+    def __init__(self, servers, **ctrlprm_dict):
+        driver_command.__init__(self, servers, NO_COMMAND)
+
+        self.queue(radar, np.int32, 'radar')
+        self.queue(channel, np.int32, 'channel')
+        self.queue(local, np.int32, 'local')
+        self.queue(priority, np.int32, 'priority')
+        self.queue(current_pulseseq_index, np.int32, 'pulseseq_idx')
+        self.queue(tbeam, np.int32, 'tbeam')
+        self.queue(tbeamcode, np.uint32, 'tbeamcode')
+
+        self.queue(tbeamazm, np.float32, 'teambeamazm')
+        self.queue(tbeamwidth, np.float32, 'tbeamwidth')
+
+        self.queue(number_of_samples, np.int32, 'number_of_samples')
+        self.queue(buffer_index, np.int32, 'buffer_index')
+
+        self.queue(baseband_samplerate, np.float32, 'baseband_samplerate')
+        self.queue(filter_bandwidth, np.int32, 'filter_bandwidth')
+
+        self.queue(match_filter, np.int32, 'match_filter')
+        self.queue(rfreq, np.int32, 'rfreq')
+        self.queue(rbeam, np.int32, 'rbeam')
+        self.queue(rbeamcode, np.uint32, 'rbeamcode')
+        self.queue(rbeamazm, np.float32, 'rbeamazm')
+        self.queue(rbeamwidth, np.float32, 'rbeamwidth')
+
+        self.queue(status, np.int32, 'status')
+
+        # TODO: set these properly 
+        name_arr = np.uint8(np.zeros(80))
+        self.queue(name_arr, np.uint8, nitems = 80)
+
+        description_arr = np.uint8(np.zeros(120))
+        self.queue(description_arr, np.uint8, nitems = 120)
 
 class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = 0):

@@ -20,8 +20,9 @@ from socket_utils import *
 # see posix_ipc python library
 # http://semanchuk.com/philip/posix_ipc/
 
-dmsg_handler = {}
+VERBOSE = 0
 
+# arby server commands
 REGISTER_SEQ = '+'
 CTRLPROG_READY = '1'
 CTRLPROG_END = '@'
@@ -46,8 +47,31 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 GPS_MSG_ERROR = 'X'
 CLEAN_EXIT = 'x'
 
-CMD_ERROR = 10
+# human readable descriptions of commands for status messages
+ARBY_COMMAND_STRS = {
+        REGISTER_SEQ : 'register sequence', \
+        CTRLPROG_READY : 'control program ready', \
+        CTRLPROG_END : 'control program end', \
+        WAIT : 'wait', \
+        PRETRIGGER : 'pretrigger', \
+        TRIGGER : 'trigger', \
+        GPS_TRIGGER : 'gps trigger', \
+        POST_TRIGGER : 'post trigger', \
+        RECV_GET_DATA : 'recv get data', \
+        FULL_CLRFREQ : 'full clearfreq', \
+        CLRFREQ : 'clearfreq', \
+        DIO_RXFE_RESET : 'reset rxfe dio', \
+        GET_STATUS : 'get status',\
+        SETTINGS : 'settings',\
+        DIO_TABLE_SETTINGS : 'dio table settings', \
+        GPS_GET_SOFT_TIME : 'get gps soft time', \
+        GPS_GET_EVENT_TIME : 'get gps event time', \
+        GPS_SCHEDULE_SINGLE_SCAN : 'schedule gps single scan', \
+        GPS_MSG_ERROR : 'gps message error', \
+        CLEAN_EXIT : 'clean exit'}
 
+#TODO: cleanup global variables
+CMD_ERROR = 10 
 sequence_list = []
 old_seq_id = 0
 old_beam = -1
@@ -64,7 +88,7 @@ def getDriverMsg(arbysock):
 
 
 class sequence(object):
-    def __init__(self, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_samples, pulse_offsets_vector, priority):
+    def __init__(self, pulse_offsets_vector, **ctrlprmstruct):
         self.txfreq = txfreq
         self.rxfreq = rxfreq
         self.txrate = txrate
@@ -75,6 +99,7 @@ class sequence(object):
         self.priority = priority
         # self.bb_vec = self._make_bb_vec()
         # self.tr_times = self._make_tr_times() 
+
     def __key(self):
         return (self.txfreq, self.rxfreq, self.txrate, self.rxrate, self.npulses, self.num_requested_samples, self.pulse_offsets_vector)
 
@@ -142,11 +167,11 @@ class register_seq_handler(dmsg_handler):
         tx_tsg_step = self._recv_dtype(np.int32)
 
         # tx.allocate_pulseseq_mem(index);
-        tx_tsg_rep = self._recv_dtype(np.uint8, tx_tsg_len)
-        tx_tsg_code = self._recv_dtype(np.uint8, tx_tsg_len)
+        tx_tsg_rep = self._recv_dtype(np.uint8, tx_tsg_len) # TODO: what is this?
+        tx_tsg_code = self._recv_dtype(np.uint8, tx_tsg_len) # TODO: what is this?
 
-        # old_seq_id=-10;
-        # new_seq_id=-1;
+        # TODO: create pulse_seq_vector from tx_tsg information?
+        sequence_list.append(sequence(pulse_delay, pulse_offsets_vector, self.ctrlprm))
 
 class ctrlprog_ready_handler(dmsg_handler):
     def process(self):
@@ -196,7 +221,8 @@ class exit_handler(dmsg_handler):
         for sock in self.cudasocks:
             sock.close()
         # TODO: clean up shared memory
-        print('received exit command, cleaning up..')
+        if(VERBOSE): 
+            print('received exit command, cleaning up..')
         sys.exit(0)
 
 class pretrigger_handler(dmsg_handler):
@@ -239,8 +265,9 @@ class recv_get_data_handler(dmsg_handler):
     def dump_raw(self):
         pass
 
+
+        # TODO: port to python..
         '''
-        TODO: port to python..
         int32_t nants = rx.get_num_ants_per_radar();
         int32_t ctrlprmsize = sizeof(ControlPRM);
         int32_t seqbufsize = tx.get_seqbuf_len(client.current_pulseseq_index);
@@ -400,7 +427,8 @@ class full_clrfreq_handler(dmsg_handler):
     pass
 
 class get_status_handler(dmsg_handler):
-    pass
+    def process(self):
+        pass
 
 class dio_table_settings_handler(dmsg_handler):
     pass
@@ -487,10 +515,10 @@ def main():
         sys.exit(1)
 
     
-    print('waiting for command from arbyserver')
     while True:
         dmsg = getDriverMsg(arbysock)
-        print('got {} command, processing arbyserver'.format(dmsg['cmd']))
+        if(VERBOSE):
+            print('received {} command from arbyserver, processing'.format(ARBY_COMMAND_STRS[chr(dmsg['cmd'])]))
         handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks)
         handler.process()
         handler.respond()
