@@ -125,54 +125,56 @@ class dmsg_handler(object):
         self.arbysock.sendall(np.int32(self.status).tostring())
 
     def _recv_ctrlprm(self):
-        self.radar = self._recv_dtype(np.int32)
-        self.channel = self._recv_dtype(np.int32)
-        self.local = self._recv_dtype(np.int32)
-        self.priority = self._recv_dtype(np.int32)
-        self.current_pulseseq_index = self._recv_dtype(np.int32)
-        self.tbeam = self._recv_dtype(np.int32)
-        self.tbeamcode = self._recv_dtype(np.uint32)
+        self.radar = recv_dtype(self.arbysock, np.int32)
+        self.channel = recv_dtype(self.arbysock, np.int32)
+        self.local = recv_dtype(self.arbysock, np.int32)
+        self.priority = recv_dtype(self.arbysock, np.int32)
+        self.current_pulseseq_index = recv_dtype(self.arbysock, np.int32)
+        self.tbeam = recv_dtype(self.arbysock, np.int32)
+        self.tbeamcode = recv_dtype(self.arbysock, np.uint32)
 
-        self.tbeamazm = self._recv_dtype(np.float32)
-        self.tbeamwidth = self._recv_dtype(np.float32)
+        self.tbeamazm = recv_dtype(self.arbysock, np.float32)
+        self.tbeamwidth = recv_dtype(self.arbysock, np.float32)
 
-        self.number_of_samples = self._recv_dtype(np.int32)
-        self.buffer_index = self._recv_dtype(np.int32)
+        self.number_of_samples = recv_dtype(self.arbysock, np.int32)
+        self.buffer_index = recv_dtype(self.arbysock, np.int32)
 
-        self.baseband_samplerate = self._recv_dtype(np.float32)
-        self.filter_bandwidth = self._recv_dtype(np.int32)
+        self.baseband_samplerate = recv_dtype(self.arbysock, np.float32)
+        self.filter_bandwidth = recv_dtype(self.arbysock, np.int32)
 
-        self.match_filter = self._recv_dtype(np.int32)
-        self.rfreq = self._recv_dtype(np.int32)
-        self.rbeam = self._recv_dtype(np.int32)
-        self.rbeamcode = self._recv_dtype(np.uint32)
-        self.rbeamazm = self._recv_dtype(np.float32)
-        self.rbeamwidth = self._recv_dtype(np.float32)
+        self.match_filter = recv_dtype(self.arbysock, np.int32)
+        self.rfreq = recv_dtype(self.arbysock, np.int32)
+        self.rbeam = recv_dtype(self.arbysock, np.int32)
+        self.rbeamcode = recv_dtype(self.arbysock, np.uint32)
+        self.rbeamazm = recv_dtype(self.arbysock, np.float32)
+        self.rbeamwidth = recv_dtype(self.arbysock, np.float32)
 
-        self.status = self._recv_dtype(np.int32)
-        self.name = self._recv_dtype(np.uint8, nitems = 80)
-        self.description = self._recv_dtype(np.uint8, nitems = 120)
+        self.status = recv_dtype(self.arbysock, np.int32)
+        self.name = recv_dtype(self.arbysock, np.uint8, nitems = 80)
+        self.description = recv_dtype(self.arbysock, np.uint8, nitems = 120)
 
     def _recv_dtype(self, dtype, nitems = 1):
-        return recv_dtype(sock, dtype, nitems) 
+        return recv_dtype(self.arbysock, dtype, nitems) 
 
 class register_seq_handler(dmsg_handler):
     def process(self):
         crtlprm = self._recv_ctrlprm()
-        r = client.radar - 1
-        c = client.channel - 1
+        #r = client.radar - 1
+        #c = client.channel - 1
         
-        seq_idx = self._recv_dtype(np.int32)
-        tx_tsg_idx = self._recv_dtype(np.int32)
-        tx_tsg_len = self._recv_dtype(np.int32)
-        tx_tsg_step = self._recv_dtype(np.int32)
+        seq_idx = recv_dtype(self.arbysock, np.int32)
+        tx_tsg_idx = recv_dtype(self.arbysock, np.int32)
+        tx_tsg_len = recv_dtype(self.arbysock, np.int32)
+        tx_tsg_step = recv_dtype(self.arbysock, np.int32)
 
         # tx.allocate_pulseseq_mem(index);
-        tx_tsg_rep = self._recv_dtype(np.uint8, tx_tsg_len) # TODO: what is this?
-        tx_tsg_code = self._recv_dtype(np.uint8, tx_tsg_len) # TODO: what is this?
+        tx_tsg_rep = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
+        tx_tsg_code = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
 
         # TODO: create pulse_seq_vector from tx_tsg information?
-        sequence_list.append(sequence(pulse_delay, pulse_offsets_vector, self.ctrlprm))
+        pulse_delay = []
+        pulse_offsets_vector = []
+        #sequence_list.append(sequence(pulse_delay, pulse_offsets_vector, self.ctrlprm))
 
 class ctrlprog_ready_handler(dmsg_handler):
     def process(self):
@@ -411,9 +413,9 @@ class rxfe_reset_handler(dmsg_handler):
 
 class settings_handler(dmsg_handler):
     def process(self):
-        ifmode = self._recv_dtype(np.uint32)
-        rf_settings = self.recv_dtype(np.uint32, 8)
-        if_settings = self.recv_dtype(np.uint32, 8)
+        ifmode = recv_dtype(self.arbysock, np.uint32)
+        rf_settings = recv_dtype(self.arbysock, np.uint32, 8)
+        if_settings = recv_dtype(self.arbysock, np.uint32, 8)
 
         if ifmode:
             raise NotImplementedError('IF mode is unimplemented')

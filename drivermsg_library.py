@@ -1,6 +1,6 @@
 # library containing constants and functions for passing messages over sockets between c/python and python/python
 import numpy as np
-
+from socket_utils import *
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
@@ -26,12 +26,13 @@ class driver_command(object):
             self.data = dtype(data)
             self.dtype = dtype
             self.name = name
+            self.nitems = nitems
 
         def transmit(self, sock):
-            return transmit_dtype(sock, data)
+            return transmit_dtype(sock, self.data)
 
         def receive(self, sock):
-            return recv_dtype(sock, self.dtype)
+            return recv_dtype(sock, self.dtype, self.nitems)
 
     def __init__(self, clients, command):
         self.clients = clients

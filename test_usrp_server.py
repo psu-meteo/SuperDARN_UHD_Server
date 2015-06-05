@@ -52,6 +52,7 @@ def send_servercmd(sock, cmd, status = 0):
   
 class ServerTestCases(unittest.TestCase):
     def setUp(self):
+        time.sleep(1)
         self.arbysockserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.arbysockserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
         self.arbysockserver.bind((HOST, ARBYSERVER_PORT))
@@ -81,7 +82,7 @@ class ServerTestCases(unittest.TestCase):
         self.arbysockserver.close()
         self.usrpsockserver.close()
         self.cudasockserver.close()
-        time.sleep(2)
+        time.sleep(1)
    
     def test_wait(self):
         send_servercmd(self.arbysock, usrp_server.WAIT)
@@ -97,10 +98,13 @@ class ServerTestCases(unittest.TestCase):
 
     def test_registerseq(self):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
-        ctrlprm = copy.copy(ctrlprm_default)
-        # TODO: modify to taste
-        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
 
+        # send ctrlprm
+        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit(self.arbysock)
+    
+        # send other data..
         transmit_dtype(self.arbysock, np.int32(0)) # seq_idx
         transmit_dtype(self.arbysock, np.int32(0)) # tsg_idx
         transmit_dtype(self.arbysock, np.int32(0)) # tsg_len

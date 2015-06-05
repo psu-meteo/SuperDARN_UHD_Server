@@ -2,7 +2,7 @@ import numpy as np
 import socket
 
 def recv_dtype(sock, dtype, nitems = 1):
-    dstr = sock.recv(dtype().nbytes)
+    dstr = sock.recv(dtype().nbytes * nitems)
     data = np.fromstring(dstr, dtype=dtype, count=nitems)
     if nitems == 1:
         return data[0]
@@ -10,4 +10,4 @@ def recv_dtype(sock, dtype, nitems = 1):
 
 
 def transmit_dtype(sock, data):
-    dstr = sock.sendall(data.tostring())
+    dstr = sock.sendall(data.tobytes())
