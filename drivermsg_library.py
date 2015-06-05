@@ -1,19 +1,21 @@
 # library containing constants and functions for passing messages over sockets between c/python and python/python
+import numpy as np
 
-UHD_SETUP = 's'
-UHD_RXFE_SET = 'r'
-UHD_READY_DATA = 'd'
-UHD_TRIGGER_PULSE = 't'
+UHD_SETUP = ord('s')
+UHD_RXFE_SET = ord('r')
+UHD_READY_DATA = ord('d')
+UHD_TRIGGER_PULSE = ord('t')
 
-CUDA_SETUP = 's'
-CUDA_PROCESS = 'p'
-CUDA_GET_DATA = 'g'
+CUDA_SETUP = ord('s')
+CUDA_PROCESS = ord('p')
+CUDA_GET_DATA = ord('g')
 
-NO_COMMAND = ''
+NO_COMMAND = ord('n')
 
 ARBYSERVER_PORT = 55421
 CUDADRIVER_PORT = 55420
 USRPDRIVER_PORT = 55422
+
 
 class driver_command(object):
     # class to help manage sending data 
@@ -33,53 +35,52 @@ class driver_command(object):
 
     def __init__(self, clients, command):
         self.clients = clients
-        self.queue = [] # ordered list of variables to transmit/receive
+        self.dataqueue = [] # ordered list of variables to transmit/receive
         self.payload = {} # dictionary to store received values
         self.command = np.uint8(command)
     
-    def queue(self, data, dtype, name = ''):
-        self.queue.append(socket_data(data, dtype, name))
+    def queue(self, data, dtype, name = '', nitems = 1):
+        self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
 
     def transmit(self, sock):
         if self.command != NO_COMMAND:
             transmit_dtype(sock, np.uint8(self.command))
 
-        for item in self.queue:
+        for item in self.dataqueue:
             item.transmit(sock)
 
     def receive(self, sock):
-        for item in self.queue:
+        for item in self.dataqueue:
             self.payload[item.name] = item.receive(sock)
 
 class server_ctrlprm(driver_command):
-    def __init__(self, servers, **ctrlprm_dict):
+    def __init__(self, servers, ctrlprm_dict):
         driver_command.__init__(self, servers, NO_COMMAND)
+        self.queue(ctrlprm_dict['radar'], np.int32, 'radar')
+        self.queue(ctrlprm_dict['channel'], np.int32, 'channel')
+        self.queue(ctrlprm_dict['local'], np.int32, 'local')
+        self.queue(ctrlprm_dict['priority'], np.int32, 'priority')
+        self.queue(ctrlprm_dict['current_pulseseq_idx'], np.int32, 'pulseseq_idx')
+        self.queue(ctrlprm_dict['tbeam'], np.int32, 'tbeam')
+        self.queue(ctrlprm_dict['tbeamcode'], np.uint32, 'tbeamcode')
 
-        self.queue(radar, np.int32, 'radar')
-        self.queue(channel, np.int32, 'channel')
-        self.queue(local, np.int32, 'local')
-        self.queue(priority, np.int32, 'priority')
-        self.queue(current_pulseseq_index, np.int32, 'pulseseq_idx')
-        self.queue(tbeam, np.int32, 'tbeam')
-        self.queue(tbeamcode, np.uint32, 'tbeamcode')
+        self.queue(ctrlprm_dict['tbeamazm'], np.float32, 'teambeamazm')
+        self.queue(ctrlprm_dict['tbeamwidth'], np.float32, 'tbeamwidth')
 
-        self.queue(tbeamazm, np.float32, 'teambeamazm')
-        self.queue(tbeamwidth, np.float32, 'tbeamwidth')
+        self.queue(ctrlprm_dict['number_of_samples'], np.int32, 'number_of_samples')
+        self.queue(ctrlprm_dict['buffer_index'], np.int32, 'buffer_index')
 
-        self.queue(number_of_samples, np.int32, 'number_of_samples')
-        self.queue(buffer_index, np.int32, 'buffer_index')
+        self.queue(ctrlprm_dict['baseband_samplerate'], np.float32, 'baseband_samplerate')
+        self.queue(ctrlprm_dict['filter_bandwidth'], np.int32, 'filter_bandwidth')
 
-        self.queue(baseband_samplerate, np.float32, 'baseband_samplerate')
-        self.queue(filter_bandwidth, np.int32, 'filter_bandwidth')
+        self.queue(ctrlprm_dict['match_filter'], np.int32, 'match_filter')
+        self.queue(ctrlprm_dict['rfreq'], np.int32, 'rfreq')
+        self.queue(ctrlprm_dict['rbeam'], np.int32, 'rbeam')
+        self.queue(ctrlprm_dict['rbeamcode'], np.uint32, 'rbeamcode')
+        self.queue(ctrlprm_dict['rbeamazm'], np.float32, 'rbeamazm')
+        self.queue(ctrlprm_dict['rbeamwidth'], np.float32, 'rbeamwidth')
 
-        self.queue(match_filter, np.int32, 'match_filter')
-        self.queue(rfreq, np.int32, 'rfreq')
-        self.queue(rbeam, np.int32, 'rbeam')
-        self.queue(rbeamcode, np.uint32, 'rbeamcode')
-        self.queue(rbeamazm, np.float32, 'rbeamazm')
-        self.queue(rbeamwidth, np.float32, 'rbeamwidth')
-
-        self.queue(status, np.int32, 'status')
+        self.queue(ctrlprm_dict['status'], np.int32, 'status')
 
         # TODO: set these properly 
         name_arr = np.uint8(np.zeros(80))

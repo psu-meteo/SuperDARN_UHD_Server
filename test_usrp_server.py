@@ -21,7 +21,7 @@ ctrlprm_default = {\
     'channel' : 0, \
     'local' : 0, \
     'priority' : 0, \
-    'pulseseq_idx': 0, \
+    'current_pulseseq_idx': 0, \
     'tbeam' : 0, \
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
@@ -96,9 +96,9 @@ class ServerTestCases(unittest.TestCase):
         self.assertTrue(status == 0)
 
     def test_registerseq(self):
-        send_servercmd(self.arbysock, usrp_server.WAIT)
+        send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
         ctrlprm = copy.copy(ctrlprm_default)
-        pdb.set_trace()
+        # TODO: modify to taste
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
 
         transmit_dtype(self.arbysock, np.int32(0)) # seq_idx
@@ -112,9 +112,6 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         stop_uhdserver(self.arbysock)
         self.assertTrue(status == 0)
-
-
-
 
     '''
     def test_pretrigger(self):
@@ -136,5 +133,6 @@ class ServerTestCases(unittest.TestCase):
     def test_rxfereset(self):
         pass
     ''' 
+
 if __name__ == '__main__':
     unittest.main()

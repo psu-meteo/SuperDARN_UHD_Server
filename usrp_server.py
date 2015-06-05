@@ -4,6 +4,7 @@
 # usrp_server takes arby_server messages and translates them for usrp_drivers
 # usrp_server handles one or more usrp_drivers
 
+# TODO: SORT OUT _recv_dtype and break out into socket_utils
 import numpy as np
 import pdb
 import struct
@@ -20,7 +21,7 @@ from socket_utils import *
 # see posix_ipc python library
 # http://semanchuk.com/philip/posix_ipc/
 
-VERBOSE = 0
+VERBOSE = 1
 
 # arby server commands
 REGISTER_SEQ = '+'
@@ -519,7 +520,13 @@ def main():
         dmsg = getDriverMsg(arbysock)
         if(VERBOSE):
             print('received {} command from arbyserver, processing'.format(ARBY_COMMAND_STRS[chr(dmsg['cmd'])]))
-        handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks)
+        try:
+            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks)
+        except KeyError:
+            # TODO: recover..
+            warnings.warn("Warning, unrecognized arbyserver command: {}".format(dmsg['cmd']))
+            continue
+
         handler.process()
         handler.respond()
 
