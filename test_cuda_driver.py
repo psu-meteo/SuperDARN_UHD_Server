@@ -6,7 +6,13 @@ import numpy as np
 
 import posix_ipc
 import pdb
+import time
+import subprocess
 
+from drivermsg_library import *
+from socket_utils import *
+
+'''
 class GPUTestCases(unittest.TestCase):
     def setUp(self):
         self.rxshm = cuda_driver.create_shm(0, 0, 0, 100, 'rx')
@@ -50,7 +56,31 @@ class GPUTestCases(unittest.TestCase):
         gpu.generate_bbtx(seqbuf, trise)
         gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
         gpu.txsamples_host_to_shm(self.txshm)
+'''
+def start_cudaserver():
+    # open up ports..
+    subprocess.Popen(['pkill', 'python3'])
+    subprocess.Popen(['python3', 'cuda_driver.py'])
+    time.sleep(2)
 
+def stop_cudaserver(sock):
+    # transmit clean exit command
+    cuda_exit_command([sock])
+    
+
+class CUDA_ServerTestCases(unittest.TestCase):
+    def setUp(self):
+        time.sleep(1)
+        start_cudaserver()
+        self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        pdb.set_trace()
+        self.serversock.connect(('localhost', CUDADRIVER_PORT))
+
+    def tearDown(self):
+        stop_cudaserver(self.serversock)
+
+    def test_init(self):
+        pass
         
 if __name__ == '__main__':
     unittest.main()

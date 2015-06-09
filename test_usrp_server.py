@@ -13,7 +13,7 @@ import usrp_server
 
 from drivermsg_library import *
 from socket_utils import *
-HOST = 'localhost'
+HOST = '127.0.0.1'
 
 
 ctrlprm_default = {\
@@ -87,13 +87,11 @@ class ServerTestCases(unittest.TestCase):
     def test_wait(self):
         send_servercmd(self.arbysock, usrp_server.WAIT)
         status = recv_dtype(self.arbysock, np.int32)
-        stop_uhdserver(self.arbysock)
         self.assertTrue(status == 0)
 
     def test_getstatus(self):
         send_servercmd(self.arbysock, usrp_server.GET_STATUS)
         status = recv_dtype(self.arbysock, np.int32)
-        stop_uhdserver(self.arbysock)
         self.assertTrue(status == 0)
 
     def test_registerseq(self):
@@ -114,7 +112,31 @@ class ServerTestCases(unittest.TestCase):
         #transmit_dtype(self.arbysock, np.int8(0)) # tsg_code
 
         status = recv_dtype(self.arbysock, np.int32)
-        stop_uhdserver(self.arbysock)
+        self.assertTrue(status == 0)
+
+    def test_ctrlprgready(self):
+        send_servercmd(self.arbysock, usrp_server.CTRLPROG_READY)
+        
+        # send ctrlprm
+        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit(self.arbysock)
+
+        # check status and close up ports
+        status = recv_dtype(self.arbysock, np.int32)
+        self.assertTrue(status == 0)
+
+
+    def test_ctrlprgready(self):
+        send_servercmd(self.arbysock, usrp_server.CTRLPROG_END)
+        
+        # send ctrlprm
+        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit(self.arbysock)
+
+        # check status and close up ports
+        status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
     '''
@@ -130,10 +152,7 @@ class ServerTestCases(unittest.TestCase):
     def test_clrfreq(self):
         pass
 
-    def test_ctrlprgready(self):
-        pass
     
- 
     def test_rxfereset(self):
         pass
     ''' 

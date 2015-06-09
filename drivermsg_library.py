@@ -9,6 +9,7 @@ UHD_TRIGGER_PULSE = ord('t')
 CUDA_SETUP = ord('s')
 CUDA_PROCESS = ord('p')
 CUDA_GET_DATA = ord('g')
+CUDA_EXIT = ord('e')
 
 NO_COMMAND = ord('n')
 
@@ -94,6 +95,11 @@ class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = 0):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
+
+class cuda_exit_command(driver_command):
+    def __init__(self, cudas, swing = 0):
+        driver_command.__init__(self, cudas, CUDA_EXIT)
+
 
 class cuda_process_command(driver_command):
     def __init__(self, cudas, swing = 0):

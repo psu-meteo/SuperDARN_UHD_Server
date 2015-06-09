@@ -33,7 +33,7 @@ RXDIR = 'rx'
 TXDIR = 'tx'
 
 HOST = '127.0.0.1'
-PORT = 40500
+PORT = CUDADRIVER_PORT 
 
 X_BIT = 0x04
 TR_BIT = 0x02
@@ -96,8 +96,13 @@ class cuda_get_data_handler(cudamsg_handler):
         cmd = cuda_get_data_command()
         cmd.receive(serversock)
         samples = gpu.pull_rxdata()
-        self.sock.send(samples.tobytes())
+        self.sock.sendall(samples.tobytes())
         semaphore.release()
+
+# cleanly exit.
+class cuda_exit_handler(cudamsg_handler):
+    def process(self):
+       clean_exit() 
 
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
@@ -114,40 +119,44 @@ class cuda_process_handler(cudamsg_handler):
 cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
         CUDA_GET_DATA: cuda_get_data_handler, \
-        CUDA_PROCESS: cuda_process_handler}
+        CUDA_PROCESS: cuda_process_handler, \
+        CUDA_EXIT: cuda_exit_handler}
 
 
-def semaphore_namer(antenna, side, swing, direction = 'rx'):
+def sem_namer(antenna, swing, side, direction = 'rx'):
     name = 'semaphore_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
     return name
 
-def shm_namer(antenna, side, swing, direction = 'rx'):
+def shm_namer(antenna, swing, side, direction = 'rx'):
     name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
     return name
 
 def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
-    name = shm_namer(antenna, side, swing, direction)
+    name = shm_namer(antenna, swing, side, direction)
     memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=int(shm_size))
     mapfile = mmap.mmap(memory.fd, memory.size)
     memory.close_fd()
     shm_list.append(name)
     return mapfile
 
-def create_semaphore(antenna, side, swing, direction):
-    name = sem_namer(antenna, side, swing, direction)
+def create_sem(antenna, swing, side, direction):
+    name = sem_namer(antenna, swing, side, direction)
     sem_list.append(name)
     sem = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT)
     return sem
 
-def sigint_handler(signum, frame):
+def clean_exit():
     for shm in shm_list:
-        posix_ipc.unlink_shared_memory(shm)
+            posix_ipc.unlink_shared_memory(shm)
 
     for sem in sem_list:
         sem.release()
         sem.unlink()
         
     sys.exit(0)
+
+def sigint_handler(signum, frame):
+   clean_exit()
 
 # class to contain references to gpu-side information
 # handle launching signal processing kernels
@@ -341,34 +350,44 @@ class ProcessingGPU(object):
             filter_taps1[:,i,0] = 4./dmrate1
 
 def main():
+    # parse commandline arguements
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--antennas', type=int, default=[0, 1], nargs='+')
+    args = parser.parse_args()
+
     # initalize cuda stuff
-    parser = argparse.ArguementParser()
-    parser.add_arguement('antennas', type=int, default=[0, 1], nargs='+')
-    
+    gpu = ProcessingGPU()
+
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     cmd_sock.bind((HOST, PORT))   
 
-    shm_size = 0 # TODO: get shm size from usrp server, tx and rx
-    
+    rxshm_size = 100000 # TODO: get shm size from usrp server, tx and rx
+    txshm_size = 100000 #
+
     # create shared memory space for each antenna (see demo in posix_ipc-1.0.0/demo/)
     # - create two shared memory spaces and semaphores for receive samples
     # - create one shared memory space and semaphore for transmit sample
 
-    for ant in antennas:
-        rx_shm_list[SIDEA].append(create_shm(ant, SIDEA, SWING0, direction = RXDIR))
-        rx_shm_list[SIDEA].append(create_shm(ant, SIDEA, SWING1, direction = RXDIR))
-        tx_shm_list.append(create_shm(shm_namer(ant, SIDEA, SWING0, direction = TXDIR)))
+    for ant in args.antennas:
+        rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
+        rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
+        tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
 
-        rx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING0, direction = RXDIR))
-        rx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING1, direction = RXDIR))
-        tx_semaphore_list[SIDEA].append(create_shm(ant, SWIDEA, SWING1, direction = TXDIR))
+        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING0, SIDEA, direction = RXDIR))
+        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING1, SIDEA, direction = RXDIR))
+        tx_semaphore_list.append(create_sem(ant, SWING0, SIDEA, direction = TXDIR))
 
     signal.signal(signal.SIGINT, sigint_handler)       
+    # TODO: make this more.. robust
+    cmd_sock.listen(1)
+    server_conn, addr = cmd_sock.accept()
 
     while(True):
-        cmd = recv_dtype(sock, np.uint8)
-        handler = cudamsg_handlers[cmd](cmd_sock, gpu)
+        pdb.set_trace()
+        cmd = recv_dtype(server_conn, np.uint8)
+        handler = cudamsg_handlers[cmd](server_conn, gpu)
         handler.process()
     
 

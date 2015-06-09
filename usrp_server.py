@@ -166,7 +166,7 @@ class register_seq_handler(dmsg_handler):
         tx_tsg_idx = recv_dtype(self.arbysock, np.int32)
         tx_tsg_len = recv_dtype(self.arbysock, np.int32)
         tx_tsg_step = recv_dtype(self.arbysock, np.int32)
-
+        
         # tx.allocate_pulseseq_mem(index);
         tx_tsg_rep = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
         tx_tsg_code = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
@@ -179,8 +179,8 @@ class register_seq_handler(dmsg_handler):
 class ctrlprog_ready_handler(dmsg_handler):
     def process(self):
         crtlprm = self._recv_ctrlprm()
-        r = client.radar - 1
-        c = client.channel - 1
+        #r = client.radar - 1
+        #c = client.channel - 1
 
         #rx.ready_client(&client);
         #tx.ready_client(&client);
@@ -205,10 +205,10 @@ class ctrlprog_ready_handler(dmsg_handler):
 class ctrlprog_end_handler(dmsg_handler):
     def process(self):
         crtlprm = self._recv_ctrlprm()
-        r = client.radar - 1
-        c = client.channel - 1
-        old_seq_id=-10;
-        new_seq_id=-1;
+        #r = client.radar - 1
+        #c = client.channel - 1
+        #old_seq_id=-10;
+        #new_seq_id=-1;
 
 
 class wait_handler(dmsg_handler):
