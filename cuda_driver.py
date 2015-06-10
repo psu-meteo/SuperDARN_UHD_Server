@@ -69,17 +69,23 @@ class cuda_setup_handler(cudamsg_handler):
         rx_semaphore_list[SIDEA][SWING0].acquire()
         rx_semaphore_list[SIDEA][SWING1].acquire()
         tx_semaphore_list[SIDEA].acquire()
-
-        cmd = cuda_setup_command()
+        
+        cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
- 
-        fc = cmd.payload['center_freq']
-        fsamp = cmd.payload['rxrate']
+        pdb.set_trace() 
+        fc = cmd.payload['txfreq']
+        fsamp = cmd.payload['txrate']
         tdelay = cmd.payload['time_delay']
         trise = cmd.payload['trise']
+        pdb.set_trace()
 
-        gpu.generate_bbtx(fc, fsamp, nchannels, tdelay, trise)
-        samples = gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
+        # TODO: generate seqbuf
+        # TODO: pass in trise
+        # TODO: pass in tpulse
+        # TODO: pass in baud
+
+        self.gpu.generate_bbtx(seqbuf, trise)
+        samples = self.gpu.interpolate_and_multiply(fc, fsamp, nchannels)
 
         tx_shm_list[SIDEA].seek(0)
         tx_shm_list[SIDEA].write(samples.tobytes())
@@ -95,7 +101,7 @@ class cuda_get_data_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_get_data_command()
         cmd.receive(serversock)
-        samples = gpu.pull_rxdata()
+        samples = self.gpu.pull_rxdata()
         self.sock.sendall(samples.tobytes())
         semaphore.release()
 
@@ -113,8 +119,8 @@ class cuda_process_handler(cudamsg_handler):
         rx_semaphore_list
         semaphore.acquire()
         
-        gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
-        gpu.rxsamples_process() 
+        self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
+        self.gpu.rxsamples_process() 
 
 cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
@@ -142,6 +148,7 @@ def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
 def create_sem(antenna, swing, side, direction):
     name = sem_namer(antenna, swing, side, direction)
     sem = posix_ipc.Semaphore(name, posix_ipc.O_CREAT)
+    sem.release()
     sem_list.append(sem)
     return sem
 
@@ -256,7 +263,9 @@ class ProcessingGPU(object):
         shm.write(self.tx_rf_outdata)
         shm.flush()
    
-    def generate_bbtx(self, seqbuf, trise):
+    def generate_bbtx(self, npulses, trise, nbaud = 1, shapefilter = None):
+        # so, generate array (npulses by nsamples)
+
         # TODO: make sure whatever is calling this uses the right type..
         seqbuf = np.uint8(seqbuf)
         bb_vec = np.complex64(np.zeros(seqbuf.shape))

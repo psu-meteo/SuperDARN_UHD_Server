@@ -16,7 +16,7 @@ NO_COMMAND = ord('n')
 ARBYSERVER_PORT = 55421
 CUDADRIVER_PORT = 55420
 USRPDRIVER_PORT = 55422
-
+UNKNOWN_ARRAY = 0 # nitems value for a array of unknown length
 
 class driver_command(object):
     # class to help manage sending data 
@@ -117,7 +117,18 @@ class cuda_setup_command(driver_command):
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_samples, np.uint64, 'num_requested_samples')
-        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector.. TODO: figure out how this works
+        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector', nitems = npulses) # vector.. TODO: figure out how this works
+
+    def receive(self, sock):
+        for item in self.dataqueue:
+            self.payload[item.name] = item.receive(sock)
+
+            # a bit convoluted.. populate pulse_offsets_vector length with value for npulses
+            if item.name == 'npulses':
+                for data in self.dataqueue:
+                    if data.name == 'pulse_offsets_vector':
+                        data.nitems = self.payload['npulses']
+
 
 class usrp_setup_command(driver_command):
     def __init__(self, usrps, txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):

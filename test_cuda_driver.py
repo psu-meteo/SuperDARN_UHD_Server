@@ -12,6 +12,15 @@ import subprocess
 from drivermsg_library import *
 from socket_utils import *
 
+cuda_parameters = {\
+    'txfreq' : 10e6, \
+    'rxfreq' : 10e6, \
+    'txrate' : 10e6, \
+    'rxrate' : 10e6, \
+    'npulses' : 2, \
+    'num_requested_samples' : 10000, \
+    'pulse_offsets_vector' : np.array([.2, .6])}
+
 '''
 class GPUTestCases(unittest.TestCase):
     def setUp(self):
@@ -56,11 +65,13 @@ class GPUTestCases(unittest.TestCase):
         gpu.generate_bbtx(seqbuf, trise)
         gpu.interpolate_and_multiply(fc, fsamp, nchannels, tdelay)
         gpu.txsamples_host_to_shm(self.txshm)
+
 '''
+
 def start_cudaserver():
     # open up ports..
-    #subprocess.Popen(['pkill', 'python3'])
-    #time.sleep(.5)
+    subprocess.Popen(['pkill', '-f', 'cuda_driver.py'])
+    time.sleep(.5)
     subprocess.Popen(['python3', 'cuda_driver.py'])
     time.sleep(1)
 
@@ -73,15 +84,36 @@ def stop_cudaserver(sock):
 class CUDA_ServerTestCases(unittest.TestCase):
     def setUp(self):
         time.sleep(1)
-        start_cudaserver()
+        #start_cudaserver()
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.serversock.connect(('localhost', CUDADRIVER_PORT))
 
     def tearDown(self):
         stop_cudaserver(self.serversock)
 
-    def test_init(self):
+    def test_cuda_setup(self):
+        # try passing in parameters
+        # testing cuda setup
+        setupcmd = cuda_setup_command([self.serversock], **cuda_parameters)
+        pdb.set_trace()
+        setupcmd.transmit()
+
+    '''
+
+    def test_cuda_exit(self):
+        # setUp, tearDown..
         pass
+
+    def test_cuda_getdata(self):
+        # populate shm
+        getdata = cuda_get_data_command([self.serversock])
+        getdata.transmit()
+
+    def test_cuda_process(self):
+        # try copying samples then processing them..
+        processcmd = cuda_process_command([self.serversock])
+        processcmd.transmit()
+    '''
         
 if __name__ == '__main__':
     unittest.main()
