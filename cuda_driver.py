@@ -141,8 +141,8 @@ def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
 
 def create_sem(antenna, swing, side, direction):
     name = sem_namer(antenna, swing, side, direction)
-    sem_list.append(name)
-    sem = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT)
+    sem = posix_ipc.Semaphore(name, posix_ipc.O_CREAT)
+    sem_list.append(sem)
     return sem
 
 def clean_exit():
@@ -385,7 +385,6 @@ def main():
     server_conn, addr = cmd_sock.accept()
 
     while(True):
-        pdb.set_trace()
         cmd = recv_dtype(server_conn, np.uint8)
         handler = cudamsg_handlers[cmd](server_conn, gpu)
         handler.process()

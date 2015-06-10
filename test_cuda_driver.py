@@ -59,13 +59,15 @@ class GPUTestCases(unittest.TestCase):
 '''
 def start_cudaserver():
     # open up ports..
-    subprocess.Popen(['pkill', 'python3'])
+    #subprocess.Popen(['pkill', 'python3'])
+    #time.sleep(.5)
     subprocess.Popen(['python3', 'cuda_driver.py'])
-    time.sleep(2)
+    time.sleep(1)
 
 def stop_cudaserver(sock):
     # transmit clean exit command
-    cuda_exit_command([sock])
+    exitcmd = cuda_exit_command([sock])
+    exitcmd.transmit()
     
 
 class CUDA_ServerTestCases(unittest.TestCase):
@@ -73,7 +75,6 @@ class CUDA_ServerTestCases(unittest.TestCase):
         time.sleep(1)
         start_cudaserver()
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        pdb.set_trace()
         self.serversock.connect(('localhost', CUDADRIVER_PORT))
 
     def tearDown(self):

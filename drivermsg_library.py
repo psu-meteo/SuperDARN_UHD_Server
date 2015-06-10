@@ -44,12 +44,13 @@ class driver_command(object):
     def queue(self, data, dtype, name = '', nitems = 1):
         self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
 
-    def transmit(self, sock):
-        if self.command != NO_COMMAND:
-            transmit_dtype(sock, np.uint8(self.command))
+    def transmit(self):
+        for clientsock in self.clients:
+            if self.command != NO_COMMAND:
+                transmit_dtype(clientsock, np.uint8(self.command))
 
-        for item in self.dataqueue:
-            item.transmit(sock)
+            for item in self.dataqueue:
+                item.transmit(clientsock)
 
     def receive(self, sock):
         for item in self.dataqueue:
