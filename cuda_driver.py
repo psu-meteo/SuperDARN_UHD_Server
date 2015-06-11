@@ -64,6 +64,7 @@ class cudamsg_handler(object):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
 # get infomation about transmit pulse sequences, assemble tx pulse samples and setup shared memory for rx
+# expect information about all pulse sequences..
 class cuda_setup_handler(cudamsg_handler):
     def process(self):
         rx_semaphore_list[SIDEA][SWING0].acquire()
@@ -79,7 +80,6 @@ class cuda_setup_handler(cudamsg_handler):
         trise = cmd.payload['trise']
         pdb.set_trace()
 
-        # TODO: generate seqbuf
         # TODO: pass in trise
         # TODO: pass in tpulse
         # TODO: pass in baud
@@ -168,10 +168,11 @@ def sigint_handler(signum, frame):
 # class to contain references to gpu-side information
 # handle launching signal processing kernels
 # and host/gpu communication and initialization
+# bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
     def __init__(self):
         MAXSTREAMS = 2
-        NFREQS = 1
+        NCHANS = 1
         NTAPS0 = 50
         NTAPS1 = 200
         NRFSAMPS_RX = 10000
@@ -184,17 +185,17 @@ class ProcessingGPU(object):
         DMRATE1 = NIFSAMPS_RX / NBBSAMPS_RX
 
         # allocate memory on cpu, compile functions
-        self.rx_filtertap_s0 = np.float32(np.zeros([NFREQS, NTAPS0, 2]))
-        self.rx_filtertap_s1 = np.float32(np.zeros([NFREQS, NTAPS1, 2]))
+        self.rx_filtertap_s0 = np.float32(np.zeros([NCHANS, NTAPS0, 2]))
+        self.rx_filtertap_s1 = np.float32(np.zeros([NCHANS, NTAPS1, 2]))
     
-        self.rx_samples_if = np.float32(np.zeros([NANTS, NFREQS, NIFSAMPS_RX]))
-        self.rx_samples_bb = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_RX]))
+        self.rx_samples_if = np.float32(np.zeros([NANTS, NCHANS, NIFSAMPS_RX]))
+        self.rx_samples_bb = np.float32(np.zeros([NANTS, NCHANS, NBBSAMPS_RX]))
     
-        self.tx_bb_indata = np.float32(np.zeros([NANTS, NFREQS, NBBSAMPS_TX]))
+        self.tx_bb_indata = np.float32(np.zeros([NANTS, NCHANS, NPULSES, NBBSAMPS_TX]))
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
         self.tx_rf_outdata = cuda.pagelocked_empty((NANTS, NRFSAMPS_TX), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        self.rx_samples_rf = cuda.pagelocked_empty((NANTS, NFREQS, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((NANTS, NCHANS, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
     
         # point GPU to page-locked memory for rf rx and tx samples
         self.cu_rx_samples_rf = np.intp(self.tx_rf_outdata.base.get_device_pointer())
@@ -221,12 +222,12 @@ class ProcessingGPU(object):
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
 
-        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), NFREQS, 1))
+        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), NPULSES, NCHANS))
         self.tx_grid = self._intify((NBBSAMPS_TX, NANTS, 1))
 
         self.rx_grid_0 = self._intify((NRFSAMPS_RX / DMRATE0, NANTS, 1))
         self.rx_grid_1 = self._intify((NBBSAMPS_RX, NANTS, 1))
-        self.rx_block_0 = self._intify((NTAPS0 / 2, NFREQS, 1))
+        self.rx_block_0 = self._intify((NTAPS0 / 2, NCHANS, 1))
         self.rx_block_1 = self._intify((1,NBBSAMPS_RX))
         
         self.streams = [cuda.Stream() for i in range(MAXSTREAMS)]
@@ -263,17 +264,29 @@ class ProcessingGPU(object):
         shm.write(self.tx_rf_outdata)
         shm.flush()
    
-    def generate_bbtx(self, npulses, trise, nbaud = 1, shapefilter = None):
-        # so, generate array (npulses by nsamples)
+    def generate_bbtx(self, bbrate, npulses, trise, nbaud = 1, shapefilter = None):
+        # calculate number of baseband samples per pulse
+        # tpulse is the pulse time in seconds
+        # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
+        # txrate is the transmit baseband rate 
+        nsamples = (tpulse + 2 * tbuffer) * txrate
+        padding = np.zeros(tbuffer * txrate)
+        pulse = np.ones(tpulse * txrate)
+        pulsesamps = np.concatenate([padding, pulse, padding])
 
-        # TODO: make sure whatever is calling this uses the right type..
-        seqbuf = np.uint8(seqbuf)
-        bb_vec = np.complex64(np.zeros(seqbuf.shape))
-        tx_mask = np.bool_(seqbuf & X_BIT) 
-        phase_mask = np.bool_(seqbuf & P_BIT)
-        bb_vec[tx_mask & ~phase_mask] = 1 
-        bb_vec[tx_mask & phase_mask] = -1
-        # TODO: add back in matched filtering code
+
+        # apply phase coding filter 
+        # because of polarization and the possibility of mimo, this is a function of antenna and channel
+        # may not necessarily be +/- 180 degrees..
+        # mask of complex numbers for phase rotation..
+        phase_mask = np.complex64(np.ones([nantennas, nchannels, npulses, nsamples]))
+        # TODO: generate phase mask...
+
+        # bb_vec is [nantennas, nchannels, npulses, nsamples]
+        bb_vec = phase_mask[:,:,:] * pulsesamps
+        
+        if shapefilter != None:
+            bb_vec = shapefilter(bb_vec)
 
         '''
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
@@ -372,8 +385,10 @@ def main():
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     cmd_sock.bind((HOST, PORT))   
 
-    rxshm_size = 100000 # TODO: get shm size from usrp server, tx and rx
-    txshm_size = 100000 #
+
+    # TODO: get shm size from usrp server, tx and rx
+    rxshm_size = 1000 # nsamples * nantennas * nchannels * np.uint16().nbytes * 2
+    txshm_size = 1000 # npulsesamps * npulses * nantennas * nchannels * np.uint16().nbytes * 2#  
 
     # create shared memory space for each antenna (see demo in posix_ipc-1.0.0/demo/)
     # - create two shared memory spaces and semaphores for receive samples

@@ -20,6 +20,7 @@ __device__ size_t outdata_idx(void) {
     return blockIdx.y * blockDim.x * gridDim.x + blockDim.x*blockIdx.x+threadIdx.x;
 }
 
+// TODO: update for npulses on blockIdx.y, nchannels on blockIdx.z
 __global__ void interpolate_and_multiply(
     float* indata,
     int16_t* outdata
