@@ -1,10 +1,9 @@
 // usrp_driver
 // connect to a USRP using UHD
 // wait for connection from usrp_server
-// accept control information, set sampling rates/rxfe settings/streams
 //
-//
-// wait for pulse sequence
+// look at boost property tree ini parser for usrp_config.ini..
+// 
 #include <semaphore.h>
 #include <string.h>
 #include <unistd.h>
