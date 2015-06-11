@@ -9,7 +9,7 @@
 // blockIdx.x - upsample factor
 // blockIdx.y - antenna number
 
-#define MAXFREQS 4
+#define MAXFREQS 8
 #define MAXANTS 32
 
 __device__ __constant__ double txfreq_rads[MAXFREQS];

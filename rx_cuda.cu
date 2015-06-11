@@ -2,11 +2,6 @@
 #include <stdint.h>
 #include "assert.h"
 
-#define MAXFREQS 4
-#define MAXFILTER 2048
-#define MAXANTS 32
-
-
 __global__ void multiply_and_add(float ***samples, float ***odata, float **filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block

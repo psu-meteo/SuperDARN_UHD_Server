@@ -13,7 +13,7 @@ import os
 import sys
 import argparse
 import signal
-
+import configparser
 import posix_ipc
 import pycuda.driver as cuda
 import pycuda.compiler
@@ -31,14 +31,6 @@ SIDEB = 1
 
 RXDIR = 'rx'
 TXDIR = 'tx'
-
-HOST = '127.0.0.1'
-PORT = CUDADRIVER_PORT 
-
-X_BIT = 0x04
-TR_BIT = 0x02
-S_BIT = 0x80
-P_BIT = 0x10
 
 rx_shm_list = [[],[]]
 tx_shm_list = []
@@ -85,7 +77,7 @@ class cuda_setup_handler(cudamsg_handler):
         # TODO: pass in baud
 
         self.gpu.generate_bbtx(seqbuf, trise)
-        samples = self.gpu.interpolate_and_multiply(fc, fsamp, nchannels)
+        samples = self.gpu.interpolate_and_multiply(fc, nchannels)
 
         tx_shm_list[SIDEA].seek(0)
         tx_shm_list[SIDEA].write(samples.tobytes())
@@ -170,32 +162,39 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self):
-        MAXSTREAMS = 2
-        NCHANS = 1
-        NTAPS0 = 50
-        NTAPS1 = 200
+    def __init__(self, MaxFreqs = 8, MaxAnts = 16, MaxStreams = 2, MaxChannels = 4, MaxPulses = 16, NTapsRX0 = 50, NTapsRX1 = 200, FSampTX = 10000000):
+        self.max_streams = 2
+        self.nchans = MaxChannels
+        self.ntaps0 = NTapsRX0
+        self.ntaps1 = NTapsRX1
+        self.nants = MaxAnts
+        self.npulses = MaxPulses
+        self.fsamptx = FSampTX
+
+        # TODO: set these..
         NRFSAMPS_RX = 10000
         NIFSAMPS_RX = 1000
         NBBSAMPS_RX = 20
-        NANTS = 1
         NRFSAMPS_TX = 10000
         NBBSAMPS_TX = 200
-        DMRATE0 = NRFSAMPS_RX / NIFSAMPS_RX
-        DMRATE1 = NIFSAMPS_RX / NBBSAMPS_RX
+
+
+        self.dmrate0 = NRFSAMPS_RX / NIFSAMPS_RX
+        self.dmrate1 = NIFSAMPS_RX / NBBSAMPS_RX # TODO: not used?
 
         # allocate memory on cpu, compile functions
-        self.rx_filtertap_s0 = np.float32(np.zeros([NCHANS, NTAPS0, 2]))
-        self.rx_filtertap_s1 = np.float32(np.zeros([NCHANS, NTAPS1, 2]))
+        # [NCHANNELS][NTAPS][I/Q]
+        self.rx_filtertap_s0 = np.float32(np.zeros([self.nchans, self.ntaps0, 2]))
+        self.rx_filtertap_s1 = np.float32(np.zeros([self.nchans, self.ntaps1, 2]))
     
-        self.rx_samples_if = np.float32(np.zeros([NANTS, NCHANS, NIFSAMPS_RX]))
-        self.rx_samples_bb = np.float32(np.zeros([NANTS, NCHANS, NBBSAMPS_RX]))
+        self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, NIFSAMPS_RX]))
+        self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, NBBSAMPS_RX]))
     
-        self.tx_bb_indata = np.float32(np.zeros([NANTS, NCHANS, NPULSES, NBBSAMPS_TX]))
+        self.tx_bb_indata = np.float32(np.zeros([self.nants, self.nchans, self.npulses, NBBSAMPS_TX]))
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
-        self.tx_rf_outdata = cuda.pagelocked_empty((NANTS, NRFSAMPS_TX), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        self.rx_samples_rf = cuda.pagelocked_empty((NANTS, NCHANS, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, NRFSAMPS_TX), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
     
         # point GPU to page-locked memory for rf rx and tx samples
         self.cu_rx_samples_rf = np.intp(self.tx_rf_outdata.base.get_device_pointer())
@@ -222,15 +221,15 @@ class ProcessingGPU(object):
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
 
-        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), NPULSES, NCHANS))
-        self.tx_grid = self._intify((NBBSAMPS_TX, NANTS, 1))
+        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), self.npulses, self.nchans))
+        self.tx_grid = self._intify((NBBSAMPS_TX, self.nants, 1))
 
-        self.rx_grid_0 = self._intify((NRFSAMPS_RX / DMRATE0, NANTS, 1))
-        self.rx_grid_1 = self._intify((NBBSAMPS_RX, NANTS, 1))
-        self.rx_block_0 = self._intify((NTAPS0 / 2, NCHANS, 1))
+        self.rx_grid_0 = self._intify((NRFSAMPS_RX / self.dmrate0, self.nants, 1))
+        self.rx_grid_1 = self._intify((NBBSAMPS_RX, self.nants, 1))
+        self.rx_block_0 = self._intify((self.ntaps0 / 2, self.nchans, 1))
         self.rx_block_1 = self._intify((1,NBBSAMPS_RX))
         
-        self.streams = [cuda.Stream() for i in range(MAXSTREAMS)]
+        self.streams = [cuda.Stream() for i in range(self.max_streams)]
    
     def _intify(self, tup):
         return tuple([int(v) for v in tup])
@@ -251,9 +250,9 @@ class ProcessingGPU(object):
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb
 
-    def interpolate_and_multiply(self, fc, fsamp, nchannels, tdelay):
-        self._set_mixerfreqs(fc, fsamp, nchannels)
-        self._set_phasedelays(fc, fsamp, nchannels, tdelay)
+    def interpolate_and_multiply(self, fc, nchannels, tdelay):
+        self._set_mixerfreqs(fc, nchannels)
+        self._set_phasedelays(fc, nchannels, tdelay)
 
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
@@ -333,11 +332,11 @@ class ProcessingGPU(object):
         '''
         self.tx_bb_indata = bb_vec
 
-    def _set_mixerfreqs(self, fc, fsamp, nchannels):
-        mixer_freqs = np.float64([2 * np.pi * (fsamp - fc[i]) / fsamp for i in range(nchannels)])
+    def _set_mixerfreqs(self, fc, nchannels):
+        mixer_freqs = np.float64([2 * np.pi * (self.fsamptx - fc[i]) / self.fsamptx for i in range(nchannels)])
         cuda.memcpy_htod(self.cu_txfreq_rads, mixer_freqs)
 
-    def _set_phasedelays(self, fc, fsamp, nchannels, tdelay):
+    def _set_phasedelays(self, fc, nchannels, tdelay):
         phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * tdelay[i] * fc[i] for i in range(nchannels)], 2 * np.pi)) 
         cuda.memcpy_htod(self.cu_txoffsets_rads, phase_delays)
  
@@ -366,33 +365,34 @@ class ProcessingGPU(object):
         self.rx_filtertaps1[:,ntaps1/2,0] = 0.1 * 1. # handle the divide-by-zero condition
         
     def _matched_filter_s1(dmrate1):
-        filter_taps1[:,:,:] = 0.
+        self.rxfilter_taps1[:,:,:] = 0.
 
         for i in range(ntaps1/2-dmrate1/4, ntaps1/2+dmrate1/4):
-            filter_taps1[:,i,0] = 4./dmrate1
+            self.rx_filter_taps1[:,i,0] = 4./dmrate1
 
 def main():
-    # parse commandline arguements
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--antennas', type=int, default=[0, 1], nargs='+')
-    args = parser.parse_args()
+    # parse usrp config file, read in antennas list
+    usrpconfig = configparser.ConfigParser()
+    usrpconfig.read('usrp_config.ini')
+    antennas = [usrpconfig[usrp]['antenna'] for usrp in usrpconfig.sections()] 
+    
+    # parse gpu config file
+    cudadriverconfig = configparser.ConfigParser()
+    cudadriverconfig.read('cudadriver_config.ini')
+    shm_settings = cudadriverconfig['shm_settings']
+    cuda_settings = cudadriverconfig['cuda_settings']
+    network_settings = cudadriverconfig['network_settings']
 
     # initalize cuda stuff
-    gpu = ProcessingGPU()
+    gpu = ProcessingGPU(**dict(cuda_settings))
 
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    cmd_sock.bind((HOST, PORT))   
-
-
-    # TODO: get shm size from usrp server, tx and rx
-    rxshm_size = 1000 # nsamples * nantennas * nchannels * np.uint16().nbytes * 2
-    txshm_size = 1000 # npulsesamps * npulses * nantennas * nchannels * np.uint16().nbytes * 2#  
-
-    # create shared memory space for each antenna (see demo in posix_ipc-1.0.0/demo/)
-    # - create two shared memory spaces and semaphores for receive samples
-    # - create one shared memory space and semaphore for transmit sample
+    cmd_sock.bind((network_settings.get('ServerHost'), network_settings.get('CUDADriverPort')))   
+    
+    rxshm_size = shm_settings.getint('rxshm_size') 
+    txshm_size = shm_settings.getint('txshm_size')
 
     for ant in args.antennas:
         rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
