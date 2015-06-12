@@ -22,6 +22,7 @@ from socket_utils import *
 # http://semanchuk.com/philip/posix_ipc/
 
 VERBOSE = 1
+STATE_TIME = 5 # microseconds
 
 # arby server commands
 REGISTER_SEQ = '+'
@@ -89,7 +90,8 @@ def getDriverMsg(arbysock):
 
 
 class sequence(object):
-    def __init__(self, pulse_offsets_vector, **ctrlprmstruct):
+    def __init__(self, channel, pulse_offsets_vector, **ctrlprmstruct):
+        self.channel = channel
         self.txfreq = txfreq
         self.rxfreq = rxfreq
         self.txrate = txrate
@@ -159,22 +161,35 @@ class dmsg_handler(object):
 class register_seq_handler(dmsg_handler):
     def process(self):
         crtlprm = self._recv_ctrlprm()
-        #r = client.radar - 1
-        #c = client.channel - 1
         
-        seq_idx = recv_dtype(self.arbysock, np.int32)
-        tx_tsg_idx = recv_dtype(self.arbysock, np.int32)
-        tx_tsg_len = recv_dtype(self.arbysock, np.int32)
-        tx_tsg_step = recv_dtype(self.arbysock, np.int32)
+        seq_idx = recv_dtype(self.arbysock, np.int32) # what is this for? channel index..
+        tx_tsg_idx = recv_dtype(self.arbysock, np.int32) # what is this for?
+        tx_tsg_len = recv_dtype(self.arbysock, np.int32) # what is this for? ..
+        tx_tsg_step = recv_dtype(self.arbysock, np.int32) # what is this for..
         
         # tx.allocate_pulseseq_mem(index);
         tx_tsg_rep = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
         tx_tsg_code = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # TODO: what is this?
 
         # TODO: create pulse_seq_vector from tx_tsg information?
+        step = np.ceil(tx_tsg_step / STATE_TIME)
+        seqbuf = []
+        for i in range(tx_tsg_len):
+            for j in range(0, step * tx_tsg_rep[i]):
+                seq_buf.append(tx_tsg_code[i])
+        
+        pdb.set_trace()
+        # so, quasi run-length-encoded sequence buffer..
+        # from this, extract t/r gate mask
+        # extract phase mask
+        # TODO: shave off padding? or, don't pad?
+
+
         pulse_delay = []
         pulse_offsets_vector = []
-        #sequence_list.append(sequence(pulse_delay, pulse_offsets_vector, self.ctrlprm))
+        
+        seq = sequence(channel, pulse_delay, pulse_offsets_vector, self.ctrlprm)
+        sequence_list.append(seq)
 
 class ctrlprog_ready_handler(dmsg_handler):
     def process(self):

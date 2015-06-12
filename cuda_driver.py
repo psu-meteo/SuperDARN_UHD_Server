@@ -68,7 +68,7 @@ class cuda_setup_handler(cudamsg_handler):
         pdb.set_trace() 
         fc = cmd.payload['txfreq']
         fsamp = cmd.payload['txrate']
-        tdelay = cmd.payload['time_delay']
+        tdelay = cmd.payload['time_delay'] 
         trise = cmd.payload['trise']
         pdb.set_trace()
 
@@ -162,7 +162,23 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, MaxFreqs = 8, MaxAnts = 16, MaxStreams = 2, MaxChannels = 4, MaxPulses = 16, NTapsRX0 = 50, NTapsRX1 = 200, FSampTX = 10000000):
+    def __init__(self)
+        with open('rx_cuda.cu', 'r') as f:
+            self.cu_rx = pycuda.compiler.SourceModule(f.read())
+            self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
+            self.cu_rx_multiply_mix_add = self.cu_rx.get_function('multiply_mix_add')
+
+        
+        with open('tx_cuda.cu', 'r') as f:
+            self.cu_tx = pycuda.compiler.SourceModule(f.read())
+            self.cu_tx_interpolate_and_multiply = self.cu_tx.get_function('interpolate_and_multiply')
+            self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
+            self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
+
+                
+        self.streams = [cuda.Stream() for i in range(self.max_streams)]
+    
+    def sequences_setup(self, sequences, usrps, MaxFreqs = 8, MaxAnts = 16, MaxStreams = 2, MaxChannels = 4, MaxPulses = 16, NTapsRX0 = 50, NTapsRX1 = 200, FSampTX = 10000000):
         self.max_streams = 2
         self.nchans = MaxChannels
         self.ntaps0 = NTapsRX0
@@ -170,14 +186,17 @@ class ProcessingGPU(object):
         self.nants = MaxAnts
         self.npulses = MaxPulses
         self.fsamptx = FSampTX
-
-        # TODO: set these..
+    
+        # TODO: set these.. look at sequences
         NRFSAMPS_RX = 10000
         NIFSAMPS_RX = 1000
         NBBSAMPS_RX = 20
         NRFSAMPS_TX = 10000
         NBBSAMPS_TX = 200
 
+        self.antennas = np.zeros(self.nants)
+        self.tdelays = np.zeros(self.nants)
+        self.phaseoffsets = np.zeros(self.nants)
 
         self.dmrate0 = NRFSAMPS_RX / NIFSAMPS_RX
         self.dmrate1 = NIFSAMPS_RX / NBBSAMPS_RX # TODO: not used?
@@ -197,8 +216,8 @@ class ProcessingGPU(object):
         self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
     
         # point GPU to page-locked memory for rf rx and tx samples
-        self.cu_rx_samples_rf = np.intp(self.tx_rf_outdata.base.get_device_pointer())
-        self.cu_tx_rf_outdata = np.intp(self.rx_samples_rf.base.get_device_pointer())
+        self.cu_rx_samples_rf = np.intp(self.rx_samples_rf.base.get_device_pointer())
+        self.cu_tx_rf_outdata = np.intp(self.tx_rf_outdata.base.get_device_pointer())
 
         # allocate memory on GPU
         self.cu_rx_filtertaps0 = cuda.mem_alloc_like(self.rx_filtertap_s0)
@@ -208,18 +227,6 @@ class ProcessingGPU(object):
         self.cu_rx_samples_bb = cuda.mem_alloc_like(self.rx_samples_bb)
     
         self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
-        
-        with open('rx_cuda.cu', 'r') as f:
-            self.cu_rx = pycuda.compiler.SourceModule(f.read())
-            self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
-            self.cu_rx_multiply_mix_add = self.cu_rx.get_function('multiply_mix_add')
-
-        
-        with open('tx_cuda.cu', 'r') as f:
-            self.cu_tx = pycuda.compiler.SourceModule(f.read())
-            self.cu_tx_interpolate_and_multiply = self.cu_tx.get_function('interpolate_and_multiply')
-            self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
-            self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
 
         self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), self.npulses, self.nchans))
         self.tx_grid = self._intify((NBBSAMPS_TX, self.nants, 1))
@@ -228,9 +235,7 @@ class ProcessingGPU(object):
         self.rx_grid_1 = self._intify((NBBSAMPS_RX, self.nants, 1))
         self.rx_block_0 = self._intify((self.ntaps0 / 2, self.nchans, 1))
         self.rx_block_1 = self._intify((1,NBBSAMPS_RX))
-        
-        self.streams = [cuda.Stream() for i in range(self.max_streams)]
-   
+
     def _intify(self, tup):
         return tuple([int(v) for v in tup])
 
@@ -250,9 +255,9 @@ class ProcessingGPU(object):
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb
 
-    def interpolate_and_multiply(self, fc, nchannels, tdelay):
+    def interpolate_and_multiply(self, fc, nchannels):
         self._set_mixerfreqs(fc, nchannels)
-        self._set_phasedelays(fc, nchannels, tdelay)
+        self._set_phasedelays(fc, nchannels)
 
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
@@ -336,8 +341,8 @@ class ProcessingGPU(object):
         mixer_freqs = np.float64([2 * np.pi * (self.fsamptx - fc[i]) / self.fsamptx for i in range(nchannels)])
         cuda.memcpy_htod(self.cu_txfreq_rads, mixer_freqs)
 
-    def _set_phasedelays(self, fc, nchannels, tdelay):
-        phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * tdelay[i] * fc[i] for i in range(nchannels)], 2 * np.pi)) 
+    def _set_phasedelays(self, fc, nchannels):
+        phase_delays = np.float32(np.mod([2 * np.pi * 1e-9 * self.tdelays[i] * fc[i] for i in range(nchannels)], 2 * np.pi)) 
         cuda.memcpy_htod(self.cu_txoffsets_rads, phase_delays)
  
     def _rect_filter_s0():
@@ -382,10 +387,12 @@ def main():
     shm_settings = cudadriverconfig['shm_settings']
     cuda_settings = cudadriverconfig['cuda_settings']
     network_settings = cudadriverconfig['network_settings']
-
+    
     # initalize cuda stuff
     gpu = ProcessingGPU(**dict(cuda_settings))
-
+    for usrp in usrpconfig.sections():
+        gpu.addusrp(**dict(usrpconfig[usrp]))
+    
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
