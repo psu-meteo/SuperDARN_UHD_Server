@@ -70,6 +70,9 @@ class server_ctrlprm(driver_command):
         self.queue(ctrlprm_dict['tbeamazm'], np.float32, 'teambeamazm')
         self.queue(ctrlprm_dict['tbeamwidth'], np.float32, 'tbeamwidth')
 
+        self.queue(ctrlprm_dict['tfreq'], np.int32, 'tfreq')
+        self.queue(ctrlprm_dict['trise'], np.int32, 'trise')
+
         self.queue(ctrlprm_dict['number_of_samples'], np.int32, 'number_of_samples')
         self.queue(ctrlprm_dict['buffer_index'], np.int32, 'buffer_index')
 
