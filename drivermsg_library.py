@@ -1,5 +1,6 @@
 # library containing constants and functions for passing messages over sockets between c/python and python/python
 import numpy as np
+import collections
 from socket_utils import *
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
@@ -57,8 +58,37 @@ class driver_command(object):
             self.payload[item.name] = item.receive(sock)
 
 class server_ctrlprm(driver_command):
-    def __init__(self, servers, ctrlprm_dict):
+    def __init__(self, servers = None, ctrlprm_dict = None):
+        if not (servers == None) and not isinstance(servers, collections.Iterable):
+                servers = [servers]
+
         driver_command.__init__(self, servers, NO_COMMAND)
+        if ctrlprm_dict == None:
+            # stuff in default values to be over-written during rx
+            ctrlprm_dict = {}
+            ctrlprm_dict['radar'] = 0
+            ctrlprm_dict['channel'] = 0
+            ctrlprm_dict['local'] = 0
+            ctrlprm_dict['priority'] = 0
+            ctrlprm_dict['current_pulseseq_idx'] = 0
+            ctrlprm_dict['tbeam'] = 0
+            ctrlprm_dict['tbeamcode'] = 0
+            ctrlprm_dict['tbeamazm'] = 0
+            ctrlprm_dict['tbeamwidth'] = 0
+            ctrlprm_dict['tfreq'] = 0
+            ctrlprm_dict['trise'] = 0
+            ctrlprm_dict['number_of_samples'] = 0
+            ctrlprm_dict['buffer_index'] = 0
+            ctrlprm_dict['baseband_samplerate'] = 0
+            ctrlprm_dict['filter_bandwidth'] = 0
+            ctrlprm_dict['match_filter'] = 0
+            ctrlprm_dict['rfreq'] = 0
+            ctrlprm_dict['rbeam'] = 0
+            ctrlprm_dict['rbeamcode'] = 0
+            ctrlprm_dict['rbeamazm'] = 0
+            ctrlprm_dict['rbeamwidth'] = 0
+            ctrlprm_dict['status'] = 0
+
         self.queue(ctrlprm_dict['radar'], np.int32, 'radar')
         self.queue(ctrlprm_dict['channel'], np.int32, 'channel')
         self.queue(ctrlprm_dict['local'], np.int32, 'local')

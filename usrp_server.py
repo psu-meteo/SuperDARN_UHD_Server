@@ -138,11 +138,12 @@ class register_seq_handler(dmsg_handler):
         tx_tsg_code = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # code
 
         step = np.ceil(tx_tsg_step / STATE_TIME)
-        seqbuf = []
+        seq_buf = []
         for i in range(tx_tsg_len):
             for j in range(0, step * tx_tsg_rep[i]):
                 seq_buf.append(tx_tsg_code[i])
-        
+        seq_buf = np.uint8(np.array(seq_buf))
+
         # extract out pulse information...
         S_BIT = 0x01 # sample impulses 
         R_BIT = 0x02 # tr gate, use for tx pulse times
@@ -158,9 +159,14 @@ class register_seq_handler(dmsg_handler):
         phase_mask = seq_buf & P_BIT
     
         # extract smsep and number of samples
-        samples_idx = np.nonzero(samples)
+        sample_idx = np.nonzero(samples)
+
+        if len(sample_idx) < 3:
+            warnings.warn("Warning, cannot register empty sequence")
+            return
+
         smsep = (sample_idx[2] - sample_idx[1]) * STATE_TIME
-        nbb_samples = sum(samples_idx)
+        nbb_samples = sum(sample_idx)
         
         # extract pulse timing
         tr_window_idx = np.nonzero(tr_window)
@@ -175,7 +181,7 @@ class register_seq_handler(dmsg_handler):
 
         # extract per-pulse phase coding masks
         phase_masks = []
-        for i in range(npulses)
+        for i in range(npulses):
             pstart = rf_pulse_edge_idx[i] 
             pend = pstart + _pulse_len(rf_pulse, pstart)
             phase_masks.append(phase_mask[pstart:pend])
@@ -360,12 +366,14 @@ class recv_get_data_handler(dmsg_handler):
             
             main_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
             back_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
+
+            # TODO: grab samples over socket 
             for usrp in self.usrpsocks:
                 for ant in usrpantennas: # TODO: FIX THIS 
-                main_samples = self.usrpsock.
-                back_samples = 
+                    pass
+                    #main_samples = self.usrpsock.
+                    #back_samples = 
 
-                # TODO: grab samples over socket 
             
 
             # TODO: do rx beamforming

@@ -16,7 +16,7 @@ from socket_utils import *
 HOST = '127.0.0.1'
 
 
-ctrlprm_default = {\
+CTRLPRM_DEFAULT = {\
     'radar' : 0, \
     'channel' : 0, \
     'local' : 0, \
@@ -26,6 +26,8 @@ ctrlprm_default = {\
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0, \
+    'tfreq': 0, \
+    'trise': 0, \
     'number_of_samples' : 0, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 0, \
@@ -98,9 +100,9 @@ class ServerTestCases(unittest.TestCase):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
 
         # send ctrlprm
-        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
-        ctrlprm_struct.transmit(self.arbysock)
+        ctrlprm_struct.transmit()
     
         # send other data..
         transmit_dtype(self.arbysock, np.int32(0)) # seq_idx
@@ -118,9 +120,9 @@ class ServerTestCases(unittest.TestCase):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_READY)
         
         # send ctrlprm
-        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm = copy.copy(CTLRPRM_DEFAULT)
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
-        ctrlprm_struct.transmit(self.arbysock)
+        ctrlprm_struct.transmit()
 
         # check status and close up ports
         status = recv_dtype(self.arbysock, np.int32)
@@ -131,9 +133,9 @@ class ServerTestCases(unittest.TestCase):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_END)
         
         # send ctrlprm
-        ctrlprm = copy.copy(ctrlprm_default)
+        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
-        ctrlprm_struct.transmit(self.arbysock)
+        ctrlprm_struct.transmit()
 
         # check status and close up ports
         status = recv_dtype(self.arbysock, np.int32)
