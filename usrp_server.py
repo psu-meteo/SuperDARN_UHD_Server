@@ -70,6 +70,7 @@ ARBY_COMMAND_STRS = {
 
 #TODO: cleanup global variables
 CMD_ERROR = 10 
+USRP_DRIVER_ERROR = 11
 sequence_list = []
 old_seq_id = 0
 old_beam = -1
@@ -247,9 +248,10 @@ class exit_handler(dmsg_handler):
             sock.close()
         for sock in self.cudasocks:
             sock.close()
-        # TODO: clean up shared memory
+
         if(VERBOSE): 
             print('received exit command, cleaning up..')
+
         sys.exit(0)
 
 class pretrigger_handler(dmsg_handler):
@@ -344,7 +346,8 @@ class recv_get_data_handler(dmsg_handler):
         int64_t tdump = 1000000 * (tdumpend.tv_sec - tdumpstart.tv_sec) + (tdumpend.tv_usec
         std::cout << "raw data transmission time (us) : " << tdump << "\n";
         '''
-
+    
+    # get_data, get samples for radar/channel 
     def process(self):
         self._recv_ctrlprm()
 
@@ -355,32 +358,72 @@ class recv_get_data_handler(dmsg_handler):
 
         if not self.status: 
             cmd = usrp_ready_data_command(self.usrpsocks, self.channel)
-            # TODO: check for off-by-one error in self.channel
             iseq += 1
             
-            # TODO: for each channel/antenna?
-            transmit_dtype(self.arbysock, np.int32(2)) # shared memory configuration flag
+            main_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
+            main_beamformed = np.uint32(np.zeros(NBBSAMPLES))
+            back_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
+            main_beamformed = np.uint32(np.zeros(NBBSAMPLES))
+            
+            # check status of usrp drivers
+            for usrpsock in self.usrpsocks:
+                rx_status = recv_dtype(usrpsock, np.int32)
+                if rx_status != 1:
+                    warnings.warn('USRP driver status {} in GET_DATA'.format(rx_status))
+                    self.status = USRP_DRIVER_ERROR
+                    
+            # grap samples
+            for usrpsock in self.usrpsocks:
+                # receive antennas controlled by usrp driver
+                nantennas = recv_dtype(usrpsock, np.uint16)
+                antennas = np.recv_dtype(usrpsock, np.uint16, nantennas)
+                for ant in antennas: 
+                    main_samples[ant][:] = recv_dtype(usrpsock, np.float64, self.ctrlprm['number_of_samples']) # TODO: check data type!?
+                    back_samples[ant][:] = recv_dtype(usrpsock, np.float64, self.ctrlprm['number_of_samples'])
+
+            # TODO: create beamform_main, a complex vector NANTS long with the phasing 
+            # could be per-channel, I suppose
+            # do rx beamforming
+            # if this bottlenecks, it should be straightforward to vectorize..
+            
+            def _complex_i32_pack(isamp, qsamp):
+                i_mask = 0xffff0000
+                q_mask = 0x0000ffff
+                packed_sample = (i_mask & (np.uint16(isamp) << 16)) + (q_mask & np.uint16(qsamp))
+                #client_main[isamp] = ((uint32_t) (temp_main[1] << 16) & 0xffff0000) | ((uint32_t) temp_main[0] & 0x0000ffff);
+                return np.uint32(packed_sample)
+
+            for i in range(NBBSAMPLES):
+                itemp = np.int16(0)
+                qtemp = np.int16(0) 
+                
+                for ant in MAIN_ANTENNAS:
+                    itemp += np.real(main_samples[ant][i]) * np.real(beamform_main[ant]) - \
+                             np.imag(main_samples[ant][i]) * np.imag(beamform_main[ant]) 
+                    qtemp += np.real(main_samples[ant][i]) * np.imag(beamform_main[ant]) + \
+                             np.imag(main_samples[ant][i]) * np.real(beamform_main[ant])
+                # form i/q packed uint32.. 
+                main_beamformed[i] = _complex_i32_pack(itemp, qtemp)
+
+                itemp = np.int16(0)
+                qtemp = np.int16(0) 
+                for ant in NBACK_ANTENNAS:
+                    itemp += np.real(back_samples[ant][i]) * np.real(beamform_back[ant]) - \
+                             np.imag(back_samples[ant][i]) * np.imag(beamform_back[ant]) 
+                    qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
+                             np.imag(back_samples[ant][i]) * np.real(beamform_back[ant])
+
+                back_beamformed[i] = _complex_i32_pack(itemp, qtemp)
+
+                
+            transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
             transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
             transmit_dtype(self.arbysock, np.int32(0)) # buffer number
             transmit_dtype(self.arbysock, np.int32(self.ctrlprm['number_of_samples'])) # number of baseband samples
-            
-            main_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
-            back_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
-
-            # TODO: grab samples over socket 
-            for usrp in self.usrpsocks:
-                for ant in usrpantennas: # TODO: FIX THIS 
-                    pass
-                    #main_samples = self.usrpsock.
-                    #back_samples = 
-
-            
-
-            # TODO: do rx beamforming
 
             # send samples over socket for self.channel on main and back array
-            transmit_dtype(self.arbysock, np.uint32(samples), self.ctrlprm['number_of_samples']) # TODO: send main data for channel
-            transmit_dtype(self.arbysock, np.uint32(samples), self.ctrlprm['number_of_samples']) # TODO: send back data for channel
+            transmit_dtype(self.arbysock, main_beamformed, self.ctrlprm['number_of_samples']) # TODO: send main data for channel
+            transmit_dtype(self.arbysock, back_beamformed, self.ctrlprm['number_of_samples']) # TODO: send back data for channel
            
             if (DUMP_RAW):
                 self.dump_raw()

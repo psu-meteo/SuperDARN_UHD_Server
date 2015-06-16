@@ -107,11 +107,11 @@ class ServerTestCases(unittest.TestCase):
         # send other data..
         transmit_dtype(self.arbysock, np.int32(0)) # seq_idx
         transmit_dtype(self.arbysock, np.int32(0)) # tsg_idx
-        transmit_dtype(self.arbysock, np.int32(0)) # tsg_len
-        transmit_dtype(self.arbysock, np.int32(0)) # tsg_step
+        transmit_dtype(self.arbysock, np.int32(0)) # tsg_len TODO: create this
+        transmit_dtype(self.arbysock, np.int32(0)) # tsg_step TODO: what is this?
 
-        #transmit_dtype(self.arbysock, np.int8(0)) # tsg_rep
-        #transmit_dtype(self.arbysock, np.int8(0)) # tsg_code
+        #transmit_dtype(self.arbysock, np.int8(0)) # tsg_rep TODO: create this..
+        #transmit_dtype(self.arbysock, np.int8(0)) # tsg_code TODO: create this..
 
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)

@@ -313,6 +313,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             
             case READY_DATA:
                 uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
+                // TODO: send int32_t status
+                // TODO: send number of antennas
+                // TODO: send antennas 
                 unlock_semaphore(swing);
                 state = ST_READY; 
                 break;
