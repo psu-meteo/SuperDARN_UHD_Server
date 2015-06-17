@@ -14,7 +14,9 @@ import usrp_server
 from drivermsg_library import *
 from socket_utils import *
 HOST = '127.0.0.1'
-START_SERVER = False
+START_SERVER = True 
+
+
 S_BIT = np.uint8(0x01) # sample impulses 
 R_BIT = np.uint8(0x02) # tr gate, use for tx pulse times
 X_BIT = np.uint8(0x04) # transmit path, use for bb 
@@ -59,6 +61,7 @@ def send_servercmd(sock, cmd, status = 0):
   
 class ServerTestCases(unittest.TestCase):
     def setUp(self):
+        print('setting up uhdserver')
         time.sleep(1)
         self.arbysockserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.arbysockserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
@@ -82,6 +85,7 @@ class ServerTestCases(unittest.TestCase):
         (self.cudasock, addr) = self.cudasockserver.accept()
     
     def tearDown(self):
+        print('tearing down uhdserver')
         stop_uhdserver(self.arbysock)
         self.arbysock.close()
         self.usrpsock.close()
@@ -90,7 +94,7 @@ class ServerTestCases(unittest.TestCase):
         self.usrpsockserver.close()
         self.cudasockserver.close()
         time.sleep(1)
-    ''' 
+    
     def test_wait(self):
         send_servercmd(self.arbysock, usrp_server.WAIT)
         status = recv_dtype(self.arbysock, np.int32)
@@ -100,7 +104,7 @@ class ServerTestCases(unittest.TestCase):
         send_servercmd(self.arbysock, usrp_server.GET_STATUS)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-    '''
+    
     def test_registerseq(self):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
 
@@ -181,7 +185,6 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
-    '''
     def test_ctrlprgready(self):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_READY)
         
@@ -206,9 +209,10 @@ class ServerTestCases(unittest.TestCase):
         # check status and close up ports
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-
     def test_get_data(self):
         # first, register sequence
+        print('testing get_data')
+        self.test_registerseq()
 
         # next, request data for that channel
         send_servercmd(self.arbysock, usrp_server.RECV_GET_DATA)
@@ -220,7 +224,7 @@ class ServerTestCases(unittest.TestCase):
 
         # check status
         status = recv_dtype(self.arbysock, np.int32)
-        self.assertTrue(status == 10)
+        self.assertTrue(status == 0)
 
         # pretend to be a usrp driver..
         # send nantennas (int16)
@@ -239,9 +243,10 @@ class ServerTestCases(unittest.TestCase):
 
         # TODO: is this expected to be sent again?
         status = recv_dtype(self.arbysock, np.int32)
+        print('get data test complete')
 
 
-
+'''
     def test_pretrigger(self):
         pass
     
@@ -257,7 +262,6 @@ class ServerTestCases(unittest.TestCase):
     
     def test_rxfereset(self):
         pass
-    ''' 
-
+    '''
 if __name__ == '__main__':
     unittest.main()

@@ -6,6 +6,7 @@ UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
+UHD_CLRFREQ = ord('c')
 
 CUDA_SETUP = ord('s')
 CUDA_PROCESS = ord('p')
@@ -190,3 +191,8 @@ class usrp_ready_data_command(driver_command):
     def __init__(self, usrps, channel):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
         self.queue(channel, np.int32, 'channel')
+
+class usrp_clrfreq_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_CLRFREQ)
+        # TODO: what do I need to send here?

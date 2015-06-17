@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # usrp drivers may not be running on the computer which usrp_server is running on
 # and will communicate with usrp_drivers using tcp ip sockets
 
@@ -20,7 +21,7 @@ from socket_utils import *
 # see posix_ipc python library
 # http://semanchuk.com/philip/posix_ipc/
 
-VERBOSE = 1
+VERBOSE = 0
 STATE_TIME = 5 # microseconds
 
 # arby server commands
@@ -74,7 +75,7 @@ USRP_DRIVER_ERROR = np.int32(11)
 sequence_list = []
 old_seq_id = 0
 old_beam = -1
-iseq = 0
+#iseq = 0
 NANTENNAS = 20
 
 def hash_sequence_list(sequence_list):
@@ -274,19 +275,21 @@ class pretrigger_handler(dmsg_handler):
         
         # provide fresh samples to usrp_driver.cpp shared memory if beam or sequence has changed
         if (seq_id != old_seq_id) or (self.beam != old_beam):
-            iseq = 0
+            # TODO: iseq = 0
             cmd = usrp_setup_command(self.usrpsocks, self.channel) # txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):
             cmd.transmit()
 
         old_seq_id = seq_id
         old_beam = new_beam
+        
+        # TODO: determine bad transmit times?
+        bad_transmit_times_len = np.int32(0)
+        bad_transmit_times_start = np.uint32(np.array([])) # units of usec
+        bad_transmit_times_duration = np.uint32(np.array([])) # units of usec
 
-        '''
-        send_data(msgsock, &bad_transmit_times.length, sizeof(bad_transmit_times.length));
-        send_data(msgsock, bad_transmit_times.start_usec, sizeof(uint32_t)*bad_transmit_times.length
-        send_data(msgsock, bad_transmit_times.duration_usec, sizeof(uint32_t)*bad_transmit_times.len
-        send_data(msgsock, &msg, sizeof(struct DriverMsg));
-        '''
+        transmit_dtype(self.arbysock, bad_transmit_times_len) 
+        transmit_dtype(self.arbysock, bad_transmit_times_start)
+        transmit_dtype(self.arbysock, bad_transmit_times_duration)
 
 class trigger_handler(dmsg_handler):
     def process(self):
@@ -363,11 +366,11 @@ class recv_get_data_handler(dmsg_handler):
         if not len(sequence_list):
             self.status = CMD_ERROR
         
-        transmit_dtype(self.arbysock, self.status) 
+        transmit_dtype(self.arbysock, np.int32(self.status)) 
 
         if not self.status: 
-            cmd = usrp_ready_data_command(self.usrpsocks, self.channel)
-            iseq += 1
+            cmd = usrp_ready_data_command(self.usrpsocks, self.ctrlprm['channel'])
+            # TODO: iseq += 1
             
             main_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
             main_beamformed = np.uint32(np.zeros(NBBSAMPLES))
@@ -434,58 +437,27 @@ class recv_get_data_handler(dmsg_handler):
 # TODO: port this..
 class clrfreq_handler(dmsg_handler):
     def process(self):
-        self._recv_clrfrqprm()
+        fstart = recv_dtype(self.arbysock, np.int32) # kHz
+        fstop = recv_dtype(self.arbysock, np.int32) # kHz
+        filter_bandwidth = recv_dtype(self.arbysock, np.float32) # kHz (c/(2 * rsep))
+        power_threshold = recv_dtype(self.arbysock, np.float32) # (typically .9, threshold before changing freq)
+        nave = recv_dtype(self.arbysock, np.int32) # (typically .9, threshold before changing freq)
         self._rect_ctrlprm()
+
         nave = 0
         usable_bandwidth = clrfreq_parameters.end - clrfreq_parameters.start
         usable_bandwidth = np.floor(usable_bandwidth/2) * 2
 
-
-        N = int(pow(2,np.ceil(np.log10(1.25*usable_bandwidth) / log10(2))))
-
-        if N > 1024:
-            N = 512
-            usable_bandwidth = 300
-            start = int(center-usable_bandwidth/2+0.49999)
-            end = int(center+usable_bandwidth/2+0.49999)
-        '''
-        for(int chan = 0; chan < nrx_antennas; chan++) {
-            usrp->set_rx_freq(1e3*center, chan);
-            usrp->set_rx_rate(1e6, chan);
-            if(verbose>-1) std::cout << "Actual RX rate for clr freq search: " << N << " kHz\n";
-        }
-
-        /* set up search parameters search_bandwidth > usable_bandwidth */
-        search_bandwidth=N;
-        //search_bandwidth=800;            
-        start=(int)(center-search_bandwidth/2.0+0.49999);
-        end=(int)(center+search_bandwidth/2+0.49999);
-        unusable_sideband=(search_bandwidth-usable_bandwidth)/2;
-        clrfreq_parameters.start=start;
-        clrfreq_parameters.end=end;
-
-        pwr.clear();
-        pwr2.clear();
-        pwr.resize(N,0);
-        pwr2.resize(usable_bandwidth,0);
-
-        rx_clrfreq_rval= recv_clr_freq(
-                usrp,
-                rx_stream,
-                center,
-                usable_bandwidth,
-                (int) client.filter_bandwidth/1e3,
-                clrfreq_parameters.nave,
-                10,
-                &pwr2.front());
-
-
-        send_data(msgsock, &clrfreq_parameters, sizeof(struct CLRFreqPRM));
-        send_data(msgsock, &usable_bandwidth, sizeof(int));
-        send_data(msgsock, &pwr2.front(), sizeof(double)*usable_bandwidth);
-        send_data(msgsock, &msg, sizeof(struct DriverMsg));
-        '''
-        pass
+        # TODO: send clrfreq request to usrp drivers, let them handle sampling and return raw samples
+        # TODO: do beamforming here on samples, create 'pwr2' double array of width usable_bandwidth with kHz resolution
+         
+        transmit_dtype(self.arbysock, np.int32(fstart)) # kHz
+        transmit_dtype(self.arbysock, np.int32(fstop)) # kHz
+        transmit_dtype(self.arbysock, np.float32(filter_bandwidth)) # kHz (c/(2 * rsep))
+        transmit_dtype(self.arbysock, np.float32(power_threshold)) # (typically .9, threshold before changing freq)
+        transmit_dtype(self.arbysock, np.int32(nave)) # (typically .9, threshold before changing freq)
+        transmit_dtype(self.arbysock, np.int32(usable_bandwidth)) # kHz?
+        transmit_dtype(self.arbysock, np.float64(pwr2)) # length usable_bandwidth array?
 
 class rxfe_reset_handler(dmsg_handler):
     def process(self):

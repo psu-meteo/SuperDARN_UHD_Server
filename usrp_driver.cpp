@@ -43,6 +43,7 @@
 
 #define USRP_SETUP 's'
 #define RXFE_SET 'r'
+#define CLRFREQ 'c'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
 
@@ -319,6 +320,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 unlock_semaphore(swing);
                 state = ST_READY; 
                 break;
+
+            case CLRFREQ:
+                
+               // TODO: synchronize clr_freq scan.. 
+               rx_clrfreq_rval= recv_clr_freq(
+                                usrp,
+                                rx_stream,
+                                center,
+                                usable_bandwidth,
+                                (int) client.filter_bandwidth/1e3,
+                                clrfreq_parameters.nave,
+                                10,
+                                &pwr2.front()); 
+                // TODO: send back raw samples for beamforming on server
 
             default:
                 break;
