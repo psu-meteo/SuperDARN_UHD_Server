@@ -127,7 +127,8 @@ class dmsg_handler(object):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
     def respond(self):
-        self.arbysock.sendall(np.int32(self.status).tostring())
+        transmit_dtype(self.arbysock(np.int32(0)))
+        transmit_dtype(self.arbysock(np.int32(self.status))
 
     def _recv_ctrlprm(self):
         ctrlprm = server_ctrlprm()
@@ -461,7 +462,7 @@ class clrfreq_handler(dmsg_handler):
 
 class rxfe_reset_handler(dmsg_handler):
     def process(self):
-        kodiak_set_rxfe(usrp, default_rf_settings);
+        kodiak_set_rxfe(self.usrpsocks, default_rf_settings);
 
 class settings_handler(dmsg_handler):
     def process(self):
@@ -473,10 +474,18 @@ class settings_handler(dmsg_handler):
             raise NotImplementedError('IF mode is unimplemented')
         
         # set RF settings
-        kodiak_set_rxfe(usrp, rf_settings);
+        kodiak_set_rxfe(self.usrpsocks, rf_settings);
 
 def kodiak_set_rxfe(handler, rf_settings):
-    pass
+    amp0 = rf_settings[1] # amp1 in RXFESettings struct
+    amp1 = rf_settings[2] # amp2 in RXFESettings struct
+    att_p5dB = np.uint8((rf_settings[4] > 0))
+    att_1dB = np.uint8((rf_settings[5] > 0))
+    att_2dB = np.uint8((rf_settings[6] > 0))
+    att_4dB = np.uint8((rf_settings[7] > 0))
+    att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
+
+    cmd = usrp_rxfe_setup_command(self.usrpsocks, amp0, amp1, att)
 
 class full_clrfreq_handler(dmsg_handler):
     pass

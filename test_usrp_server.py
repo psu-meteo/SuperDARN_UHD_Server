@@ -97,11 +97,15 @@ class ServerTestCases(unittest.TestCase):
     
     def test_wait(self):
         send_servercmd(self.arbysock, usrp_server.WAIT)
+
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
     def test_getstatus(self):
         send_servercmd(self.arbysock, usrp_server.GET_STATUS)
+
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
     
@@ -182,6 +186,7 @@ class ServerTestCases(unittest.TestCase):
         transmit_dtype(self.arbysock, np.int8(tsg_rep))
         transmit_dtype(self.arbysock, np.int8(tsg_code))
 
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
@@ -194,6 +199,8 @@ class ServerTestCases(unittest.TestCase):
         ctrlprm_struct.transmit()
 
         # check status and close up ports
+
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
@@ -207,8 +214,11 @@ class ServerTestCases(unittest.TestCase):
         ctrlprm_struct.transmit()
 
         # check status and close up ports
+
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
+    
     def test_get_data(self):
         # first, register sequence
         print('testing get_data')
@@ -242,16 +252,21 @@ class ServerTestCases(unittest.TestCase):
         back_beamformed = recv_dtype(self.arbysock, np.uint32)
 
         # TODO: is this expected to be sent again?
+
+        drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         print('get data test complete')
+
+    def test_trigger(self):
+        send_servercmd(self.arbysock, usrp_server.TRIGGER)
+        status = recv_dtype(self.arbysock, np.int32)
+        self.assertTrue(status == 0)
 
 
 '''
     def test_pretrigger(self):
         pass
     
-    def test_trigger(self):
-        pass
 
     def test_posttrigger(self):
         pass
