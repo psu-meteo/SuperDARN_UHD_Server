@@ -68,13 +68,14 @@ ARBY_COMMAND_STRS = {
         GPS_MSG_ERROR : 'gps message error', \
         CLEAN_EXIT : 'clean exit'}
 
-#TODO: cleanup global variables
-CMD_ERROR = 10 
-USRP_DRIVER_ERROR = 11
+#TODO: cleanup/eliminate global variables
+CMD_ERROR = np.int32(10)
+USRP_DRIVER_ERROR = np.int32(11)
 sequence_list = []
 old_seq_id = 0
 old_beam = -1
 iseq = 0
+NANTENNAS = 20
 
 def hash_sequence_list(sequence_list):
     return ''.join([s.__hash__() for s in sequence_list])
@@ -85,20 +86,27 @@ def getDriverMsg(arbysock):
     cmd = {'cmd':msgtype, 'status':msgstatus}
     return cmd
 
-
 class sequence(object):
-    def __init__(self, channel, npulses, pulse_offsets_vector, phase_masks, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
-        self.num_requested_samples = num_requested_samples
+        self.nbb_samples = nbb_samples 
         self.pulse_offsets_vector = pulse_offsets_vector
-        self.priority = priority
+        self.priority = self.ctrlprm['priority']
         self.bb_vec = self._make_bb_vec()
-        self.phase_mask = phase_mask
+        self.phase_mask = phase_masks
         self.ready = True # what is ready flag for?
+        self.tx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
+        self.rx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
+    
+    # TODO... write this
+    def _make_bb_vec(self):
+        # create un-phased baseband vector(s)?
+        return []
 
+    # TODO: benchmark this and see if it needs to be smarter..
     def __key(self):
-        return (self.txfreq, self.rxfreq, self.txrate, self.rxrate, self.npulses, self.num_requested_samples, self.pulse_offsets_vector)
+        return (hash(frozenset(self.ctrlprm.items())), self.pulse_offsets_vector, self.bb_vec, self.phase_mask)
 
     def __eq__(self, x, y):
         return type(x) == type(y) and x.__key() == y.__key()
@@ -129,29 +137,30 @@ class register_seq_handler(dmsg_handler):
     def process(self):
         self._recv_ctrlprm()
         
-        seq_idx = recv_dtype(self.arbysock, np.int32) # what is this for? channel index..
-        tx_tsg_idx = recv_dtype(self.arbysock, np.int32) # what is this for?
-        tx_tsg_len = recv_dtype(self.arbysock, np.int32) # what is this for? ..
-        tx_tsg_step = recv_dtype(self.arbysock, np.int32) # what is this for..
+        seq_idx = recv_dtype(self.arbysock, np.int32)
+        tx_tsg_idx = recv_dtype(self.arbysock, np.int32)
+        tx_tsg_len = recv_dtype(self.arbysock, np.int32) 
+        tx_tsg_step = recv_dtype(self.arbysock, np.int32)
         
         # psuedo-run length encoded tsg
         tx_tsg_rep = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # number of iterations of code tx_tsg_code
         tx_tsg_code = recv_dtype(self.arbysock, np.uint8, tx_tsg_len) # code
-
+        
+        # TODO: sort out step/tx_tsg_step/STATE_TIME conversions..
         step = np.ceil(tx_tsg_step / STATE_TIME)
         seq_buf = []
         for i in range(tx_tsg_len):
-            for j in range(0, step * tx_tsg_rep[i]):
+            for j in range(0, np.int32(step * tx_tsg_rep[i])):
                 seq_buf.append(tx_tsg_code[i])
         seq_buf = np.uint8(np.array(seq_buf))
 
         # extract out pulse information...
-        S_BIT = 0x01 # sample impulses 
-        R_BIT = 0x02 # tr gate, use for tx pulse times
-        X_BIT = 0x04 # transmit path, use for bb 
-        A_BIT = 0x08 # enable attenuator 
-        P_BIT = 0x10 # phase code
-
+        S_BIT = np.uint8(0x01) # sample impulses 
+        R_BIT = np.uint8(0x02) # tr gate, use for tx pulse times
+        X_BIT = np.uint8(0x04) # transmit path, use for bb 
+        A_BIT = np.uint8(0x08) # enable attenuator 
+        P_BIT = np.uint8(0x10) # phase code
+       
         # create masks
         samples = seq_buf & S_BIT
         tr_window = seq_buf & R_BIT
@@ -160,24 +169,23 @@ class register_seq_handler(dmsg_handler):
         phase_mask = seq_buf & P_BIT
     
         # extract smsep and number of samples
-        sample_idx = np.nonzero(samples)
-
+        sample_idx = np.nonzero(samples)[0]
         if len(sample_idx) < 3:
             warnings.warn("Warning, cannot register empty sequence")
             return
 
-        smsep = (sample_idx[2] - sample_idx[1]) * STATE_TIME
-        nbb_samples = sum(sample_idx)
+        smsep = (sample_idx[2] - sample_idx[1] + 1) * STATE_TIME
+        nbb_samples = len(sample_idx)
         
         # extract pulse timing
-        tr_window_idx = np.nonzero(tr_window)
-        tr_rising_edge_idx = rising_edge_idx(tr_window_idx)
-        pulse_offsets_vector = STEP * tr_window[tr_rising_edge_idx] 
-
+        tr_window_idx = np.nonzero(tr_window)[0]
+        tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
+        pulse_offsets_vector = tx_tsg_step * tr_rising_edge_idx 
+        
         # extract tr window to rf pulse delay
-        rf_pulse_idx = np.nonzero(rf_pulse)
-        rf_pulse_edge_idx = rising_edge_idx(rf_pulse_idx)
-        tr_to_pulse_delay = (rf_pulse_idx[rf_pulse_edge_idx[0]] - tr_window_idx[tr_rising_edge_idx[0]]) * STATE_TIME
+        rf_pulse_idx = np.nonzero(rf_pulse)[0]
+        rf_pulse_edge_idx = _rising_edge_idx(rf_pulse_idx)
+        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * STATE_TIME
         npulses = len(rf_pulse_edge_idx)
 
         # extract per-pulse phase coding masks
@@ -188,11 +196,14 @@ class register_seq_handler(dmsg_handler):
             phase_masks.append(phase_mask[pstart:pend])
         
         # add sequence to sequence list..
-        seq = sequence(channel, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, self.ctrlprm)
+        seq = sequence(npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, self.ctrlprm)
         sequence_list.append(seq)
 
+# function to get the indexes of rising edges going from zero to a nonzero value in array ar
 def _rising_edge_idx(ar):
-    return np.nonzero(np.diff(np.insert(ar, 0, -1)) - 1)
+    ar = np.insert(ar, 0, -2)
+    edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
+    return edges[edges > 0]
 
 # returns the run length of a pulse in array ar starting at index idx
 def _pulse_len(ar, idx):
@@ -205,14 +216,15 @@ def _pulse_len(ar, idx):
 
 class ctrlprog_ready_handler(dmsg_handler):
     def process(self):
-        # TODO: something here
-        # when is 
         self._recv_ctrlprm()
-        #r = client.radar - 1
-        #c = client.channel - 1
-
-        #rx.ready_client(&client);
+        # TODO: configure per-beam phase shifts and per-beam beamforming vectors
+        # I handle all this setup when the sequences are registered..?
         #tx.ready_client(&client);
+        # c code sets up time_delays and tx)freqs here
+        # okay, so here I configure per-beam information 
+        #     tx_freqs[client->radar-1].push_back(1e3*client->tfreq);
+        # time_delays[client->radar-1].push_back(10*(16/2-client->tbeam)); //10 ns per antenna per beam
+
         '''
         if ((ready_index[r][c]>=0) && (ready_index[r][c] <maxclients) ) {
             clients[ready_index[r][c]]=client;
@@ -222,15 +234,16 @@ class ctrlprog_ready_handler(dmsg_handler):
             ready_index[r][c]=numclients;
             numclients=(numclients+1);
         }
+        if numclients >= MAXCLIENTS:
+            msg.status = -2;
+            numclients = numclients % MAXCLIENTS;
+
         '''
         #index=client.current_pulseseq_index;
 
         #tx.unpack_pulseseq(index);
 
-        if numclients >= MAXCLIENTS:
-            msg.status = -2;
-            numclients = numclients % MAXCLIENTS;
-        
+                
 class ctrlprog_end_handler(dmsg_handler):
     def process(self):
         self._recv_ctrlprm()
@@ -284,17 +297,11 @@ class trigger_handler(dmsg_handler):
 
 class posttrigger_handler(dmsg_handler):
     def process(self):
-        numclients = 0
-
-        #tx.clear_channel_list(); clear list of tx_freqs and time_delays (time delay between adjacent antennas)
-        #rx.clear_channel_list(); clear list of rx frequency offsets? 
-        #ready_index[r][c]=-1;
+        # todo: For each sequence, clear tx_time_delay, rx_time_delay, tx_freq, and rx_freq 
+        pass
 
 class recv_get_data_handler(dmsg_handler):
     def dump_raw(self):
-        pass
-
-
         # TODO: port to python..
         '''
         int32_t nants = rx.get_num_ants_per_radar();
@@ -346,12 +353,14 @@ class recv_get_data_handler(dmsg_handler):
         int64_t tdump = 1000000 * (tdumpend.tv_sec - tdumpstart.tv_sec) + (tdumpend.tv_usec
         std::cout << "raw data transmission time (us) : " << tdump << "\n";
         '''
-    
+        pass
+
     # get_data, get samples for radar/channel 
     def process(self):
         self._recv_ctrlprm()
-
-        if not len(sequence_length):
+        
+        # TODO: wtf is this?
+        if not len(sequence_list):
             self.status = CMD_ERROR
         
         transmit_dtype(self.arbysock, self.status) 
@@ -372,7 +381,7 @@ class recv_get_data_handler(dmsg_handler):
                     warnings.warn('USRP driver status {} in GET_DATA'.format(rx_status))
                     self.status = USRP_DRIVER_ERROR
                     
-            # grap samples
+            # grab samples
             for usrpsock in self.usrpsocks:
                 # receive antennas controlled by usrp driver
                 nantennas = recv_dtype(usrpsock, np.uint16)
@@ -382,17 +391,11 @@ class recv_get_data_handler(dmsg_handler):
                     back_samples[ant][:] = recv_dtype(usrpsock, np.float64, self.ctrlprm['number_of_samples'])
 
             # TODO: create beamform_main, a complex vector NANTS long with the phasing 
+            beamform_main = np.ones(len(MAIN_ANTENNAS))
+            beamform_back = np.ones(len(MAIN_ANTENNAS))
             # could be per-channel, I suppose
             # do rx beamforming
             # if this bottlenecks, it should be straightforward to vectorize..
-            
-            def _complex_i32_pack(isamp, qsamp):
-                i_mask = 0xffff0000
-                q_mask = 0x0000ffff
-                packed_sample = (i_mask & (np.uint16(isamp) << 16)) + (q_mask & np.uint16(qsamp))
-                #client_main[isamp] = ((uint32_t) (temp_main[1] << 16) & 0xffff0000) | ((uint32_t) temp_main[0] & 0x0000ffff);
-                return np.uint32(packed_sample)
-
             for i in range(NBBSAMPLES):
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
@@ -402,8 +405,7 @@ class recv_get_data_handler(dmsg_handler):
                              np.imag(main_samples[ant][i]) * np.imag(beamform_main[ant]) 
                     qtemp += np.real(main_samples[ant][i]) * np.imag(beamform_main[ant]) + \
                              np.imag(main_samples[ant][i]) * np.real(beamform_main[ant])
-                # form i/q packed uint32.. 
-                main_beamformed[i] = _complex_i32_pack(itemp, qtemp)
+                main_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
 
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
@@ -413,7 +415,7 @@ class recv_get_data_handler(dmsg_handler):
                     qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
                              np.imag(back_samples[ant][i]) * np.real(beamform_back[ant])
 
-                back_beamformed[i] = _complex_i32_pack(itemp, qtemp)
+                back_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
 
                 
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
@@ -429,6 +431,7 @@ class recv_get_data_handler(dmsg_handler):
                 self.dump_raw()
             
 
+# TODO: port this..
 class clrfreq_handler(dmsg_handler):
     def process(self):
         self._recv_clrfrqprm()
