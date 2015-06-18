@@ -488,28 +488,37 @@ def kodiak_set_rxfe(handler, rf_settings):
     cmd = usrp_rxfe_setup_command(self.usrpsocks, amp0, amp1, att)
 
 class full_clrfreq_handler(dmsg_handler):
+    # not applicable to USRP setup?
+    # I don't see this used anywhere
     pass
 
 class get_status_handler(dmsg_handler):
     def process(self):
+        # TODO, low priority, send back fault status read from usrps
         pass
 
 class dio_table_settings_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 class gps_get_soft_time_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 class gps_get_event_time_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 class gps_schedule_single_scan_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 class gps_msg_error_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 class gpstrigger_handler(dmsg_handler):
+    # not applicable to USRP setup
     pass
 
 
