@@ -10,10 +10,12 @@ import pdb
 import struct
 import socket
 import argparse
+import configparser
 import mmap
 import sys
 import warnings
 import time
+import uuid
 import posix_ipc
 
 from drivermsg_library import *
@@ -72,20 +74,51 @@ ARBY_COMMAND_STRS = {
 #TODO: cleanup/eliminate global variables
 CMD_ERROR = np.int32(10)
 USRP_DRIVER_ERROR = np.int32(11)
-sequence_list = []
-old_seq_id = 0
-old_beam = -1
 #iseq = 0
 NANTENNAS = 20
 
-def hash_sequence_list(sequence_list):
-    return ''.join([s.__hash__() for s in sequence_list])
 
 def getDriverMsg(arbysock):
     msgtype = recv_dtype(arbysock, np.int32)
     msgstatus = recv_dtype(arbysock, np.int32)
     cmd = {'cmd':msgtype, 'status':msgstatus}
     return cmd
+
+class sequenceManager(object):
+    def __init__(self):
+        self.stored_seq_id = uuid.uuid1() # id of sequence stored 
+        self.loaded_seq_id = uuid.uuid1() # id of sequence sent to cuda_driver 
+        self.iseq = 0 # number of sequence checks since last sequence change
+        self.sequences = [] # list of sequence objects
+        self.beam = -1 
+
+    def addSequence(self, sequence):
+        self.sequences.append(sequence)
+        self.stored_seq_id = uuid.uuid1()
+        self.iseq = 0
+    
+    def getSequence(self, channel):
+        for sequence in self.sequences:
+            if sequence.ctrlprm['channel'] == channel:
+                return channel
+
+        warnings.warn('Sequence for channel {} not found!'.format(channel))
+        return None
+
+    # check if new samples need to be calculated 
+    # sequence changed or beam changed
+    def sequenceUpdateCheck(self, beam):
+        return (self.stored_seq_id != self.loaded_seq_id) or (self.beam != beam)
+        
+    
+    # update sequences loaded id
+    def sequencesLoaded(self, beam = None):
+        if beam:
+            self.beam = beam
+            self.iseq = 0
+        self.loaded_seq_id = self.stored_seq_id
+
+    
 
 class sequence(object):
     def __init__(self, npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, ctrlprm):
@@ -99,36 +132,28 @@ class sequence(object):
         self.ready = True # what is ready flag for?
         self.tx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
         self.rx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
+        self.sequence_id = uuid.uuid1()
     
     # TODO... write this
     def _make_bb_vec(self):
         # create un-phased baseband vector(s)?
         return []
 
-    # TODO: benchmark this and see if it needs to be smarter..
-    def __key(self):
-        return (hash(frozenset(self.ctrlprm.items())), self.pulse_offsets_vector, self.bb_vec, self.phase_mask)
-
-    def __eq__(self, x, y):
-        return type(x) == type(y) and x.__key() == y.__key()
-
-    def __hash__(self):
-        return hash(self.__key())
-
-
 class dmsg_handler(object):
-    def __init__(self, arbysock, usrpsocks, cudasocks):
+    def __init__(self, arbysock, usrpsocks, cudasocks, config, sequence_manager):
         self.arbysock = arbysock
         self.usrpsocks = usrpsocks 
         self.cudasocks = cudasocks 
+        self.config = config
+        self.sequence_manager = sequence_manager 
         self.status = 0;
 
     def process(self):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
     def respond(self):
-        transmit_dtype(self.arbysock(np.int32(0)))
-        transmit_dtype(self.arbysock(np.int32(self.status))
+        transmit_dtype(self.arbysock,np.int32(0))
+        transmit_dtype(self.arbysock,np.int32(self.status))
 
     def _recv_ctrlprm(self):
         ctrlprm = server_ctrlprm()
@@ -199,7 +224,7 @@ class register_seq_handler(dmsg_handler):
         
         # add sequence to sequence list..
         seq = sequence(npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, self.ctrlprm)
-        sequence_list.append(seq)
+        self.sequence_manager.addSequence(seq)
 
 # function to get the indexes of rising edges going from zero to a nonzero value in array ar
 def _rising_edge_idx(ar):
@@ -271,22 +296,19 @@ class exit_handler(dmsg_handler):
 
 class pretrigger_handler(dmsg_handler):
     def process(self):
-        # setup for next trigger
-        seq_id = hash_sequence_list(sequence_list)
-        
+        beam = self.ctrlprm['tbeam'] 
+        sequence = self.sequence_manager.getSequence(self.ctrlprm['channel'])
         # provide fresh samples to usrp_driver.cpp shared memory if beam or sequence has changed
-        if (seq_id != old_seq_id) or (self.beam != old_beam):
-            # TODO: iseq = 0
-            cmd = usrp_setup_command(self.usrpsocks, self.channel) # txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):
+        if (self.sequence_manager.sequenceUpdateCheck(beam)):
+            cmd = usrp_setup_command(self.usrpsocks, self.ctrlprm, sequence)
             cmd.transmit()
+            self.sequence_manager.sequencesLoaded(beam)
 
-        old_seq_id = seq_id
-        old_beam = new_beam
-        
-        # TODO: determine bad transmit times?
-        bad_transmit_times_len = np.int32(0)
-        bad_transmit_times_start = np.uint32(np.array([])) # units of usec
-        bad_transmit_times_duration = np.uint32(np.array([])) # units of usec
+        sequence.iseq += 1
+
+        bad_transmit_times_len = np.int32(sequence.npulses)
+        bad_transmit_times_start = np.uint32(sequence.pulse_offsets_vector * 1e6 - 100) # units of usec
+        bad_transmit_times_duration = np.uint32(np.array([600] * sequence.npulses)) # TODO.. don't hardcode.. units of usec
 
         transmit_dtype(self.arbysock, bad_transmit_times_len) 
         transmit_dtype(self.arbysock, bad_transmit_times_start)
@@ -362,9 +384,10 @@ class recv_get_data_handler(dmsg_handler):
     # get_data, get samples for radar/channel 
     def process(self):
         self._recv_ctrlprm()
+        nbb_samples = self.ctrlprm['number_of_samples']
         
-        # TODO: wtf is this?
-        if not len(sequence_list):
+        #  check if any sequences are registered
+        if not len(self.sequence_manager.sequence_list):
             self.status = CMD_ERROR
         
         transmit_dtype(self.arbysock, np.int32(self.status)) 
@@ -373,10 +396,10 @@ class recv_get_data_handler(dmsg_handler):
             cmd = usrp_ready_data_command(self.usrpsocks, self.ctrlprm['channel'])
             # TODO: iseq += 1
             
-            main_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
-            main_beamformed = np.uint32(np.zeros(NBBSAMPLES))
-            back_samples = np.complex64(np.zeros((NANTENNAS, NBBSAMPLES)))
-            main_beamformed = np.uint32(np.zeros(NBBSAMPLES))
+            main_samples = np.complex64(np.zeros((NANTENNAS, nbb_samples)))
+            main_beamformed = np.uint32(np.zeros(nbb_samples))
+            back_samples = np.complex64(np.zeros((NANTENNAS, nbb_samples)))
+            main_beamformed = np.uint32(np.zeros(nbb_samples))
             
             # check status of usrp drivers
             for usrpsock in self.usrpsocks:
@@ -391,8 +414,8 @@ class recv_get_data_handler(dmsg_handler):
                 nantennas = recv_dtype(usrpsock, np.uint16)
                 antennas = np.recv_dtype(usrpsock, np.uint16, nantennas)
                 for ant in antennas: 
-                    main_samples[ant][:] = recv_dtype(usrpsock, np.float64, self.ctrlprm['number_of_samples']) # TODO: check data type!?
-                    back_samples[ant][:] = recv_dtype(usrpsock, np.float64, self.ctrlprm['number_of_samples'])
+                    main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
+                    back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
 
             # TODO: create beamform_main, a complex vector NANTS long with the phasing 
             beamform_main = np.ones(len(MAIN_ANTENNAS))
@@ -400,7 +423,7 @@ class recv_get_data_handler(dmsg_handler):
             # could be per-channel, I suppose
             # do rx beamforming
             # if this bottlenecks, it should be straightforward to vectorize..
-            for i in range(NBBSAMPLES):
+            for i in range(nbb_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
                 
@@ -545,8 +568,13 @@ dmsg_handlers = {\
     CLEAN_EXIT : exit_handler}
 
 def main():
-    # TODO: read in config information
+    # read in config information
+    usrp_config = configparser.ConfigParser()
+    usrp_config.read('usrp_config.ini')
     
+    # list of registered sequences
+    sequence_list = []
+
     # open USRPs drvers and initialize them
     usrp_drivers = ['localhost'] # computers to talk to for cuda
     usrp_driver_socks = []
@@ -555,6 +583,7 @@ def main():
     cuda_driver_socks = []
 
     arby_server = 'localhost' # hostname arby server..
+        
 
     # open arby server socket
     try:
@@ -593,7 +622,7 @@ def main():
         if(VERBOSE):
             print('received {} command from arbyserver, processing'.format(ARBY_COMMAND_STRS[chr(dmsg['cmd'])]))
         try:
-            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks)
+            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks, usrp_config, sequence_list)
         except KeyError:
             # TODO: recover..
             warnings.warn("Warning, unrecognized arbyserver command: {}".format(dmsg['cmd']))

@@ -165,7 +165,7 @@ class cuda_setup_command(driver_command):
 
 
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):
+    def __init__(self, usrps, ctrlprm, sequence_manager)
         driver_command.__init__(self, usrps, UHD_SETUP)
 
         self.queue(txfreq, np.float64, 'txfreq')

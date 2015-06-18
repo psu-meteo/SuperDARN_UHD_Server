@@ -61,7 +61,6 @@ def send_servercmd(sock, cmd, status = 0):
   
 class ServerTestCases(unittest.TestCase):
     def setUp(self):
-        print('setting up uhdserver')
         time.sleep(1)
         self.arbysockserver = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.arbysockserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
@@ -85,7 +84,6 @@ class ServerTestCases(unittest.TestCase):
         (self.cudasock, addr) = self.cudasockserver.accept()
     
     def tearDown(self):
-        print('tearing down uhdserver')
         stop_uhdserver(self.arbysock)
         self.arbysock.close()
         self.usrpsock.close()

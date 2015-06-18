@@ -317,6 +317,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 // TODO: send int32_t status
                 // TODO: send number of antennas
                 // TODO: send antennas 
+                // TODO: send back data..
                 unlock_semaphore(swing);
                 state = ST_READY; 
                 break;

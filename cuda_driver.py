@@ -55,7 +55,8 @@ class cudamsg_handler(object):
     def process(self):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
-# get infomation about transmit pulse sequences, assemble tx pulse samples and setup shared memory for rx
+# get infomation about a transmit pulse sequence channel
+# assemble tx pulse samples and setup shared memory for rx
 # expect information about all pulse sequences..
 class cuda_setup_handler(cudamsg_handler):
     def process(self):
@@ -65,6 +66,8 @@ class cuda_setup_handler(cudamsg_handler):
         
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
+
+        # TODO: ..  fix everything
         pdb.set_trace() 
         fc = cmd.payload['txfreq']
         fsamp = cmd.payload['txrate']
