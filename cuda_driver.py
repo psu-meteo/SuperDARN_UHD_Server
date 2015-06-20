@@ -68,18 +68,19 @@ class cuda_setup_handler(cudamsg_handler):
         cmd.receive(self.sock)
 
         # TODO: ..  fix everything
-        pdb.set_trace() 
-        fc = cmd.payload['txfreq']
-        fsamp = cmd.payload['txrate']
-        tdelay = cmd.payload['time_delay'] 
-        trise = cmd.payload['trise']
+        sequence = cmd.sequence
+
+        beam = sequence.ctrlprm['beam']
+        fc = sequence.ctrlprm['txfreq'] * 1e3
+        bbrate = sequence.ctrlprm['baseband_samplerate'] 
+        trise = sequence.ctrlprm['trise']
+
         pdb.set_trace()
 
-        # TODO: pass in trise
         # TODO: pass in tpulse
         # TODO: pass in baud
 
-        self.gpu.generate_bbtx(seqbuf, trise)
+        self.gpu.generate_bbtx(trise)
         samples = self.gpu.interpolate_and_multiply(fc, nchannels)
 
         tx_shm_list[SIDEA].seek(0)
@@ -165,7 +166,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self)
+    def __init__(self):
         with open('rx_cuda.cu', 'r') as f:
             self.cu_rx = pycuda.compiler.SourceModule(f.read())
             self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
@@ -281,21 +282,29 @@ class ProcessingGPU(object):
         pulse = np.ones(tpulse * txrate)
         pulsesamps = np.concatenate([padding, pulse, padding])
 
-
-        # apply phase coding filter 
-        # because of polarization and the possibility of mimo, this is a function of antenna and channel
-        # may not necessarily be +/- 180 degrees..
-        # mask of complex numbers for phase rotation..
-        phase_mask = np.complex64(np.ones([nantennas, nchannels, npulses, nsamples]))
-        # TODO: generate phase mask...
-
-        # bb_vec is [nantennas, nchannels, npulses, nsamples]
-        bb_vec = phase_mask[:,:,:] * pulsesamps
+        # construct baseband tx sample array
+        bbtx = np.zeros((NANTENNAS, NPULSES, NSAMPLES))
         
-        if shapefilter != None:
-            bb_vec = shapefilter(bb_vec)
+        
+        for ant in NANTENNAS:
+            for pulse in NPULSES:
+                pdb.set_trace()
+                # compute pulse, apply phase shift
+                psamp = pulsesamps * phase_mask[ant][pulse]
+                
+                # apply filtering function
+                if shapefilter != None:
+                    psamp = shapefilter(psamp)
+                
+                # apply phasing here?
+                # psamp = psamp * self.tx_time_delay_main * something
+                # store..
+                bbtx[ant][pulse] = psamp
+        
+        self.tx_bb_indata = bb_vec
 
         '''
+        filter code from c.. break out into functions or use numpy/scipy functions
     std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
     std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
 
@@ -338,7 +347,6 @@ class ProcessingGPU(object):
     }
 
         '''
-        self.tx_bb_indata = bb_vec
 
     def _set_mixerfreqs(self, fc, nchannels):
         mixer_freqs = np.float64([2 * np.pi * (self.fsamptx - fc[i]) / self.fsamptx for i in range(nchannels)])

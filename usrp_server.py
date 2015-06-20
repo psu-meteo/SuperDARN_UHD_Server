@@ -25,7 +25,8 @@ from socket_utils import *
 
 VERBOSE = 0
 STATE_TIME = 5 # microseconds
-
+NANTENNAS_MAIN = 2
+NANTENNAS_BACK = 0
 # arby server commands
 REGISTER_SEQ = '+'
 CTRLPROG_READY = '1'
@@ -75,8 +76,6 @@ ARBY_COMMAND_STRS = {
 CMD_ERROR = np.int32(10)
 USRP_DRIVER_ERROR = np.int32(11)
 #iseq = 0
-NANTENNAS = 20
-
 
 def getDriverMsg(arbysock):
     msgtype = recv_dtype(arbysock, np.int32)
@@ -118,27 +117,25 @@ class sequenceManager(object):
             self.iseq = 0
         self.loaded_seq_id = self.stored_seq_id
 
-    
 
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
-        self.nbb_samples = nbb_samples 
         self.pulse_offsets_vector = pulse_offsets_vector
-        self.priority = self.ctrlprm['priority']
-        self.bb_vec = self._make_bb_vec()
-        self.phase_mask = phase_masks
+        self.pulse_lens = pulse_lens
+        self.phase_masks = phase_masks
+        self.pulse_masks = pulse_masks
         self.ready = True # what is ready flag for?
-        self.tx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
-        self.rx_time_delay = np.zeros(NANTENNAS) # time delay to apply to beams for phasing, in nanoseconds
+
+        # TODO: number of antennas shouldn't be hardcoded
+        # TODO: also, calculate proper delays..
+        self.tx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
+        self.rx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
+        self.tx_time_delay_back = np.zeros(NANTENNAS_BACK) # time delay to apply to beams for phasing, in nanoseconds
+        self.rx_time_delay_back = np.zeros(NANTENNAS_BACK) # time delay to apply to beams for phasing, in nanoseconds
         self.sequence_id = uuid.uuid1()
     
-    # TODO... write this
-    def _make_bb_vec(self):
-        # create un-phased baseband vector(s)?
-        return []
-
 class dmsg_handler(object):
     def __init__(self, arbysock, usrpsocks, cudasocks, config, sequence_manager):
         self.arbysock = arbysock
@@ -204,7 +201,7 @@ class register_seq_handler(dmsg_handler):
         smsep = (sample_idx[2] - sample_idx[1] + 1) * STATE_TIME
         nbb_samples = len(sample_idx)
         
-        # extract pulse timing
+        # extract pulse start timing
         tr_window_idx = np.nonzero(tr_window)[0]
         tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
         pulse_offsets_vector = tx_tsg_step * tr_rising_edge_idx 
@@ -215,15 +212,19 @@ class register_seq_handler(dmsg_handler):
         tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * STATE_TIME
         npulses = len(rf_pulse_edge_idx)
 
-        # extract per-pulse phase coding masks
+        # extract per-pulse phase coding and transmit pulse masks
         phase_masks = []
+        pulse_masks = []
+        pulse_lens = []
         for i in range(npulses):
             pstart = rf_pulse_edge_idx[i] 
             pend = pstart + _pulse_len(rf_pulse, pstart)
             phase_masks.append(phase_mask[pstart:pend])
+            pulse_masks.append(rf_pulse[pstart:pend])
+            pulse_lens.append((pend - pstart) * STATE_TIME) 
         
         # add sequence to sequence list..
-        seq = sequence(npulses, tr_to_pulse_delay, nbb_samples, pulse_offsets_vector, phase_masks, self.ctrlprm)
+        seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
         self.sequence_manager.addSequence(seq)
 
 # function to get the indexes of rising edges going from zero to a nonzero value in array ar
@@ -316,7 +317,7 @@ class pretrigger_handler(dmsg_handler):
 
 class trigger_handler(dmsg_handler):
     def process(self):
-        if len(sequences):
+        if len(self.sequence_manager.sequences):
             cmd = usrp_trigger_pulse_command(self.usrpsocks)
             cmd.transmit()
 
@@ -387,7 +388,7 @@ class recv_get_data_handler(dmsg_handler):
         nbb_samples = self.ctrlprm['number_of_samples']
         
         #  check if any sequences are registered
-        if not len(self.sequence_manager.sequence_list):
+        if not len(self.sequence_manager.sequences):
             self.status = CMD_ERROR
         
         transmit_dtype(self.arbysock, np.int32(self.status)) 
@@ -396,9 +397,9 @@ class recv_get_data_handler(dmsg_handler):
             cmd = usrp_ready_data_command(self.usrpsocks, self.ctrlprm['channel'])
             # TODO: iseq += 1
             
-            main_samples = np.complex64(np.zeros((NANTENNAS, nbb_samples)))
+            main_samples = np.complex64(np.zeros((NANTENNAS_MAIN, nbb_samples)))
             main_beamformed = np.uint32(np.zeros(nbb_samples))
-            back_samples = np.complex64(np.zeros((NANTENNAS, nbb_samples)))
+            back_samples = np.complex64(np.zeros((NANTENNAS_BACK, nbb_samples)))
             main_beamformed = np.uint32(np.zeros(nbb_samples))
             
             # check status of usrp drivers
@@ -573,7 +574,7 @@ def main():
     usrp_config.read('usrp_config.ini')
     
     # list of registered sequences
-    sequence_list = []
+    sequence_manager = sequenceManager()
 
     # open USRPs drvers and initialize them
     usrp_drivers = ['localhost'] # computers to talk to for cuda
@@ -622,7 +623,7 @@ def main():
         if(VERBOSE):
             print('received {} command from arbyserver, processing'.format(ARBY_COMMAND_STRS[chr(dmsg['cmd'])]))
         try:
-            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks, usrp_config, sequence_list)
+            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks, usrp_config, sequence_manager)
         except KeyError:
             # TODO: recover..
             warnings.warn("Warning, unrecognized arbyserver command: {}".format(dmsg['cmd']))

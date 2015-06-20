@@ -142,30 +142,23 @@ class cuda_process_command(driver_command):
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_setup_command(driver_command):
-    def __init__(self, cudas, txfreq = 0, rxfreq = 0, txrate = 0, rxrate = 0, npulses = 0, num_requested_samples = 0, pulse_offsets_vector = 0):
+    def __init__(self, cudas, sequence, beam):
         driver_command.__init__(self, cudas, CUDA_SETUP)
-
-        self.queue(txfreq, np.float64, 'txfreq')
-        self.queue(rxfreq, np.float64, 'rxfreq')
-        self.queue(txrate, np.float64, 'txrate')
-        self.queue(rxrate, np.float64, 'rxrate')
-        self.queue(npulses, np.uint32, 'npulses')
-        self.queue(num_requested_samples, np.uint64, 'num_requested_samples')
-        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector', nitems = npulses) # vector.. TODO: figure out how this works
-
+        self.sequence = sequence
+        self.queue(beam, np.float64, 'beam')
+        
     def receive(self, sock):
-        for item in self.dataqueue:
-            self.payload[item.name] = item.receive(sock)
+        super().receive(sock)
+        self.sequence = pickle_recv(sock)
 
-            # a bit convoluted.. populate pulse_offsets_vector length with value for npulses
-            if item.name == 'npulses':
-                for data in self.dataqueue:
-                    if data.name == 'pulse_offsets_vector':
-                        data.nitems = self.payload['npulses']
+    def transmit(self, sock):
+        super().transmit(sock)
+        pickle_send(sock, self.sequence)
 
+       
 
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, ctrlprm, sequence_manager)
+    def __init__(self, usrps, ctrlprm, sequence_manager):
         driver_command.__init__(self, usrps, UHD_SETUP)
 
         self.queue(txfreq, np.float64, 'txfreq')

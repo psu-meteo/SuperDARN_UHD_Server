@@ -14,7 +14,7 @@ import usrp_server
 from drivermsg_library import *
 from socket_utils import *
 HOST = '127.0.0.1'
-START_SERVER = True 
+START_SERVER = False 
 
 
 S_BIT = np.uint8(0x01) # sample impulses 
@@ -92,7 +92,7 @@ class ServerTestCases(unittest.TestCase):
         self.usrpsockserver.close()
         self.cudasockserver.close()
         time.sleep(1)
-    
+    ''' 
     def test_wait(self):
         send_servercmd(self.arbysock, usrp_server.WAIT)
 
@@ -106,7 +106,7 @@ class ServerTestCases(unittest.TestCase):
         drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-    
+    ''' 
     def test_registerseq(self):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
 
@@ -187,7 +187,8 @@ class ServerTestCases(unittest.TestCase):
         drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-
+    
+    '''
     def test_ctrlprgready(self):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_READY)
         
@@ -254,14 +255,12 @@ class ServerTestCases(unittest.TestCase):
         drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         print('get data test complete')
-
     def test_trigger(self):
         send_servercmd(self.arbysock, usrp_server.TRIGGER)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
 
-'''
     def test_pretrigger(self):
         pass
     
@@ -275,6 +274,8 @@ class ServerTestCases(unittest.TestCase):
     
     def test_rxfereset(self):
         pass
+
     '''
+
 if __name__ == '__main__':
     unittest.main()
