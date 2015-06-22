@@ -4,7 +4,6 @@
 //
 // look at boost property tree ini parser for usrp_config.ini..
 // 
-#include <semaphore.h>
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -14,6 +13,9 @@
 #include <signal.h>
 #include <iostream>
 #include <complex>
+#include <semaphore.h>
+#include <time.h>
+#include <fcntl.h>
 
 #include <uhd/types/tune_request.hpp>
 #include <uhd/utils/thread_priority.hpp>
@@ -27,8 +29,6 @@
 #include <boost/format.hpp>
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
-
-#include "msgstructs.h"
 
 #define SETUP_WAIT 1
 #define SWING0 0
@@ -59,55 +59,55 @@ enum driver_states
 namespace po = boost::program_options;
 
 void* open_sample_shm(int32_t ant, int32_t side, int32_t swing, size_t shm_size) {
-    void *shm = NULL;
+    void *pshm = NULL;
     char shm_device[80];
     int32_t shm_fd;
 
     sprintf(shm_device,"/shm_ant_%d_side_%d_swing_%d", ant, side, swing);
     shm_fd = shm_open(shm_device, O_RDWR, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {
-        sprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d", errno);
+        fprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d\n", errno);
     }
     
     if (ftruncate(shm_fd, shm_size) != 0){
-        sprintf(stderr, "ftruncate error!! Shared memory buffer is undersized.\n");
+        fprintf(stderr, "ftruncate error!! Shared memory buffer is undersized.\n");
     }
 
-    shm = mmap((void *)0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (shm == MAP_FAILED) {
-        sprintf(stderr, "MMapping shared memory failed; errno is %d", errno);
+    pshm = mmap((void *)0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (pshm == MAP_FAILED) {
+        fprintf(stderr, "MMapping shared memory failed; errno is %d", errno);
     }
     
     close(shm_fd);    
-    return shm;
+    return pshm;
 }
 
 sem_t* open_sample_semaphore(int32_t ant, int32_t swing) {
     char sem_name[80];
-    sem_t sem;
+    sem_t *sem = NULL;
     sprintf(sem_name,"/semaphore_ant_%d_swing_%d", ant, swing);
     
     sem = sem_open(sem_name, 0);
 
     if (sem == SEM_FAILED) {
         sem = NULL;
-        sprintf(stderr, "Getting a handle to the semaphore failed; errno is %d", errno);
+        fprintf(stderr, "Getting a handle to the semaphore failed; errno is %d", errno);
     }
-    return sem
+    return sem;
 }
 
-void lock_semaphore(int32_t swing, sem_t *sem_arr)
+void lock_semaphore(int32_t swing, sem_t **sem_arr)
 {
     sem_wait(sem_arr[swing]);
 }
 
-void unlock_semaphore(int32_t swing, sem_t *sem_arr)
+void unlock_semaphore(int32_t swing, sem_t **sem_arr)
 {
     sem_post(sem_arr[swing]);
 
 }
 
-uint32_t = toggle_swing(uint32_t swing) {
+uint32_t toggle_swing(uint32_t swing) {
     if (swing == SWING0) {
         return SWING1;
     }
@@ -115,12 +115,12 @@ uint32_t = toggle_swing(uint32_t swing) {
         return SWING0;
     }
     else {
-        sprintf(stderr, "Unknown swing value, reverting to SWING0");
+        fprintf(stderr, "Unknown swing value, reverting to SWING0");
     }
     return SWING0; 
 }
 
-double sock_get_float64(serversock)
+double sock_get_float64(int32_t serversock)
 {
    double d;
    ssize_t status = recv(serversock, &d, sizeof(double), 0)
@@ -129,17 +129,17 @@ double sock_get_float64(serversock)
    }
    return d;
 }
-uint32_t sock_get_uint32(serversock)
+uint32_t sock_get_uint32(int32_t serversock)
 {
    uint32_t d;
-   ssize_t status = recv(serversock, &d, sizeof(uint32_t), 0)
+   ssize_t status = recv(int32_t serversock, &d, sizeof(uint32_t), 0)
    if(status != sizeof(uint32_t)) {
         fprintf(stderr, "error receiving uint32_t");
    }
    return d;
 }
 
-uint64_t sock_get_uint64(serversock)
+uint64_t sock_get_uint64(int32_t serversock)
 {
    uint64_t d;
    ssize_t status = recv(serversock, &d, sizeof(uint64_t), 0)
@@ -149,7 +149,7 @@ uint64_t sock_get_uint64(serversock)
    return d;
 }
 
-uint8_t sock_get_uint8(serversock)
+uint8_t sock_get_uint8(int32_t serversock)
 {
    uint8_t d;
    ssize_t status = recv(serversock, &d, sizeof(uint8_t), 0)
