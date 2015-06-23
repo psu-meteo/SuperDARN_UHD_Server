@@ -14,7 +14,7 @@ import usrp_server
 from drivermsg_library import *
 from socket_utils import *
 HOST = '127.0.0.1'
-START_SERVER = False 
+START_SERVER = True 
 
 
 S_BIT = np.uint8(0x01) # sample impulses 

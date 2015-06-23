@@ -297,7 +297,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
                 else {
                     state = ST_PULSE;
-                    lock_semaphore(swing);
+                    lock_semaphore(swing, sem_arr);
                     // todo: num_requested_samples
                     start_time = usrp->get_time_now() + START_OFFSET;
 
@@ -318,13 +318,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 // TODO: send number of antennas
                 // TODO: send antennas 
                 // TODO: send back data..
-                unlock_semaphore(swing);
+                unlock_semaphore(swing, sem_arr);
                 state = ST_READY; 
                 break;
 
             case CLRFREQ:
-                
                // TODO: synchronize clr_freq scan.. 
+               /*
                rx_clrfreq_rval= recv_clr_freq(
                                 usrp,
                                 rx_stream,
@@ -335,6 +335,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                                 10,
                                 &pwr2.front()); 
                 // TODO: send back raw samples for beamforming on server
+                */
+                break;
 
             default:
                 break;

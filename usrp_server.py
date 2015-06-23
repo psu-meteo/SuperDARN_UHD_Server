@@ -130,6 +130,7 @@ class sequence(object):
 
         # TODO: number of antennas shouldn't be hardcoded
         # TODO: also, calculate proper delays..
+        # so, calculate delay in nanoseconds as a function of beam number
         self.tx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
         self.rx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
         self.tx_time_delay_back = np.zeros(NANTENNAS_BACK) # time delay to apply to beams for phasing, in nanoseconds
@@ -585,7 +586,6 @@ def main():
 
     arby_server = 'localhost' # hostname arby server..
         
-
     # open arby server socket
     try:
         arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
