@@ -25,8 +25,10 @@ from socket_utils import *
 
 VERBOSE = 0
 STATE_TIME = 5 # microseconds
-NANTENNAS_MAIN = 2
-NANTENNAS_BACK = 0
+
+MAXANTENNAS_MAIN = 32
+MAXANTENNAS_BACK = 4
+
 # arby server commands
 REGISTER_SEQ = '+'
 CTRLPROG_READY = '1'
@@ -119,7 +121,7 @@ class sequenceManager(object):
 
 
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
@@ -128,13 +130,30 @@ class sequence(object):
         self.pulse_masks = pulse_masks
         self.ready = True # what is ready flag for?
 
-        # TODO: number of antennas shouldn't be hardcoded
-        # TODO: also, calculate proper delays..
-        # so, calculate delay in nanoseconds as a function of beam number
-        self.tx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
-        self.rx_time_delay_main = np.zeros(NANTENNAS_MAIN) # time delay to apply to beams for phasing, in nanoseconds
-        self.tx_time_delay_back = np.zeros(NANTENNAS_BACK) # time delay to apply to beams for phasing, in nanoseconds
-        self.rx_time_delay_back = np.zeros(NANTENNAS_BACK) # time delay to apply to beams for phasing, in nanoseconds
+        # time delays to apply to beams for phasing, in nanoseconds
+        self.tx_phase_main = np.zeros(MAXANTENNAS_MAIN) 
+        self.rx_phase_main = np.zeros(MAXANTENNAS_MAIN) 
+        self.tx_phase_back = np.zeros(MAXANTENNAS_BACK)
+        self.rx_phase_back = np.zeros(MAXANTENNAS_BACK)
+        
+        # determine phase delay offsets for array
+        tfreq = self.ctrlprm['tfreq']
+        rfreq = self.ctrlprm['rfreq']
+        beam = self.ctrlprm['tbeam']
+
+        if rfreq and rfreq != tfreq:
+            warnings.warn('rfreq != tfreq, this behavior is not yet supported')
+            sys.exit(1)
+
+        for usrp in usrp_config:
+            pos = usrp['x_position']
+            if usrp['mainarray']:
+                phase_delay = beam * pos
+                self.tx_phase_main[usrp['antennaidx']] = 
+                self.rx_phase_main[usrp['antennaidx']] = 
+            else:
+                self.tx_phase_back[usrp['antennaidx']] = 
+                self.rx_phase_back[usrp['antennaidx']] = 
         self.sequence_id = uuid.uuid1()
     
 class dmsg_handler(object):
@@ -455,7 +474,7 @@ class recv_get_data_handler(dmsg_handler):
             # send samples over socket for self.channel on main and back array
             transmit_dtype(self.arbysock, main_beamformed, self.ctrlprm['number_of_samples']) # TODO: send main data for channel
             transmit_dtype(self.arbysock, back_beamformed, self.ctrlprm['number_of_samples']) # TODO: send back data for channel
-           
+            
             if (DUMP_RAW):
                 self.dump_raw()
             
