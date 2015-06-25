@@ -128,9 +128,9 @@ class sequence(object):
         self.pulse_lens = pulse_lens
         self.phase_masks = phase_masks
         self.pulse_masks = pulse_masks
-        self.ready = True # what is ready flag for?
+        self.ready = True # TODO: what is ready flag for?
 
-        # time delays to apply to beams for phasing, in nanoseconds
+        # phase shift to apply to beams for phasing # TODO: units?
         self.tx_phase_main = np.zeros(MAXANTENNAS_MAIN) 
         self.rx_phase_main = np.zeros(MAXANTENNAS_MAIN) 
         self.tx_phase_back = np.zeros(MAXANTENNAS_BACK)
@@ -144,24 +144,34 @@ class sequence(object):
         if rfreq and rfreq != tfreq:
             warnings.warn('rfreq != tfreq, this behavior is not yet supported')
             sys.exit(1)
-
+    
         for usrp in usrp_config:
-            pos = usrp['x_position']
-            if usrp['mainarray']:
-                phase_delay = beam * pos
-                self.tx_phase_main[usrp['antennaidx']] = 
-                self.rx_phase_main[usrp['antennaidx']] = 
+            if usrp == 'DEFAULT':
+                continue
+            if not 'x_position' in usrp_config[usrp]:
+                warnings.warn('Antenna location for usrp {} not specified with x_position entry in usrp_config.ini, skipping..'.format(usrp))
+                continue
+
+            pos = usrp_config.getfloat(usrp, 'x_position')
+            aidx = usrp_config.getint(usrp, 'array_idx')
+
+            # TODO: fix phase delay calculation...
+            phase_delay = beam * pos
+
+            if usrp_config.getboolean(usrp, 'mainarray'):
+                self.tx_phase_main[aidx] = phase_delay 
+                self.rx_phase_main[aidx] = phase_delay
             else:
-                self.tx_phase_back[usrp['antennaidx']] = 
-                self.rx_phase_back[usrp['antennaidx']] = 
+                self.tx_phase_back[aidx] = phase_delay
+                self.rx_phase_back[aidx] = phase_delay
         self.sequence_id = uuid.uuid1()
     
 class dmsg_handler(object):
-    def __init__(self, arbysock, usrpsocks, cudasocks, config, sequence_manager):
+    def __init__(self, arbysock, usrpsocks, cudasocks, usrp_config, sequence_manager):
         self.arbysock = arbysock
         self.usrpsocks = usrpsocks 
         self.cudasocks = cudasocks 
-        self.config = config
+        self.usrp_config = usrp_config
         self.sequence_manager = sequence_manager 
         self.status = 0;
 
@@ -244,7 +254,8 @@ class register_seq_handler(dmsg_handler):
             pulse_lens.append((pend - pstart) * STATE_TIME) 
         
         # add sequence to sequence list..
-        seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
+
+        seq = sequence(self.usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
         self.sequence_manager.addSequence(seq)
 
 # function to get the indexes of rising edges going from zero to a nonzero value in array ar

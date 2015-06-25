@@ -70,27 +70,30 @@ class GPUTestCases(unittest.TestCase):
 
 def start_cudaserver():
     # open up ports..
-    subprocess.Popen(['pkill', '-f', 'cuda_driver.py'])
     time.sleep(.5)
-    subprocess.Popen(['python3', 'cuda_driver.py'])
+    cuda_driver = subprocess.Popen(['python3', 'cuda_driver.py'])
     time.sleep(1)
+    return cuda_driver.pid
 
-def stop_cudaserver(sock):
+def stop_cudaserver(sock, pid):
     # transmit clean exit command
     exitcmd = cuda_exit_command([sock])
     exitcmd.transmit()
+    # kill the process just to be sure..
+    subprocess.Popen(['pkill', str(pid)])
     
 
 class CUDA_ServerTestCases(unittest.TestCase):
     def setUp(self):
         time.sleep(1)
-        #start_cudaserver()
+        self.pid = start_cudaserver()
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.serversock.connect(('localhost', CUDADRIVER_PORT))
 
     def tearDown(self):
-        stop_cudaserver(self.serversock)
+        stop_cudaserver(self.serversock, self.pid)
 
+    '''
     def test_cuda_setup(self):
         # try passing in parameters
         # testing cuda setup
@@ -99,11 +102,10 @@ class CUDA_ServerTestCases(unittest.TestCase):
         setupcmd.transmit()
 
     '''
-
     def test_cuda_exit(self):
         # setUp, tearDown..
         pass
-
+    '''
     def test_cuda_getdata(self):
         # populate shm
         getdata = cuda_get_data_command([self.serversock])

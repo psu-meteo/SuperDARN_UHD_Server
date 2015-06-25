@@ -67,7 +67,6 @@ class cuda_setup_handler(cudamsg_handler):
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
 
-        # TODO: ..  fix everything
         sequence = cmd.sequence
 
         beam = sequence.ctrlprm['beam']
@@ -78,9 +77,9 @@ class cuda_setup_handler(cudamsg_handler):
         pdb.set_trace()
 
         # TODO: pass in tpulse
-        # TODO: pass in baud
 
-        self.gpu.generate_bbtx(trise)
+        self.generate_bbtx(trise)
+        self.gpu.tx_bb_indata = self.bb_vec # TODO: check data type..
         samples = self.gpu.interpolate_and_multiply(fc, nchannels)
 
         tx_shm_list[SIDEA].seek(0)
@@ -90,6 +89,83 @@ class cuda_setup_handler(cudamsg_handler):
         rx_semaphore_list[SWING0].release()
         rx_semaphore_list[SWING1].release()
         tx_semaphore_list[SIDEA].release()
+ 
+    def generate_bbtx(self, bbrate, npulses, trise, nbaud = 1, shapefilter = None):
+        # calculate number of baseband samples per pulse
+        # tpulse is the pulse time in seconds
+        # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
+        # txrate is the transmit baseband rate 
+        nsamples = (tpulse + 2 * tbuffer) * txrate
+        padding = np.zeros(tbuffer * txrate)
+        pulse = np.ones(tpulse * txrate)
+        pulsesamps = np.concatenate([padding, pulse, padding])
+
+        # construct baseband tx sample array
+        bbtx = np.zeros((NANTENNAS, NPULSES, NSAMPLES))
+        
+        
+        for ant in NANTENNAS:
+            for pulse in NPULSES:
+                pdb.set_trace()
+                # compute pulse, apply phase shift
+                psamp = pulsesamps * phase_mask[ant][pulse]
+                
+                # apply filtering function
+                if shapefilter != None:
+                    psamp = shapefilter(psamp)
+                
+                # apply phasing here?
+                # psamp = psamp * self.tx_time_delay_main * something
+                # store..
+                bbtx[ant][pulse] = psamp
+        
+        self.bb_vec = bb_vec
+
+        '''
+        filter code from c.. break out into functions or use numpy/scipy functions
+    std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
+    std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
+
+    std::complex<float> temp;
+    size_t signal_len = rawsignal.size();
+    size_t taps_len = taps.size();
+
+    /*Calculate taps for Gaussian filter. This is reference code for future u
+    //alpha = 32*(9.86/(2e-8*client.trise)) / (0.8328*usrp->get_rx_rate());
+    ////std::cout << "alpha: " << alpha << std::endl;
+    ////for (i=0; i<filter_table_len; i++){
+    ////  filter_table[i] = pow(alpha/3.14,0.5)*pow(M_E, 
+    ////      -1*(alpha)*pow((((float)i-(filter_table_len-1)/2)/filter_table_
+
+    for (size_t i=0; i<taps_len/2; i++){
+            temp = std::complex<float>(0,0);
+            for(size_t j=0; j<taps_len/2+i; j++){
+                    temp += rawsignal[i+j] * taps[taps_len/2-i+j];
+            }
+            //if (i %5 == 0 ) std::cout << i << " " << temp << std::endl;
+            bb_vec[i] = temp;
+    }
+
+    for (size_t i=taps_len/2; i<signal_len-taps_len; i++){
+            temp = std::complex<float>(0,0);
+            for(size_t j=0; j<taps_len; j++){
+                    temp += rawsignal[i+j] * taps[j];
+            }
+            bb_vec[i] = temp;
+            //std::cout << i << " " << temp << std::endl;
+    }
+
+    for (size_t i=signal_len-taps_len; i<signal_len/2; i++){
+            temp = std::complex<float>(0,0);
+            for(size_t j=0; j<signal_len-i; j++){
+                    temp += rawsignal[i+j] * taps[j];
+            }
+            bb_vec[i] = temp;
+            //if (i 5 == 0 ) std::cout << i << " " << temp << std::endl;
+    }
+
+        '''
+
 
 
 # take copy and process data from shared memory, send to usrp_server via socks 
@@ -150,7 +226,7 @@ def create_sem(antenna, swing, side, direction):
 
 def clean_exit():
     for shm in shm_list:
-            posix_ipc.unlink_shared_memory(shm)
+        posix_ipc.unlink_shared_memory(shm)
 
     for sem in sem_list:
         sem.release()
@@ -166,7 +242,21 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self):
+    def __init__(self, maxfreqs = 8, maxants = 16, maxstreams = 2, maxchannels = 4, maxpulses = 16, ntapsrx0 = 50, ntapsrx1 = 200, fsamptx = 10000000):
+        self.max_streams = int(maxstreams)
+        self.nchans = int(maxchannels)
+        self.ntaps0 = int(ntapsrx0)
+        self.ntaps1 = int(ntapsrx1)
+        self.nants = int(maxants)
+        self.npulses = int(maxpulses)
+        self.fsamptx = int(fsamptx)
+        
+        self.tdelays = np.zeros(maxants) # table to account for constant time delay to antenna, e.g cable length difference
+        self.phase_offsets = np.zeros(maxants) # table to account for constant phase offset, e.g 180 degree phase flip
+
+        # dictionaries to map usrp array indexes and sequence channels to indexes 
+        self.channel_to_idx = {}
+
         with open('rx_cuda.cu', 'r') as f:
             self.cu_rx = pycuda.compiler.SourceModule(f.read())
             self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
@@ -181,17 +271,21 @@ class ProcessingGPU(object):
 
                 
         self.streams = [cuda.Stream() for i in range(self.max_streams)]
-    
-    def sequences_setup(self, sequences, usrps, MaxFreqs = 8, MaxAnts = 16, MaxStreams = 2, MaxChannels = 4, MaxPulses = 16, NTapsRX0 = 50, NTapsRX1 = 200, FSampTX = 10000000):
-        self.max_streams = 2
-        self.nchans = MaxChannels
-        self.ntaps0 = NTapsRX0
-        self.ntaps1 = NTapsRX1
-        self.nants = MaxAnts
-        self.npulses = MaxPulses
-        self.fsamptx = FSampTX
-    
+   
+    def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
+        self.tdelays[array_idx] = tdelay
+        self.phase_offsets[array_idx] = phase_offset
+
+    def sequences_setup(self, sequence, usrps):
         # TODO: set these.. look at sequences
+        channel = sequence.ctrlprm['channel']
+
+        if not channel in self.channel_to_idx:
+            self.channel_to_idx[channel] = len(self.channel_to_idx)
+            # TODO: how are channels remove from mapping?
+    
+        cidx = self.channel_to_idx[channel] 
+
         NRFSAMPS_RX = 10000
         NIFSAMPS_RX = 1000
         NBBSAMPS_RX = 20
@@ -199,9 +293,7 @@ class ProcessingGPU(object):
         NBBSAMPS_TX = 200
 
         self.antennas = np.zeros(self.nants)
-        self.tdelays = np.zeros(self.nants)
-        self.phaseoffsets = np.zeros(self.nants)
-
+        
         self.dmrate0 = NRFSAMPS_RX / NIFSAMPS_RX
         self.dmrate1 = NIFSAMPS_RX / NBBSAMPS_RX # TODO: not used?
 
@@ -271,82 +363,6 @@ class ProcessingGPU(object):
         shm.seek(0)
         shm.write(self.tx_rf_outdata)
         shm.flush()
-   
-    def generate_bbtx(self, bbrate, npulses, trise, nbaud = 1, shapefilter = None):
-        # calculate number of baseband samples per pulse
-        # tpulse is the pulse time in seconds
-        # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
-        # txrate is the transmit baseband rate 
-        nsamples = (tpulse + 2 * tbuffer) * txrate
-        padding = np.zeros(tbuffer * txrate)
-        pulse = np.ones(tpulse * txrate)
-        pulsesamps = np.concatenate([padding, pulse, padding])
-
-        # construct baseband tx sample array
-        bbtx = np.zeros((NANTENNAS, NPULSES, NSAMPLES))
-        
-        
-        for ant in NANTENNAS:
-            for pulse in NPULSES:
-                pdb.set_trace()
-                # compute pulse, apply phase shift
-                psamp = pulsesamps * phase_mask[ant][pulse]
-                
-                # apply filtering function
-                if shapefilter != None:
-                    psamp = shapefilter(psamp)
-                
-                # apply phasing here?
-                # psamp = psamp * self.tx_time_delay_main * something
-                # store..
-                bbtx[ant][pulse] = psamp
-        
-        self.tx_bb_indata = bb_vec
-
-        '''
-        filter code from c.. break out into functions or use numpy/scipy functions
-    std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
-    std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
-
-    std::complex<float> temp;
-    size_t signal_len = rawsignal.size();
-    size_t taps_len = taps.size();
-
-    /*Calculate taps for Gaussian filter. This is reference code for future u
-    //alpha = 32*(9.86/(2e-8*client.trise)) / (0.8328*usrp->get_rx_rate());
-    ////std::cout << "alpha: " << alpha << std::endl;
-    ////for (i=0; i<filter_table_len; i++){
-    ////  filter_table[i] = pow(alpha/3.14,0.5)*pow(M_E, 
-    ////      -1*(alpha)*pow((((float)i-(filter_table_len-1)/2)/filter_table_
-
-    for (size_t i=0; i<taps_len/2; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<taps_len/2+i; j++){
-                    temp += rawsignal[i+j] * taps[taps_len/2-i+j];
-            }
-            //if (i %5 == 0 ) std::cout << i << " " << temp << std::endl;
-            bb_vec[i] = temp;
-    }
-
-    for (size_t i=taps_len/2; i<signal_len-taps_len; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<taps_len; j++){
-                    temp += rawsignal[i+j] * taps[j];
-            }
-            bb_vec[i] = temp;
-            //std::cout << i << " " << temp << std::endl;
-    }
-
-    for (size_t i=signal_len-taps_len; i<signal_len/2; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<signal_len-i; j++){
-                    temp += rawsignal[i+j] * taps[j];
-            }
-            bb_vec[i] = temp;
-            //if (i 5 == 0 ) std::cout << i << " " << temp << std::endl;
-    }
-
-        '''
 
     def _set_mixerfreqs(self, fc, nchannels):
         mixer_freqs = np.float64([2 * np.pi * (self.fsamptx - fc[i]) / self.fsamptx for i in range(nchannels)])
@@ -390,7 +406,7 @@ def main():
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
-    antennas = [usrpconfig[usrp]['antenna'] for usrp in usrpconfig.sections()] 
+    antennas = [usrpconfig[usrp]['array_idx'] for usrp in usrpconfig.sections()]  # TODO: fix for back array..
     
     # parse gpu config file
     cudadriverconfig = configparser.ConfigParser()
@@ -402,7 +418,7 @@ def main():
     # initalize cuda stuff
     gpu = ProcessingGPU(**dict(cuda_settings))
     for usrp in usrpconfig.sections():
-        gpu.addusrp(**dict(usrpconfig[usrp]))
+        gpu.addUSRP(**dict(usrpconfig[usrp]))
     
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
