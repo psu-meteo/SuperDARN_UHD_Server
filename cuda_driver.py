@@ -60,49 +60,58 @@ class cudamsg_handler(object):
 # expect information about all pulse sequences..
 class cuda_setup_handler(cudamsg_handler):
     def process(self):
+        # acquire rx/tx semaphores
+        # (don't drag the samples rug out from under an ongoing transmission)
         rx_semaphore_list[SIDEA][SWING0].acquire()
         rx_semaphore_list[SIDEA][SWING1].acquire()
         tx_semaphore_list[SIDEA].acquire()
         
+        # get picked sequence information dict from usrp_server
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
 
-        sequence = cmd.sequence
-
-        beam = sequence.ctrlprm['beam']
-        fc = sequence.ctrlprm['txfreq'] * 1e3
-        bbrate = sequence.ctrlprm['baseband_samplerate'] 
-        trise = sequence.ctrlprm['trise']
-
-        pdb.set_trace()
-
-        # TODO: pass in tpulse
-
-        self.generate_bbtx(trise)
+        self.sequence = cmd.sequence
+    
+        # extract some information from the picked dict, generate baseband samples
+        self.beam = sequence.ctrlprm['beam']
+        self.fc = sequence.ctrlprm['txfreq'] * 1e3
+                self.generate_bbtx(trise)
         self.gpu.tx_bb_indata = self.bb_vec # TODO: check data type..
+
+        # upsample baseband samples on GPU, write samples to shared memory
         samples = self.gpu.interpolate_and_multiply(fc, nchannels)
+        # TODO: for antenna in antennas..
+        # TODO: assumes single polarization
+        for ant in self.antennas:
+            tx_shm_list[ant].seek(0)
+            tx_shm_list[ant].write(samples[ant].tobytes())
 
-        tx_shm_list[SIDEA].seek(0)
-        tx_shm_list[SIDEA].write(samples.tobytes())
-        tx_shm_list[SIDEA].flush()
+        for ant in self.antennas:
+            tx_shm_list[ant].flush()
 
+        # release semaphores
         rx_semaphore_list[SWING0].release()
         rx_semaphore_list[SWING1].release()
         tx_semaphore_list[SIDEA].release()
  
-    def generate_bbtx(self, bbrate, npulses, trise, nbaud = 1, shapefilter = None):
-        # calculate number of baseband samples per pulse
+    def generate_bbtx(self):
         # tpulse is the pulse time in seconds
         # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
-        # txrate is the transmit baseband rate 
-        nsamples = (tpulse + 2 * tbuffer) * txrate
-        padding = np.zeros(tbuffer * txrate)
-        pulse = np.ones(tpulse * txrate)
+        # bbrate is the transmit baseband sample rate 
+
+        bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
+        trise = self.sequence.ctrlprm['trise']
+        tpulse = self.sequence.pulse_lens[0]
+
+        nsamples = (tpulse + 2 * tbuffer) * bbrate
+        padding = np.zeros(tbuffer * bbrate)
+        pulse = np.ones(tpulse * bbrate)
         pulsesamps = np.concatenate([padding, pulse, padding])
+
+        
 
         # construct baseband tx sample array
         bbtx = np.zeros((NANTENNAS, NPULSES, NSAMPLES))
-        
         
         for ant in NANTENNAS:
             for pulse in NPULSES:
@@ -201,7 +210,7 @@ cudamsg_handlers = {\
         CUDA_EXIT: cuda_exit_handler}
 
 
-def sem_namer(antenna, swing, side, direction = 'rx'):
+def sem_namer(swing, side, direction = 'rx'):
     name = 'semaphore_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
     return name
 
@@ -217,8 +226,8 @@ def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
     shm_list.append(name)
     return mapfile
 
-def create_sem(antenna, swing, side, direction):
-    name = sem_namer(antenna, swing, side, direction)
+def create_sem(swing, side, direction):
+    name = sem_namer(swing, side, direction)
     sem = posix_ipc.Semaphore(name, posix_ipc.O_CREAT)
     sem.release()
     sem_list.append(sem)
@@ -424,24 +433,29 @@ def main():
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     cmd_sock.bind((network_settings.get('ServerHost'), network_settings.get('CUDADriverPort')))   
-    
+   
+    # get size of shared memory buffer per-antenna in bytes from cudadriver_config.ini
     rxshm_size = shm_settings.getint('rxshm_size') 
     txshm_size = shm_settings.getint('txshm_size')
-
+    
+    # create shared memory buffers and semaphores for rx and tx
     for ant in args.antennas:
         rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
 
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING0, SIDEA, direction = RXDIR))
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING1, SIDEA, direction = RXDIR))
-        tx_semaphore_list.append(create_sem(ant, SWING0, SIDEA, direction = TXDIR))
+    rx_semaphore_list[SIDEA].append(create_sem(SWING0, SIDEA, direction = RXDIR))
+    rx_semaphore_list[SIDEA].append(create_sem(SWING1, SIDEA, direction = RXDIR))
+    tx_semaphore_list.append(create_sem(SWING0, SIDEA, direction = TXDIR))
+    
+    # create sigin_handler for graceful-ish cleanup on exit
+    signal.signal(signal.SIGINT, sigint_handler)
 
-    signal.signal(signal.SIGINT, sigint_handler)       
-    # TODO: make this more.. robust
+    # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()
-
+    
+    # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
         handler = cudamsg_handlers[cmd](server_conn, gpu)

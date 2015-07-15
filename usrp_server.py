@@ -254,7 +254,6 @@ class register_seq_handler(dmsg_handler):
             pulse_lens.append((pend - pstart) * STATE_TIME) 
         
         # add sequence to sequence list..
-
         seq = sequence(self.usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
         self.sequence_manager.addSequence(seq)
 
