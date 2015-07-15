@@ -32,6 +32,7 @@ SIDEB = 1
 RXDIR = 'rx'
 TXDIR = 'tx'
 
+
 rx_shm_list = [[],[]]
 tx_shm_list = []
 rx_semaphore_list = [[],[]] # [side][swing]
@@ -45,10 +46,14 @@ sem_list = []
 
 swing = SWING0
 
+# returns a complex number from a phase in radians
+def rad_to_rect(rad):
+    return exp(1j * rad)
 
 class cudamsg_handler(object):
-    def __init__(self, serversock, gpu):
+    def __init__(self, serversock, gpu, antennas):
         self.sock = serversock
+        self.antennas = antennas
         self.status = 0
         self.gpu = gpu
 
@@ -75,7 +80,7 @@ class cuda_setup_handler(cudamsg_handler):
         # extract some information from the picked dict, generate baseband samples
         self.beam = sequence.ctrlprm['beam']
         self.fc = sequence.ctrlprm['txfreq'] * 1e3
-                self.generate_bbtx(trise)
+        self.generate_bbtx()
         self.gpu.tx_bb_indata = self.bb_vec # TODO: check data type..
 
         # upsample baseband samples on GPU, write samples to shared memory
@@ -94,7 +99,7 @@ class cuda_setup_handler(cudamsg_handler):
         rx_semaphore_list[SWING1].release()
         tx_semaphore_list[SIDEA].release()
  
-    def generate_bbtx(self):
+    def generate_bbtx(self, shapefilter = None):
         # tpulse is the pulse time in seconds
         # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
         # bbrate is the transmit baseband sample rate 
@@ -102,21 +107,21 @@ class cuda_setup_handler(cudamsg_handler):
         bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
         trise = self.sequence.ctrlprm['trise']
         tpulse = self.sequence.pulse_lens[0]
-
+        npulses = len(self.sequence.pulse_lens)
+        nantennas = len(self.antennas)
+        
         nsamples = (tpulse + 2 * tbuffer) * bbrate
         padding = np.zeros(tbuffer * bbrate)
         pulse = np.ones(tpulse * bbrate)
         pulsesamps = np.concatenate([padding, pulse, padding])
 
-        
-
         # construct baseband tx sample array
-        bbtx = np.zeros((NANTENNAS, NPULSES, NSAMPLES))
+        bbtx = np.complex128(np.zeros((nantennas, npulses, pulsesamps)))
         
-        for ant in NANTENNAS:
-            for pulse in NPULSES:
+        for ant in self.antennas:
+            for pulse in range(npulses):
                 pdb.set_trace()
-                # compute pulse, apply phase shift
+                # compute pulse compression 
                 psamp = pulsesamps * phase_mask[ant][pulse]
                 
                 # apply filtering function
@@ -124,57 +129,11 @@ class cuda_setup_handler(cudamsg_handler):
                     psamp = shapefilter(psamp)
                 
                 # apply phasing here?
-                # psamp = psamp * self.tx_time_delay_main * something
-                # store..
+                beamforming_phase = rad_to_rect(beamforming_shift[bmnum] * ant)
+                psamp *= beamforming_phase 
                 bbtx[ant][pulse] = psamp
         
         self.bb_vec = bb_vec
-
-        '''
-        filter code from c.. break out into functions or use numpy/scipy functions
-    std::vector<float> taps((size_t)(25e3/trise), trise/25.e3/2);
-    std::vector<std::complex<float> > rawsignal(seq_buf[old_index].size());
-
-    std::complex<float> temp;
-    size_t signal_len = rawsignal.size();
-    size_t taps_len = taps.size();
-
-    /*Calculate taps for Gaussian filter. This is reference code for future u
-    //alpha = 32*(9.86/(2e-8*client.trise)) / (0.8328*usrp->get_rx_rate());
-    ////std::cout << "alpha: " << alpha << std::endl;
-    ////for (i=0; i<filter_table_len; i++){
-    ////  filter_table[i] = pow(alpha/3.14,0.5)*pow(M_E, 
-    ////      -1*(alpha)*pow((((float)i-(filter_table_len-1)/2)/filter_table_
-
-    for (size_t i=0; i<taps_len/2; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<taps_len/2+i; j++){
-                    temp += rawsignal[i+j] * taps[taps_len/2-i+j];
-            }
-            //if (i %5 == 0 ) std::cout << i << " " << temp << std::endl;
-            bb_vec[i] = temp;
-    }
-
-    for (size_t i=taps_len/2; i<signal_len-taps_len; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<taps_len; j++){
-                    temp += rawsignal[i+j] * taps[j];
-            }
-            bb_vec[i] = temp;
-            //std::cout << i << " " << temp << std::endl;
-    }
-
-    for (size_t i=signal_len-taps_len; i<signal_len/2; i++){
-            temp = std::complex<float>(0,0);
-            for(size_t j=0; j<signal_len-i; j++){
-                    temp += rawsignal[i+j] * taps[j];
-            }
-            bb_vec[i] = temp;
-            //if (i 5 == 0 ) std::cout << i << " " << temp << std::endl;
-    }
-
-        '''
-
 
 
 # take copy and process data from shared memory, send to usrp_server via socks 
@@ -458,7 +417,7 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
-        handler = cudamsg_handlers[cmd](server_conn, gpu)
+        handler = cudamsg_handlers[cmd](server_conn, gpu, antennas)
         handler.process()
     
 
