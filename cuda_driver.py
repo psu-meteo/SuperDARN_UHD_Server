@@ -51,11 +51,13 @@ def rad_to_rect(rad):
     return exp(1j * rad)
 
 class cudamsg_handler(object):
-    def __init__(self, serversock, gpu, antennas):
+    def __init__(self, serversock, gpu, antennas, array_info, hardware_limits):
         self.sock = serversock
         self.antennas = antennas
         self.status = 0
         self.gpu = gpu
+        self.array_info = array_info
+        self.hardware_limits = hardware_limits
 
     def process(self):
         raise NotImplementedError('The process method for this driver message is unimplemented')
@@ -85,7 +87,6 @@ class cuda_setup_handler(cudamsg_handler):
 
         # upsample baseband samples on GPU, write samples to shared memory
         samples = self.gpu.interpolate_and_multiply(fc, nchannels)
-        # TODO: for antenna in antennas..
         # TODO: assumes single polarization
         for ant in self.antennas:
             tx_shm_list[ant].seek(0)
@@ -107,6 +108,13 @@ class cuda_setup_handler(cudamsg_handler):
         bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
         trise = self.sequence.ctrlprm['trise']
         tpulse = self.sequence.pulse_lens[0]
+        
+        assert tpulse < self.hardware_limits['min_chip'], 'pulse length is too short for hardware'
+        assert tpulse > self.hardware_limits['max_tpulse'], 'pulse length is too long for hardware'
+        assert self.sequence.ctrlprm['tfreq'] * 1000 >= self.hardware_limits['minimum_tfreq'], 'transmit frequency too low for hardware'
+        assert self.sequence.ctrlprm['tfreq'] * 1000 <= self.hardware_limits['maximum_tfreq'], 'transmit frequency too high for hardware'
+        assert sum(self.sequence.pulse_lens) / (self.pulse_offsets_vector[-1] + tpulse) < self.hardware_limits['max_dutycycle'], ' duty cycle of pulse sequence is too high'
+        
         npulses = len(self.sequence.pulse_lens)
         nantennas = len(self.antennas)
         
@@ -114,6 +122,12 @@ class cuda_setup_handler(cudamsg_handler):
         padding = np.zeros(tbuffer * bbrate)
         pulse = np.ones(tpulse * bbrate)
         pulsesamps = np.concatenate([padding, pulse, padding])
+
+        beam_sep = self.array_info['beam_sep'] # degrees
+        nbeams = self.array_info['nbeams'] 
+        x_spacing = self.array_info['x_spacing'] # meters
+        # TODO: calculate beamforming shift..
+        beamforming_shift = [ a * pshift for a in self.antennas)]
 
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, pulsesamps)))
@@ -170,7 +184,7 @@ cudamsg_handlers = {\
 
 
 def sem_namer(swing, side, direction = 'rx'):
-    name = 'semaphore_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+    name = 'semaphore_{}_side_{}_swing_{}'.format(direction, int(side), int(swing))
     return name
 
 def shm_namer(antenna, swing, side, direction = 'rx'):
@@ -382,7 +396,14 @@ def main():
     shm_settings = cudadriverconfig['shm_settings']
     cuda_settings = cudadriverconfig['cuda_settings']
     network_settings = cudadriverconfig['network_settings']
-    
+   
+    # parse array config file
+    arrayconfig = configparser.ConfigParser()
+    arrayconfig = arrayconfig.read('array_config.ini')
+    array_info = arrayconfig('array_info')
+    hardware_limits = arrayconfig('hardware_limits')
+
+
     # initalize cuda stuff
     gpu = ProcessingGPU(**dict(cuda_settings))
     for usrp in usrpconfig.sections():
@@ -417,7 +438,7 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
-        handler = cudamsg_handlers[cmd](server_conn, gpu, antennas)
+        handler = cudamsg_handlers[cmd](server_conn, gpu, antennas, array_info, hardware_limits)
         handler.process()
     
 
