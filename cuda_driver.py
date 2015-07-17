@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # driver to process chunks of samples using CUDA
 # uses shared memory to get samples from usrp_drivers 
 # spawn one cude driver per computer
@@ -32,6 +33,7 @@ SIDEB = 1
 RXDIR = 'rx'
 TXDIR = 'tx'
 
+DEBUG = True
 
 rx_shm_list = [[],[]]
 tx_shm_list = []
@@ -45,6 +47,12 @@ shm_list = []
 sem_list = []
 
 swing = SWING0
+
+# python3 or greater is needed for direct transfers between shm and gpu memory
+if sys.hexversion < 0x030300F0:
+    print('this code requires python 3.3 or greater')
+    sys.exit(0)
+
 
 # returns a complex number from a phase in radians
 def rad_to_rect(rad):
@@ -120,7 +128,6 @@ class cuda_setup_handler(cudamsg_handler):
         
         for ant in self.antennas:
             for pulse in range(npulses):
-                pdb.set_trace()
                 # compute pulse compression 
                 psamp = pulsesamps * phase_mask[ant][pulse]
                 
@@ -170,7 +177,7 @@ cudamsg_handlers = {\
 
 
 def sem_namer(swing, side, direction = 'rx'):
-    name = 'semaphore_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+    name = 'semaphore_{}_side_{}_swing_{}'.format(direction, int(side), int(swing))
     return name
 
 def shm_namer(antenna, swing, side, direction = 'rx'):
@@ -218,9 +225,8 @@ class ProcessingGPU(object):
         self.nants = int(maxants)
         self.npulses = int(maxpulses)
         self.fsamptx = int(fsamptx)
-        
-        self.tdelays = np.zeros(maxants) # table to account for constant time delay to antenna, e.g cable length difference
-        self.phase_offsets = np.zeros(maxants) # table to account for constant phase offset, e.g 180 degree phase flip
+        self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
+        self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
 
         # dictionaries to map usrp array indexes and sequence channels to indexes 
         self.channel_to_idx = {}
@@ -391,14 +397,14 @@ def main():
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    cmd_sock.bind((network_settings.get('ServerHost'), network_settings.get('CUDADriverPort')))   
+    cmd_sock.bind((network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))   
    
     # get size of shared memory buffer per-antenna in bytes from cudadriver_config.ini
     rxshm_size = shm_settings.getint('rxshm_size') 
     txshm_size = shm_settings.getint('txshm_size')
     
     # create shared memory buffers and semaphores for rx and tx
-    for ant in args.antennas:
+    for ant in antennas:
         rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
@@ -410,10 +416,15 @@ def main():
     # create sigin_handler for graceful-ish cleanup on exit
     signal.signal(signal.SIGINT, sigint_handler)
 
+    if(DEBUG):
+        print('cuda_driver waiting for socket connection')
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()
-    
+ 
+    if(DEBUG):
+        print('cuda_driver waiting for command')
+   
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)

@@ -1,7 +1,9 @@
 # library containing constants and functions for passing messages over sockets between c/python and python/python
 import numpy as np
+import uuid
 import collections
 from socket_utils import *
+
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
@@ -18,7 +20,6 @@ NO_COMMAND = ord('n')
 ARBYSERVER_PORT = 55421
 CUDADRIVER_PORT = 55420
 USRPDRIVER_PORT = 55422
-UNKNOWN_ARRAY = 0 # nitems value for a array of unknown length
 
 class driver_command(object):
     # class to help manage sending data 
@@ -189,3 +190,95 @@ class usrp_clrfreq_command(driver_command):
     def __init__(self, usrps):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
         # TODO: what do I need to send here?
+
+
+class sequence(object):
+    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+        self.ctrlprm = ctrlprm
+        self.npulses = npulses
+        self.pulse_offsets_vector = pulse_offsets_vector
+        self.pulse_lens = pulse_lens
+        self.phase_masks = phase_masks
+        self.pulse_masks = pulse_masks
+        self.ready = True # TODO: what is ready flag for?
+
+        # phase shift to apply to beams for phasing # TODO: units?
+        self.tx_phase_main = np.zeros(MAXANTENNAS_MAIN)
+        self.rx_phase_main = np.zeros(MAXANTENNAS_MAIN)
+        self.tx_phase_back = np.zeros(MAXANTENNAS_BACK)
+        self.rx_phase_back = np.zeros(MAXANTENNAS_BACK)
+
+        # determine phase delay offsets for array
+        tfreq = self.ctrlprm['tfreq']
+        rfreq = self.ctrlprm['rfreq']
+        beam = self.ctrlprm['tbeam']
+
+        if rfreq and rfreq != tfreq:
+            warnings.warn('rfreq != tfreq, this behavior is not yet supported')
+            sys.exit(1)
+
+        for usrp in usrp_config:
+            if usrp == 'DEFAULT':
+                continue
+            if not 'x_position' in usrp_config[usrp]:
+                warnings.warn('Antenna location for usrp {} not specified with x_position entry in usrp_config.ini, skipping..'.format(usrp))
+                continue
+
+            pos = usrp_config.getfloat(usrp, 'x_position')
+            aidx = usrp_config.getint(usrp, 'array_idx')
+
+            # TODO: fix phase delay calculation...
+            phase_delay = beam * pos
+
+            if usrp_config.getboolean(usrp, 'mainarray'):
+                self.tx_phase_main[aidx] = phase_delay
+                self.rx_phase_main[aidx] = phase_delay
+            else:
+                self.tx_phase_back[aidx] = phase_delay
+                self.rx_phase_back[aidx] = phase_delay
+        self.sequence_id = uuid.uuid1()
+
+def create_testsequence():
+    # TODO: set stepping of baseband samples, fill in ctrlprm with something reasonable
+
+    ctrlprm = {\
+    'radar' : 0, \
+    'channel' : 0, \
+    'local' : 0, \
+    'priority' : 0, \
+    'current_pulseseq_idx': 0, \
+    'tbeam' : 0, \
+    'tbeamcode' : 0, \
+    'tbeamazm': 0, \
+    'tbeamwidth': 0, \
+    'tfreq': 10000, \
+    'trise': 100, \
+    'number_of_samples' : 0, \
+    'buffer_index' : 0, \
+    'baseband_samplerate' : 1000, \
+    'filter_bandwidth' : 0, \
+    'match_filter' : 0, \
+    'rfreq' : 10000, \
+    'rbeam' : 0, \
+    'rbeamcode' : 0, \
+    'rbeamazm' : 0, \
+    'rbeamwidth' : 0, \
+    'status' : 0}
+        
+    npulses = 3
+
+    tr_to_pulse_delay = 50e-6
+    pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
+
+    step = 5e-6
+    pulse_lens = [300e-6, 300e-6, 300e-6]
+    phase_masks = [np.zeros(p/step) for p in pulse_lens]
+    pulse_masks = [np.ones(p/step) for p in pulse_lens]
+
+
+    usrp_config = configparser.ConfigParser()
+    usrp_config.read('usrp_config.ini')
+
+
+    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
+    return seq
