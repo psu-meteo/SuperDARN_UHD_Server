@@ -5,6 +5,14 @@
 # usrp_server takes arby_server messages and translates them for usrp_drivers
 # usrp_server handles one or more usrp_drivers
 
+import sys
+# python3 or greater is needed for direct transfers between shm and gpu memory
+if sys.hexversion < 0x030300F0:
+    print('This code requires Python 3.3 or greater, exiting..')
+    sys.exit(0)
+
+
+
 import numpy as np
 import pdb
 import struct
@@ -12,7 +20,6 @@ import socket
 import argparse
 import configparser
 import mmap
-import sys
 import warnings
 import time
 import uuid
@@ -78,12 +85,6 @@ ARBY_COMMAND_STRS = {
 CMD_ERROR = np.int32(10)
 USRP_DRIVER_ERROR = np.int32(11)
 #iseq = 0
-
-# python3 or greater is needed for direct transfers between shm and gpu memory
-if sys.hexversion < 0x030300F0:
-    print('this code requires python 3.3 or greater')
-    sys.exit(0)
-
 
 
 def getDriverMsg(arbysock):

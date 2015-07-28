@@ -34,6 +34,7 @@ RXDIR = 'rx'
 TXDIR = 'tx'
 
 DEBUG = True
+C = 3e8
 
 rx_shm_list = [[],[]]
 tx_shm_list = []
@@ -116,11 +117,12 @@ class cuda_setup_handler(cudamsg_handler):
         bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
         trise = self.sequence.ctrlprm['trise']
         tpulse = self.sequence.pulse_lens[0]
-        
+        tfreq = self.sequence.ctrlprm['tfreq'] * 1000
+
         assert tpulse < self.hardware_limits['min_chip'], 'pulse length is too short for hardware'
         assert tpulse > self.hardware_limits['max_tpulse'], 'pulse length is too long for hardware'
-        assert self.sequence.ctrlprm['tfreq'] * 1000 >= self.hardware_limits['minimum_tfreq'], 'transmit frequency too low for hardware'
-        assert self.sequence.ctrlprm['tfreq'] * 1000 <= self.hardware_limits['maximum_tfreq'], 'transmit frequency too high for hardware'
+        assert tfreq >= self.hardware_limits['minimum_tfreq'], 'transmit frequency too low for hardware'
+        assert tfreq <= self.hardware_limits['maximum_tfreq'], 'transmit frequency too high for hardware'
         assert sum(self.sequence.pulse_lens) / (self.pulse_offsets_vector[-1] + tpulse) < self.hardware_limits['max_dutycycle'], ' duty cycle of pulse sequence is too high'
         
         npulses = len(self.sequence.pulse_lens)
@@ -134,8 +136,18 @@ class cuda_setup_handler(cudamsg_handler):
         beam_sep = self.array_info['beam_sep'] # degrees
         nbeams = self.array_info['nbeams'] 
         x_spacing = self.array_info['x_spacing'] # meters
-        # TODO: calculate beamforming shift..
-        beamforming_shift = [ a * pshift for a in self.antennas)]
+        beamnum = self.sequence.ctrlprm['bmnum']
+
+        # calculate beamforming shift..
+        center_beam = (nbeams - 1.0) / 2.
+
+        # calculate beam azimuth, in radians
+        bmazm = np.deg2rad(90 + (beamnum - center_beam) * beam_sep)
+
+        # translate to phase increment
+        wavelength = c / tfreq
+        pshift = (2 * np.pi * x_spacing * np.sin(bmazm)) / wavelength
+        beamforming_shift = [a * pshift for a in self.antennas]
 
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, pulsesamps)))
@@ -149,8 +161,7 @@ class cuda_setup_handler(cudamsg_handler):
                 if shapefilter != None:
                     psamp = shapefilter(psamp)
                 
-                # apply phasing here?
-                beamforming_phase = rad_to_rect(beamforming_shift[bmnum] * ant)
+                beamforming_phase = rad_to_rect(beamforming_shift[ant])
                 psamp *= beamforming_phase 
                 bbtx[ant][pulse] = psamp
         
@@ -405,10 +416,9 @@ def main():
    
     # parse array config file
     arrayconfig = configparser.ConfigParser()
-    arrayconfig = arrayconfig.read('array_config.ini')
-    array_info = arrayconfig('array_info')
-    hardware_limits = arrayconfig('hardware_limits')
-
+    arrayconfig.read('array_config.ini')
+    array_info = arrayconfig['array_info']
+    hardware_limits = arrayconfig['hardware_limits']
 
     # initalize cuda stuff
     gpu = ProcessingGPU(**dict(cuda_settings))

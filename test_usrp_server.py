@@ -1,5 +1,12 @@
 #!/usr/bin/python3
 # test the cuda driver..
+
+import sys
+if sys.hexversion < 0x030300F0:
+    print('This code requires Python 3.3 or greater, exiting..')
+    sys.exit(0)
+
+
 import unittest
 import usrp_server 
 import socket
