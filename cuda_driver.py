@@ -57,7 +57,7 @@ if sys.hexversion < 0x030300F0:
 
 # returns a complex number from a phase in radians
 def rad_to_rect(rad):
-    return exp(1j * rad)
+    return np.exp(1j * rad)
 
 class cudamsg_handler(object):
     def __init__(self, serversock, gpu, antennas, array_info, hardware_limits):
@@ -89,8 +89,8 @@ class cuda_setup_handler(cudamsg_handler):
         self.sequence = cmd.sequence
     
         # extract some information from the picked dict, generate baseband samples
-        self.beam = sequence.ctrlprm['beam']
-        self.fc = sequence.ctrlprm['txfreq'] * 1e3
+        self.beam = self.sequence.ctrlprm['tbeam']
+        self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
         self.generate_bbtx()
         self.gpu.tx_bb_indata = self.bb_vec # TODO: check data type..
 
@@ -111,32 +111,36 @@ class cuda_setup_handler(cudamsg_handler):
  
     def generate_bbtx(self, shapefilter = None):
         # tpulse is the pulse time in seconds
-        # tguard is the time between the T/R gate going high and the start of a rectangular pulse in seconds
         # bbrate is the transmit baseband sample rate 
+        # tfreq is transmit freq in hz
+        # tbuffer is guard time between tr gate and rf pulse in seconds
 
         bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
         trise = self.sequence.ctrlprm['trise']
         tpulse = self.sequence.pulse_lens[0]
         tfreq = self.sequence.ctrlprm['tfreq'] * 1000
+        tbuffer = int(self.hardware_limits['min_tr_to_pulse'])
 
-        assert tpulse < self.hardware_limits['min_chip'], 'pulse length is too short for hardware'
-        assert tpulse > self.hardware_limits['max_tpulse'], 'pulse length is too long for hardware'
-        assert tfreq >= self.hardware_limits['minimum_tfreq'], 'transmit frequency too low for hardware'
-        assert tfreq <= self.hardware_limits['maximum_tfreq'], 'transmit frequency too high for hardware'
-        assert sum(self.sequence.pulse_lens) / (self.pulse_offsets_vector[-1] + tpulse) < self.hardware_limits['max_dutycycle'], ' duty cycle of pulse sequence is too high'
+        assert tbuffer >= int(self.hardware_limits['min_tr_to_pulse']) / 1e6, 'time between TR gate and RF pulse too short for hardware'
+        assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length is too short for hardware'
+        assert tpulse < int(self.hardware_limits['max_tpulse']) / 1e6, 'pulse length is too long for hardware'
+        assert tfreq >= int(self.hardware_limits['minimum_tfreq']), 'transmit frequency too low for hardware'
+        assert tfreq <= int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
+        assert sum(self.sequence.pulse_lens) / (self.sequence.pulse_offsets_vector[-1] + tpulse) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
         npulses = len(self.sequence.pulse_lens)
         nantennas = len(self.antennas)
         
+        # tbuffer is the time between tr gate and transmit pulse 
         nsamples = (tpulse + 2 * tbuffer) * bbrate
         padding = np.zeros(tbuffer * bbrate)
         pulse = np.ones(tpulse * bbrate)
         pulsesamps = np.concatenate([padding, pulse, padding])
 
-        beam_sep = self.array_info['beam_sep'] # degrees
-        nbeams = self.array_info['nbeams'] 
-        x_spacing = self.array_info['x_spacing'] # meters
-        beamnum = self.sequence.ctrlprm['bmnum']
+        beam_sep = float(self.array_info['beam_sep']) # degrees
+        nbeams = int(self.array_info['nbeams'])
+        x_spacing = float(self.array_info['x_spacing']) # meters
+        beamnum = self.sequence.ctrlprm['tbeam']
 
         # calculate beamforming shift..
         center_beam = (nbeams - 1.0) / 2.
@@ -145,18 +149,18 @@ class cuda_setup_handler(cudamsg_handler):
         bmazm = np.deg2rad(90 + (beamnum - center_beam) * beam_sep)
 
         # translate to phase increment
-        wavelength = c / tfreq
+        wavelength = C / tfreq
         pshift = (2 * np.pi * x_spacing * np.sin(bmazm)) / wavelength
         beamforming_shift = [a * pshift for a in self.antennas]
-
+        
         # construct baseband tx sample array
-        bbtx = np.complex128(np.zeros((nantennas, npulses, pulsesamps)))
+        bbtx = np.complex128(np.zeros((nantennas, npulses, len(pulsesamps))))
         
         for ant in self.antennas:
             for pulse in range(npulses):
                 # compute pulse compression 
-                psamp = pulsesamps * phase_mask[ant][pulse]
-                
+                psamp = pulsesamps * self.sequence.phase_masks[ant][pulse]
+                 
                 # apply filtering function
                 if shapefilter != None:
                     psamp = shapefilter(psamp)
@@ -165,7 +169,8 @@ class cuda_setup_handler(cudamsg_handler):
                 psamp *= beamforming_phase 
                 bbtx[ant][pulse] = psamp
         
-        self.bb_vec = bb_vec
+        pdb.set_trace()
+        self.bb_vec = bbtx 
 
 
 # take copy and process data from shared memory, send to usrp_server via socks 
@@ -405,7 +410,7 @@ def main():
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
-    antennas = [usrpconfig[usrp]['array_idx'] for usrp in usrpconfig.sections()]  # TODO: fix for back array..
+    antennas = [int(usrpconfig[usrp]['array_idx']) for usrp in usrpconfig.sections()]  # TODO: fix for back array..
     
     # parse gpu config file
     cudadriverconfig = configparser.ConfigParser()

@@ -143,18 +143,18 @@ class cuda_process_command(driver_command):
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_setup_command(driver_command):
-    def __init__(self, cudas, sequence, beam):
+    def __init__(self, cudas, sequence = None):
         driver_command.__init__(self, cudas, CUDA_SETUP)
         self.sequence = sequence
-        self.queue(beam, np.float64, 'beam')
         
     def receive(self, sock):
         super().receive(sock)
         self.sequence = pickle_recv(sock)
 
-    def transmit(self, sock):
-        super().transmit(sock)
-        pickle_send(sock, self.sequence)
+    def transmit(self):
+        super().transmit()
+        for sock in self.clients:
+            pickle_send(sock, self.sequence)
 
        
 
@@ -198,48 +198,27 @@ class sequence(object):
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens
-        self.phase_masks = phase_masks
+        self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
         self.ready = True # TODO: what is ready flag for?
+        
+        # validate input sequence
+        if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
+            raise ValueError('rfreq != tfreq, this behavior is not yet supported')
 
-        # phase shift to apply to beams for phasing # TODO: units?
-        self.tx_phase_main = np.zeros(MAXANTENNAS_MAIN)
-        self.rx_phase_main = np.zeros(MAXANTENNAS_MAIN)
-        self.tx_phase_back = np.zeros(MAXANTENNAS_BACK)
-        self.rx_phase_back = np.zeros(MAXANTENNAS_BACK)
+        if self.ctrlprm['number_of_samples'] <= 0:
+            raise ValueError('number of samples must be greater than zero!')
 
-        # determine phase delay offsets for array
-        tfreq = self.ctrlprm['tfreq']
-        rfreq = self.ctrlprm['rfreq']
-        beam = self.ctrlprm['tbeam']
+        if self.npulses == 0:
+            raise ValueError('number of pulses must be greater than zero!')
 
-        if rfreq and rfreq != tfreq:
-            warnings.warn('rfreq != tfreq, this behavior is not yet supported')
-            sys.exit(1)
 
-        for usrp in usrp_config:
-            if usrp == 'DEFAULT':
-                continue
-            if not 'x_position' in usrp_config[usrp]:
-                warnings.warn('Antenna location for usrp {} not specified with x_position entry in usrp_config.ini, skipping..'.format(usrp))
-                continue
-
-            pos = usrp_config.getfloat(usrp, 'x_position')
-            aidx = usrp_config.getint(usrp, 'array_idx')
-
-            # TODO: fix phase delay calculation...
-            phase_delay = beam * pos
-
-            if usrp_config.getboolean(usrp, 'mainarray'):
-                self.tx_phase_main[aidx] = phase_delay
-                self.rx_phase_main[aidx] = phase_delay
-            else:
-                self.tx_phase_back[aidx] = phase_delay
-                self.rx_phase_back[aidx] = phase_delay
         self.sequence_id = uuid.uuid1()
 
 def create_testsequence():
     # TODO: set stepping of baseband samples, fill in ctrlprm with something reasonable
+
+    import configparser
 
     ctrlprm = {\
     'radar' : 0, \
@@ -253,7 +232,7 @@ def create_testsequence():
     'tbeamwidth': 0, \
     'tfreq': 10000, \
     'trise': 100, \
-    'number_of_samples' : 0, \
+    'number_of_samples' : 100, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 1000, \
     'filter_bandwidth' : 0, \
@@ -272,7 +251,7 @@ def create_testsequence():
 
     step = 5e-6
     pulse_lens = [300e-6, 300e-6, 300e-6]
-    phase_masks = [np.zeros(p/step) for p in pulse_lens]
+    phase_masks = [np.ones(p/step) for p in pulse_lens] # 
     pulse_masks = [np.ones(p/step) for p in pulse_lens]
 
 

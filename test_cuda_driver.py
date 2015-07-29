@@ -42,6 +42,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
         self.pid = start_cudaserver()
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.serversock.connect(('localhost', CUDADRIVER_PORT))
+        self.cudasocks = [] # TODO...
 
     def tearDown(self):
         stop_cudaserver(self.serversock, self.pid)
@@ -57,8 +58,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
         # TODO: construct sequence setup..
         bmnum = 0
         seq = create_testsequence()
-        pdb.set_trace()
-        setupcmd = cuda_setup_command([self.serversock], seq, bmnum)
+        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
 
     '''
