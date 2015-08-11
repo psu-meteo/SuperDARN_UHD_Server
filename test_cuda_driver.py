@@ -13,6 +13,8 @@ from drivermsg_library import *
 from socket_utils import *
 START_DRIVER = False 
 
+np.seterr(all='raise')
+
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
     sys.exit(0)
@@ -46,6 +48,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
     def tearDown(self):
         stop_cudaserver(self.serversock, self.pid)
+        self.serversock.close()
     '''
     def test_cuda_exit(self):
         # setUp, tearDown..

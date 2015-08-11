@@ -17,9 +17,9 @@ CUDA_EXIT = ord('e')
 
 NO_COMMAND = ord('n')
 
-ARBYSERVER_PORT = 55421
-CUDADRIVER_PORT = 55420
-USRPDRIVER_PORT = 55422
+ARBYSERVER_PORT = int(55421)
+CUDADRIVER_PORT = int(55420)
+USRPDRIVER_PORT = int(55422)
 
 class driver_command(object):
     # class to help manage sending data 
@@ -251,8 +251,8 @@ def create_testsequence():
 
     step = 5e-6
     pulse_lens = [300e-6, 300e-6, 300e-6]
-    phase_masks = [np.ones(p/step) for p in pulse_lens] # 
-    pulse_masks = [np.ones(p/step) for p in pulse_lens]
+    phase_masks = [np.ones(int(p/step)) for p in pulse_lens] # 
+    pulse_masks = [np.ones(int(p/step)) for p in pulse_lens]
 
 
     usrp_config = configparser.ConfigParser()

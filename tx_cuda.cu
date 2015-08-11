@@ -13,7 +13,7 @@
 #define MAXANTS 32
 
 __device__ __constant__ double txfreq_rads[MAXFREQS];
-__device__ __constant__ float txphasedelay_rads[MAXANTS];
+__device__ __constant__ float txphasedelay_rads[MAXANTS * MAXFREQS];
 
 
 __device__ size_t outdata_idx(void) {
