@@ -23,12 +23,13 @@
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/transport/udp_simple.hpp>
 #include <uhd/exception.hpp>
-
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <boost/format.hpp>
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
+
+#include "dio.h"
 
 #define SETUP_WAIT 1
 #define SWING0 0
@@ -40,14 +41,11 @@
 
 #define START_OFFSET .05
 
-
 #define USRP_SETUP 's'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
-
-
 
 enum driver_states
 {
@@ -123,16 +121,17 @@ uint32_t toggle_swing(uint32_t swing) {
 double sock_get_float64(int32_t serversock)
 {
    double d;
-   ssize_t status = recv(serversock, &d, sizeof(double), 0)
+   ssize_t status = recv(serversock, &d, sizeof(double), 0);
    if(status != sizeof(double)) {
         fprintf(stderr, "error receiving float64");
    }
    return d;
 }
+
 uint32_t sock_get_uint32(int32_t serversock)
 {
    uint32_t d;
-   ssize_t status = recv(int32_t serversock, &d, sizeof(uint32_t), 0)
+   ssize_t status = recv(serversock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
         fprintf(stderr, "error receiving uint32_t");
    }
@@ -142,7 +141,7 @@ uint32_t sock_get_uint32(int32_t serversock)
 uint64_t sock_get_uint64(int32_t serversock)
 {
    uint64_t d;
-   ssize_t status = recv(serversock, &d, sizeof(uint64_t), 0)
+   ssize_t status = recv(serversock, &d, sizeof(uint64_t), 0);
    if(status != sizeof(uint64_t)) {
         fprintf(stderr, "error receiving uint64_t");
    }
@@ -152,7 +151,7 @@ uint64_t sock_get_uint64(int32_t serversock)
 uint8_t sock_get_uint8(int32_t serversock)
 {
    uint8_t d;
-   ssize_t status = recv(serversock, &d, sizeof(uint8_t), 0)
+   ssize_t status = recv(serversock, &d, sizeof(uint8_t), 0);
    if(status != sizeof(uint8_t)) {
         fprintf(stderr, "error receiving uint8_t");
    }
@@ -160,6 +159,13 @@ uint8_t sock_get_uint8(int32_t serversock)
 }
 
 
+void siginthandler(int sigint)
+{
+    // rc = munmap(pSharedMemory, (size_t)params.size)
+    // rc = sem_close(the_semaphore); 
+    // close(msgsock);
+    exit(1);
+}
 
 
 
@@ -183,8 +189,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     int32_t verbose = 0; 
     int32_t rx_worker_status;
 
-    void *shm_arr[NSWINGS][NSWINGS];
-    sem_t *sem_arr[NSWINGS][NSWINGS];
+    void *shm_arr[NSWINGS][NSIDES];
+    sem_t *sem_arr[NSWINGS][NSIDES];
     uint32_t state = ST_INIT;
     uint32_t ant = 0;
     uint32_t swing = SWING0;
@@ -208,15 +214,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     
     signal(SIGINT, siginthandler);
-
+    
     // open shared rx sample shared memory buffers created by cuda_driver.py
     shm_arr[SWING0][SIDEA] = open_sample_shm(ant, SIDEA, SWING0, shm_size);
     //shm_arr[SWING0][SIDEB] = open_sample_shm(ant, SIDEB, SWING0, shm_size);
     shm_arr[SWING1][SIDEA] = open_sample_shm(ant, SIDEA, SWING1, shm_size);
     //shm_arr[SWING1][SIDEB] = open_sample_shm(ant, SIDEB, SWING1, shm_size);
 
-
-    
     // open shared rx sample shared memorby buffer semaphores created by cuda_driver.py
     sem_arr[SWING0] = open_sample_semaphore(ant, SWING0);
     //sem_arr[SWING0][SIDEB] = open_sample_semaphore(ant, SIDEB, SWING0);
@@ -230,11 +234,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // swing a and swing b
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     
+    // TODO: OPEN SOCKET PROPERLY HERE
+    uint32_t serversock = 0;
+
     while(true) {
         uint8_t command = sock_get_uint8(serversock);
 
         switch(command) {
-            case USRP_SETUP:
+            case USRP_SETUP: {
                 double txrate, rxrate, txfreq, rxfreq;
                 
                 txfreq = sock_get_float64(serversock);
@@ -245,17 +252,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 num_requested_samples = sock_get_uint64(serversock);
                 
                 pulse_offsets.resize(npulses);
-                for(int i = 0; i < npulses; i++) {
+                for(uint32_t i = 0; i < npulses; i++) {
                     pulse_offsets[i] = sock_get_float64(serversock); 
                 }
                 
                 usrp->set_rx_rate(rxrate);
-                usrp->set_rx_rate(txrate);
+                usrp->set_tx_rate(txrate);
                 
-                uhd::tune_request_t tune_request(rxfreq);
-                usrp->set_rx_freq(tune_request);
-                uhd::tune_request_t tune_request(txfreq);
-                usrp->set_rx_freq(tune_request);
+                usrp->set_rx_freq(rxfreq);
+                usrp->set_tx_freq(txfreq);
 
                 if(verbose) {
                     std::cout << boost::format("Actual RX Freq: %f MHz...") % (usrp->get_rx_freq()/1e6) << std::endl << std::endl;
@@ -276,8 +281,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 
                 state = ST_READY; 
                 break;
-           
-            case RXFE_SET:
+                }
+            case RXFE_SET: {
                 RXFESettings rf_settings;
                 rf_settings.amp1 = sock_get_uint8(serversock);
                 rf_settings.amp2 = sock_get_uint8(serversock);
@@ -288,8 +293,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 rf_settings.att4 = (att >> 3) & 0x01;
                 kodiak_set_rxfe(usrp, rf_settings);
                 break;
+                }
 
-            case TRIGGER_PULSE:
+            case TRIGGER_PULSE: {
                 std::vector<uhd::time_spec_t> pulse_times (pulse_offsets.size());
                 if (state != ST_READY) {
                     ;
@@ -305,14 +311,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         pulse_times[p_i] = start_time + pulse_offsets[p_i];
                     }
 
-                    rx_threads.create_thread(boost::bind(uhd_worker, usrp, rx_stream, shm_arr[swing], num_requested_samples, start_time, rx_worker_status); 
-                    tx_threads.create_thread(boost::bind(uhd_worker, tx_stream, pulse_seq_ptr, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+                    rx_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_arr[swing], num_requested_samples, start_time, rx_worker_status); 
+                    tx_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptr, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
                     swing = toggle_swing(swing); 
                 }
 
                 break;
-            
-            case READY_DATA:
+                }
+
+            case READY_DATA: {
                 uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
                 // TODO: send int32_t status
                 // TODO: send number of antennas
@@ -321,8 +328,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 unlock_semaphore(swing, sem_arr);
                 state = ST_READY; 
                 break;
+                }
 
-            case CLRFREQ:
+            case CLRFREQ: {
                // TODO: synchronize clr_freq scan.. 
                /*
                rx_clrfreq_rval= recv_clr_freq(
@@ -337,9 +345,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 // TODO: send back raw samples for beamforming on server
                 */
                 break;
+                }
 
-            default:
+            default: {
                 break;
+            }
         }
 
         // create state machine to test triggering, simulating commands
@@ -348,10 +358,3 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     return 0;
 }
 
-void siginthandler(int sigint)
-{
-    // rc = munmap(pSharedMemory, (size_t)params.size)
-    // rc = sem_close(the_semaphore); 
-    // close(msgsock);
-    exit(1);
-}

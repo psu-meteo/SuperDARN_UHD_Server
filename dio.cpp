@@ -20,6 +20,8 @@
 #include <control_program.h>
 
 #include "rtypes.h"
+#include "dio.h"
+#include "rosmsg.h"
 
 #define SYNC_PINS 0x02
 #define TR_PINS 0x18
