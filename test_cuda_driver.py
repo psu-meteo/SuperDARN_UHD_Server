@@ -13,8 +13,6 @@ from drivermsg_library import *
 from socket_utils import *
 START_DRIVER = False 
 
-np.seterr(all='raise')
-
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
     sys.exit(0)

@@ -246,7 +246,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, maxfreqs = 8, maxants = 16, maxstreams = 2, maxchannels = 1, maxpulses = 16, ntapsrx0 = 50, ntapsrx1 = 200, fsamptx = 10000000):
+    def __init__(self, maxfreqs = 8, maxants = 16, maxstreams = 2, maxchannels = 1, maxpulses = 16, ntapsrx0 = 50, ntapsrx1 = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
         self.max_streams = int(maxstreams)
         self.max_freqs = int(maxfreqs)
         self.nchans = int(maxchannels)
@@ -254,7 +254,9 @@ class ProcessingGPU(object):
         self.ntaps1 = int(ntapsrx1)
         self.nants = int(maxants)
         self.npulses = int(maxpulses)
+        self.rfifrate = int(rfifrate)
         self.fsamptx = int(fsamptx)
+        self.fsamprx = int(fsamprx)
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
 
@@ -276,7 +278,6 @@ class ProcessingGPU(object):
             self.cu_tx_interpolate_and_multiply = self.cu_tx.get_function('interpolate_and_multiply')
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
-
                 
         self.streams = [cuda.Stream() for i in range(self.max_streams)]
     
@@ -291,6 +292,7 @@ class ProcessingGPU(object):
     def sequences_setup(self, sequence, fc, bbtx):
         # TODO: set these.. look at sequences
         channel = sequence.ctrlprm['channel']
+        bbrate = sequence.ctrlprm['baseband_samplerate']
 
         if not channel in self.channel_to_idx:
             self.channel_to_idx[channel] = len(self.channel_to_idx)
@@ -298,30 +300,42 @@ class ProcessingGPU(object):
     
         cidx = self.channel_to_idx[channel] 
 
-        NRFSAMPS_RX = 10000
-        NIFSAMPS_RX = 1000
-        NBBSAMPS_RX = 20
-        NRFSAMPS_TX = 10000
-        NBBSAMPS_TX = 200
+        # calculate rx sample decimation rates
+        nbbsamps_rx = sequence.ctrlprm['number_of_samples'] # number of recv samples
+        rx_time = nbbsamps_rx / bbrate
+        nrfsamps_rx = rx_time * self.fsamprx
+        # compute decimation rate for RF to IF, this is fixed..
+        # so, current worst case is 16 antennas with 2 channels, 10 MSPS sampling rate
+        # block size of 1024
+        # so, (1024 / 16 / 2) = 32
+        # unrolled pre-reduction of 2 in rx kernels
+        # so, decimation rate of 64
+        nifsamps_rx = nrfsamps_rx / self.rfifrate 
+
+        # calculate tx upsample rates
+        # bb based on tx sample stepping? (5e-6)
+        nbbsamps_tx = sum(sequence.pulse_lens) / (sequence.txbbrate)
+        nrfsamps_tx = self.fsamptx * sum(sequence.pulse_lens)
+        nifsamps_tx = nrfsamps_tx / self.rfifrate
         
         # TODO: this is a workaround for testing.. replace with actual antenna indexes from config files?
-        self.antennas = np.zeros(self.nants, dtype=np.uint16)
+        self.antennas = np.arange(self.nants, dtype=np.uint16)
 
-        self.dmrate0 = NRFSAMPS_RX / NIFSAMPS_RX
+        self.dmrate_rftoif = nrfsamps_rx / nifsamps_rx
 
         # allocate memory on cpu, compile functions
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_s0 = np.float32(np.zeros([self.nchans, self.ntaps0, 2]))
         self.rx_filtertap_s1 = np.float32(np.zeros([self.nchans, self.ntaps1, 2]))
     
-        self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, NIFSAMPS_RX]))
-        self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, NBBSAMPS_RX]))
+        self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, nifsamps_rx]))
+        self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, nbbsamps_rx]))
     
-        self.tx_bb_indata = np.float32(np.zeros([self.nants, self.nchans, self.npulses, NBBSAMPS_TX]))
+        self.tx_bb_indata = np.float32(np.zeros([self.nants, self.nchans, self.npulses, nbbsamps_tx]))
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
-        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, NRFSAMPS_TX), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, NRFSAMPS_RX), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, nrfsamps_tx), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
     
         # point GPU to page-locked memory for rf rx and tx samples
         self.cu_rx_samples_rf = np.intp(self.rx_samples_rf.base.get_device_pointer())
@@ -336,20 +350,18 @@ class ProcessingGPU(object):
     
         self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
         
-        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), self.nchans, 1))
-        self.tx_grid = self._intify((NBBSAMPS_TX, self.nants, self.npulses))
-        # TODO: move nchans from block to grid
+        self.tx_block = self._intify(((nrfsamps_tx / nbbsamps_tx), self.nchans, 1))
+        self.tx_grid = self._intify((nbbsamps_tx, self.nants, self.npulses))
 
         # check that downsample rate doesn't create a block size that exceeds hardware limits 
         # with 4 channels and 8 pulses there is a maximum downsample rate of about 32..
         blocksize = functools.reduce(np.multiply, self.tx_block)
         assert blocksize <= cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK), 'block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
 
-
-        self.rx_grid_0 = self._intify((NRFSAMPS_RX / self.dmrate0, self.nants, 1))
-        self.rx_grid_1 = self._intify((NBBSAMPS_RX, self.nants, 1))
-        self.rx_block_0 = self._intify((self.ntaps0 / 2, self.nchans, 1))
-        self.rx_block_1 = self._intify((1,NBBSAMPS_RX))
+        self.rx_grid_if = self._intify((nifsamps_rx, self.nants, 1))
+        self.rx_grid_bb = self._intify((nbbsamps_rx, self.nants, 1))
+        self.rx_block_if = self._intify((self.ntaps0 / 2, self.nchans, 1))
+        self.rx_block_bb = self._intify((1,nbbsamps_rx))
 
         # upsample baseband samples on GPU, write samples to shared memory
         samples = self.interpolate_and_multiply(fc, sequence.ctrlprm['channel'])
@@ -367,8 +379,8 @@ class ProcessingGPU(object):
                
     # kick off async data processing
     def rxsamples_process(self):
-        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_0, stream = self.streams[swing])
-        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_1, stream = self.streams[swing])
+        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_if, stream = self.streams[swing])
+        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_bb, stream = self.streams[swing])
     
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):

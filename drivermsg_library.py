@@ -193,13 +193,14 @@ class usrp_clrfreq_command(driver_command):
 
 
 class sequence(object):
-    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, txbbrate, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
+        self.txbbrate = txbbrate 
         self.ready = True # TODO: what is ready flag for?
         
         # validate input sequence
@@ -259,5 +260,5 @@ def create_testsequence():
     usrp_config.read('usrp_config.ini')
 
 
-    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
+    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, txbbrate, ctrlprm)
     return seq
