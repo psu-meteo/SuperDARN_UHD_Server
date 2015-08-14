@@ -15,6 +15,8 @@
 #include <math.h>
 #include <control_program.h>
 
+#include "recv_and_hold.h"
+
 #define SYNC_PINS 0x02
 #define TR_PINS 0x18
 #define MIMIC_PINS 0x1800 

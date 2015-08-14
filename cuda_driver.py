@@ -174,8 +174,9 @@ class cuda_setup_handler(cudamsg_handler):
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
     def process(self):
-        cmd = cuda_get_data_command()
-        cmd.receive(serversock)
+        cmd = cuda_get_data_command([self.sock])
+        cmd.receive(self.sock)
+
         samples = self.gpu.pull_rxdata()
         self.sock.sendall(samples.tobytes())
         semaphore.release()
@@ -278,7 +279,9 @@ class ProcessingGPU(object):
 
                 
         self.streams = [cuda.Stream() for i in range(self.max_streams)]
-   
+    
+    # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
+    # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
     def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
         self.tdelays[array_idx] = tdelay
         self.phase_offsets[array_idx] = phase_offset
@@ -303,9 +306,8 @@ class ProcessingGPU(object):
         
         # TODO: this is a workaround for testing.. replace with actual antenna indexes from config files?
         self.antennas = np.zeros(self.nants, dtype=np.uint16)
-        
+
         self.dmrate0 = NRFSAMPS_RX / NIFSAMPS_RX
-        self.dmrate1 = NIFSAMPS_RX / NBBSAMPS_RX # TODO: not used?
 
         # allocate memory on cpu, compile functions
         # [NCHANNELS][NTAPS][I/Q]
@@ -334,13 +336,15 @@ class ProcessingGPU(object):
     
         self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
         
-        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), self.npulses, 1))
-        blocksize = functools.reduce(np.multiply, self.tx_block)
-        # TODO: fix block sizes...
-        # so, with 4 channels and 8 pulses there is a maximum downsample rate of about 32..
-        assert blocksize <= cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK), 'block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+        self.tx_block = self._intify(((NRFSAMPS_TX / NBBSAMPS_TX), self.nchans, 1))
+        self.tx_grid = self._intify((NBBSAMPS_TX, self.nants, self.npulses))
         # TODO: move nchans from block to grid
-        self.tx_grid = self._intify((NBBSAMPS_TX, self.nants, self.nchans))
+
+        # check that downsample rate doesn't create a block size that exceeds hardware limits 
+        # with 4 channels and 8 pulses there is a maximum downsample rate of about 32..
+        blocksize = functools.reduce(np.multiply, self.tx_block)
+        assert blocksize <= cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK), 'block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+
 
         self.rx_grid_0 = self._intify((NRFSAMPS_RX / self.dmrate0, self.nants, 1))
         self.rx_grid_1 = self._intify((NBBSAMPS_RX, self.nants, 1))
@@ -365,25 +369,24 @@ class ProcessingGPU(object):
     def rxsamples_process(self):
         self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_0, stream = self.streams[swing])
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_1, stream = self.streams[swing])
-
+    
+    # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
         self.streams[swing].synchronize()
         cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
         return self.rx_samples_bb
   
-    # TODO: rf samples must contain sum of upsampled pulses from all channels..
+    # upsample baseband data on gpu
     def interpolate_and_multiply(self, fc, channel = 0):
         self._set_mixerfreq(fc, channel)
         self._set_phasedelay(fc, channel)
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
         # TODO: add stream.synchronize() before copying samples
-
+    
+    # copy rf samples to shared memory for transmission by usrp driver
     def txsamples_host_to_shm(self):
         # TODO: assumes single polarization
-
-        #cuda.memcpy_dtoh(self.cu_tx_rf_outdata, self.tx_rf_outdata)
-
         for ant in self.antennas:
             tx_shm_list[ant].seek(0)
             tx_shm_list[ant].write(self.tx_rf_outdata[ant].tobytes())

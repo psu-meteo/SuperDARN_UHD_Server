@@ -11,6 +11,8 @@
 #include <math.h>
 #include <time.h>
 
+#include "burst_worker.h"
+
 #define TEST_TXWORKER 1
 
 extern int verbose;

@@ -29,6 +29,8 @@
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
 
+#include "burst_worker.h"
+#include "recv_and_hold.h"
 #include "dio.h"
 
 #define SETUP_WAIT 1
@@ -56,7 +58,7 @@ enum driver_states
 
 namespace po = boost::program_options;
 
-void* open_sample_shm(int32_t ant, int32_t side, int32_t swing, size_t shm_size) {
+void *open_sample_shm(int32_t ant, int32_t side, int32_t swing, size_t shm_size) {
     void *pshm = NULL;
     char shm_device[80];
     int32_t shm_fd;
@@ -80,7 +82,7 @@ void* open_sample_shm(int32_t ant, int32_t side, int32_t swing, size_t shm_size)
     return pshm;
 }
 
-sem_t* open_sample_semaphore(int32_t ant, int32_t swing) {
+sem_t open_sample_semaphore(int32_t ant, int32_t swing) {
     char sem_name[80];
     sem_t *sem = NULL;
     sprintf(sem_name,"/semaphore_ant_%d_swing_%d", ant, swing);
@@ -91,17 +93,18 @@ sem_t* open_sample_semaphore(int32_t ant, int32_t swing) {
         sem = NULL;
         fprintf(stderr, "Getting a handle to the semaphore failed; errno is %d", errno);
     }
-    return sem;
+
+    return *sem;
 }
 
-void lock_semaphore(int32_t swing, sem_t **sem_arr)
+void lock_semaphore(int32_t swing, sem_t sem)
 {
-    sem_wait(sem_arr[swing]);
+    sem_wait(&sem);
 }
 
-void unlock_semaphore(int32_t swing, sem_t **sem_arr)
+void unlock_semaphore(int32_t swing, sem_t sem)
 {
-    sem_post(sem_arr[swing]);
+    sem_post(&sem);
 
 }
 
@@ -185,12 +188,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     std::string args, txsubdev, rxsubdev, ref;
     
-    size_t shm_size, num_rx_samps, tx_pulse_length;
+    size_t shm_size;
     int32_t verbose = 0; 
     int32_t rx_worker_status;
 
-    void *shm_arr[NSWINGS][NSIDES];
-    sem_t *sem_arr[NSWINGS][NSIDES];
+    // clean up to fix it later..
+    void *shm_swinga, *shm_swingb;
+    sem_t sem_swinga, sem_swingb;
+
     uint32_t state = ST_INIT;
     uint32_t ant = 0;
     uint32_t swing = SWING0;
@@ -203,8 +208,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     
     std::vector<double> pulse_offsets;
 
-    boost::thread_group rx_threads;
-    boost::thread_group tx_threads;
+    boost::thread_group uhd_threads;
 
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(args);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
@@ -216,16 +220,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     signal(SIGINT, siginthandler);
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
-    shm_arr[SWING0][SIDEA] = open_sample_shm(ant, SIDEA, SWING0, shm_size);
-    //shm_arr[SWING0][SIDEB] = open_sample_shm(ant, SIDEB, SWING0, shm_size);
-    shm_arr[SWING1][SIDEA] = open_sample_shm(ant, SIDEA, SWING1, shm_size);
-    //shm_arr[SWING1][SIDEB] = open_sample_shm(ant, SIDEB, SWING1, shm_size);
+    shm_swinga = open_sample_shm(ant, SIDEA, SWING0, shm_size);
+    shm_swingb = open_sample_shm(ant, SIDEA, SWING1, shm_size);
 
     // open shared rx sample shared memorby buffer semaphores created by cuda_driver.py
-    sem_arr[SWING0] = open_sample_semaphore(ant, SWING0);
-    //sem_arr[SWING0][SIDEB] = open_sample_semaphore(ant, SIDEB, SWING0);
-    sem_arr[SWING1] = open_sample_semaphore(ant, SWING1);
-    //sem_arr[SWING1][SIDEB] = open_sample_semaphore(ant, SIDEB, SWING1);
+    sem_swinga = open_sample_semaphore(ant, SWING0);
+    sem_swingb = open_sample_semaphore(ant, SWING1);
 
     // init rxfe
     kodiak_init_rxfe(usrp);
@@ -303,7 +303,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
                 else {
                     state = ST_PULSE;
-                    lock_semaphore(swing, sem_arr);
+                    lock_semaphore(swing, sem_swinga);
                     // todo: num_requested_samples
                     start_time = usrp->get_time_now() + START_OFFSET;
 
@@ -311,8 +311,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         pulse_times[p_i] = start_time + pulse_offsets[p_i];
                     }
 
-                    rx_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_arr[swing], num_requested_samples, start_time, rx_worker_status); 
-                    tx_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptr, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+                    // TODO: arbitrarily create arguements for testing.. these shouldn't be here
+                    std::vector<std::complex<int16_t> *>& pulse_seq_ptrs; // TODO: not intialized
+                    uint32_t pulse_tx_samps = 0; 
+                    // TODO: remove above...
+                    
+                    uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_swinga, num_requested_samples, start_time, rx_worker_status)); 
+                    uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
                     swing = toggle_swing(swing); 
                 }
 
@@ -325,7 +330,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 // TODO: send number of antennas
                 // TODO: send antennas 
                 // TODO: send back data..
-                unlock_semaphore(swing, sem_arr);
+                unlock_semaphore(swing, sem_swinga);
                 state = ST_READY; 
                 break;
                 }

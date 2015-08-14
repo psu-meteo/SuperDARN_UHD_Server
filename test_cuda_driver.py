@@ -38,6 +38,9 @@ def stop_cudaserver(sock, pid):
     subprocess.Popen(['pkill', str(pid)])
     
 
+# TODO:
+# Test sample generation on test transmit pulse sequence
+# Test sample downconversion of rx pulse sequence
 class CUDA_ServerTestCases(unittest.TestCase):
     def setUp(self):
         time.sleep(1)
@@ -55,27 +58,32 @@ class CUDA_ServerTestCases(unittest.TestCase):
         pass
     '''
     def test_cuda_setup(self):
-        # try passing in parameters
-        # testing cuda setup
-
-        # TODO: construct sequence setup..
-        bmnum = 0
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
 
-    '''
     
     def test_cuda_getdata(self):
-        # populate shm
+        seq = create_testsequence()
+        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
+        setupcmd.transmit()
+
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
 
+    def test_cuda_downsample(self):
+        pass
+
+
+    '''
     def test_cuda_process(self):
         # try copying samples then processing them..
         processcmd = cuda_process_command([self.serversock])
         processcmd.transmit()
     '''
-        
+    # TODO: check shared memory..
+    # TODO: check multiple channel generation
+
+       
 if __name__ == '__main__':
     unittest.main()
