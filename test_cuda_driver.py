@@ -23,7 +23,7 @@ def start_cudaserver():
     if not START_DRIVER:
         return -1
     cuda_driver = subprocess.Popen(['python3', 'cuda_driver.py'])
-    time.sleep(1)
+    time.sleep(2)
     return cuda_driver.pid
 
 def stop_cudaserver(sock, pid):
@@ -34,11 +34,9 @@ def stop_cudaserver(sock, pid):
     if not START_DRIVER:
         return
     subprocess.Popen(['pkill', str(pid)])
+    time.sleep(1)
     
 
-# TODO:
-# Test sample generation on test transmit pulse sequence
-# Test sample downconversion of rx pulse sequence
 class CUDA_ServerTestCases(unittest.TestCase):
     def setUp(self):
         time.sleep(1)
@@ -50,38 +48,46 @@ class CUDA_ServerTestCases(unittest.TestCase):
     def tearDown(self):
         stop_cudaserver(self.serversock, self.pid)
         self.serversock.close()
-    '''
-    def test_cuda_exit(self):
-        # setUp, tearDown..
-        pass
-    '''
-    def test_cuda_setup(self):
-        seq = create_testsequence()
-        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
-        setupcmd.transmit()
-
+    
     
     def test_cuda_getdata(self):
+        print('testing get data')
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
 
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
+    '''
+    def test_cuda_setup(self):
+        print('testing cuda setup')
+        seq = create_testsequence()
+        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
+        setupcmd.transmit()
 
+
+    # TODO: test sample generation on test transmit pulse sequence
+    def test_cuda_shm(self):
+        print('checking tx samples')
+    
+    # TODO: test shared memory
+    def test_cuda_shm(self):
+        print('testing tx sample shared memory')
+
+
+    # TODO: test sample downconversion of rx pulse sequence
     def test_cuda_downsample(self):
-        pass
+        print('testing gpu downsampling')
 
+    # TODO: test registering multiple channels
+    def test_cuda_multichannel(self):
+        print('testing adding multiple channels')
+
+    # TODO: test removing channels
+    def test_channel_remove(self):
+        print('testing removing a channel from a gpu')
 
     '''
-    def test_cuda_process(self):
-        # try copying samples then processing them..
-        processcmd = cuda_process_command([self.serversock])
-        processcmd.transmit()
-    '''
-    # TODO: check shared memory..
-    # TODO: check multiple channel generation
-
        
 if __name__ == '__main__':
     unittest.main()

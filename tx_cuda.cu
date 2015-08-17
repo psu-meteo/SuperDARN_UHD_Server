@@ -22,6 +22,7 @@ __device__ __constant__ double txfreq_rads[MAXFREQS];
 __device__ __constant__ float txphasedelay_rads[MAXANTS * MAXFREQS];
 
 // index into rf sample array
+// [antenna][channel][pulse][sample]
 __device__ size_t outdata_idx(void) {
     size_t upsamp_idx = threadIdx.x;
     size_t upsamp_offset = blockIdx.x * blockDim.x;
@@ -29,7 +30,7 @@ __device__ size_t outdata_idx(void) {
     size_t antenna_offset = blockIdx.y * blockDim.x * gridDim.z * gridDim.x;
     return antenna_offset + pulse_offset + upsamp_offset + upsamp_idx;
 }
-
+// [pulse][sample]
 // index into input baseband samples
 __device__ size_t indata_idx(int32_t offset) {
     return 2*blockIdx.x + offset;

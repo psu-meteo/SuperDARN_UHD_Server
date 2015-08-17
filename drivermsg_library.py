@@ -217,7 +217,7 @@ class sequence(object):
         self.sequence_id = uuid.uuid1()
 
 def create_testsequence():
-    # TODO: set stepping of baseband samples, fill in ctrlprm with something reasonable
+    # fill ctrlprm with something reasonable, create test sequence
 
     import configparser
 
@@ -250,10 +250,10 @@ def create_testsequence():
     tr_to_pulse_delay = 50e-6
     pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
 
-    step = 5e-6
+    txbbrate = 1/(5e-6)
     pulse_lens = [300e-6, 300e-6, 300e-6]
-    phase_masks = [np.ones(int(p/step)) for p in pulse_lens] # 
-    pulse_masks = [np.ones(int(p/step)) for p in pulse_lens]
+    phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens] # 
+    pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
 
 
     usrp_config = configparser.ConfigParser()
