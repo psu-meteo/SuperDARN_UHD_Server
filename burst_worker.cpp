@@ -13,7 +13,7 @@
 
 #include "burst_worker.h"
 
-#define TEST_TXWORKER 1
+#define TEST_TXWORKER 0
 
 extern int verbose;
 int debug=0;
@@ -93,6 +93,7 @@ void tx_worker(
  
 }
 
+/*
 #ifdef TEST_TXWORKER
 int main(void) {
     typedef std::complex<int16_t> sc16;
@@ -179,4 +180,5 @@ int main(void) {
     return 0;
 }
 #endif
+*/
      

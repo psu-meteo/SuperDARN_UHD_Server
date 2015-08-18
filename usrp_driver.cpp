@@ -13,6 +13,7 @@
 #include <signal.h>
 #include <iostream>
 #include <complex>
+#include <vector>
 #include <semaphore.h>
 #include <time.h>
 #include <fcntl.h>
@@ -188,7 +189,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     std::string args, txsubdev, rxsubdev, ref;
     
-    size_t shm_size;
+    size_t shm_size = 0; // TODO: SET SHM_SIZE
     int32_t verbose = 0; 
     int32_t rx_worker_status;
 
@@ -312,12 +313,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                     // TODO: arbitrarily create arguements for testing.. these shouldn't be here
-                    std::vector<std::complex<int16_t> *>& pulse_seq_ptrs; // TODO: not intialized
+                    // create vector pointers to arrays of of complex int16_ts..
+                    std::vector<std::complex<int16_t> *> pulse_seq_ptrs; // TODO: not intialized
+
                     uint32_t pulse_tx_samps = 0; 
                     // TODO: remove above...
                     
-                    uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_swinga, num_requested_samples, start_time, rx_worker_status)); 
-                    uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+                    //uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_swinga, num_requested_samples, start_time, rx_worker_status)); 
+                    //uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
                     swing = toggle_swing(swing); 
                 }
 

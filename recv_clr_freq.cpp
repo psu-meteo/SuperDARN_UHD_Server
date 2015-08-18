@@ -10,8 +10,6 @@
 #include <uhd/exception.hpp>
 
 #include <boost/thread.hpp>
-extern int verbose;
-
 
 void spectrum_worker(
     fftw_plan* plan,
@@ -102,7 +100,7 @@ int recv_clr_freq(
     clock_gettime(CLOCK_REALTIME, &start_proc);
     boost::thread_group spect_threads;
     while(num_acc_samps < num_usrp_samples){
-        int num_rx_samps = rx_stream->recv(rx_vec_ptrs, nsamps, md, timeout);
+        uint32_t num_rx_samps = rx_stream->recv(rx_vec_ptrs, nsamps, md, timeout);
 
 	    //Check for errors
 	    if (num_rx_samps != nsamps){
@@ -239,11 +237,11 @@ int recv_clr_freq(
 
     elapsed = (1e9*stop.tv_sec+stop.tv_nsec) - (1e9*start.tv_sec+start.tv_nsec);
     process_t = (1e9*stop.tv_sec+stop.tv_nsec) - (1e9*start_proc.tv_sec+start.tv_nsec);
-    if (verbose) std::cout << "clear freq function total time: " <<
+    if (debug) std::cout << "clear freq function total time: " <<
         elapsed / 1e6 << " ms" << std::endl;
-    if (verbose) std::cout << "clear freq function processing time: " <<
+    if (debug) std::cout << "clear freq function processing time: " <<
         process_t / 1e6 << " ms" << std::endl;
-    if (verbose) std::cout << "clear freq function listening time: " <<
+    if (debug) std::cout << "clear freq function listening time: " <<
         1e3*num_usrp_samples / usrp->get_rx_rate() << " ms" << std::endl;
 
     //if (tmp_pwr!=NULL) free(tmp_pwr);
@@ -301,7 +299,7 @@ void spectrum_worker(
     //if (debug && num_acc_samps == 0) std::cout << "start phase: " << 
     //    ant << " " << start_pshift << " " << end_pshift << " " << 
     //    inc_pshift << std::endl;
-    for (int i=0; i<fftsize; i++){
+    for (size_t i=0; i<fftsize; i++){
         out[i][0] = out[i][0] * cos(start_pshift + i*inc_pshift) -
             out[i][1] * sin(start_pshift*i*inc_pshift);
         out[i][1] = out[i][0] * sin(start_pshift + i*inc_pshift) +
