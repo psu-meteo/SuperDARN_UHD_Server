@@ -3,17 +3,15 @@
 #include <queue>
 #include <iostream>
 #include <iomanip>
+#include <thread>
+#include <math.h>
 
-//Added by Alex for usrp
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/utils/thread_priority.hpp>
 #include <uhd/utils/safe_main.hpp>
 #include <uhd/utils/static.hpp>
 #include <uhd/exception.hpp>
 #include <boost/thread.hpp>
-#include <thread>
-#include <math.h>
-#include <control_program.h>
 
 #include "recv_and_hold.h"
 
@@ -60,13 +58,12 @@ public:
  * Also handles the former duties of the timing card...
  **********************************************************************/
 void recv_and_hold(
-    struct TRTimes* trtimes,
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
     std::vector<std::complex<int16_t> *> client_buff_ptrs,
     size_t num_requested_samples,
     uhd::time_spec_t start_time,
-    int *return_status
+    int32_t *return_status
 ){
     std::vector<std::vector<std::complex<short> > >  temp_buffs;
     std::vector<std::complex<short> *> temp_buff_ptrs;
@@ -116,7 +113,7 @@ void recv_and_hold(
     //    std::cout << i << " " << trtimes[i] << " " << trdurations[i] << std::endl;
     //}
     //std::cout << "Sending out TR logic signals\n";
-    
+    /* 
     // queue up gpio commands for T/R signals
     for (int i=0; i<trtimes->length; i++){
         c.port = "TXA";
@@ -147,7 +144,7 @@ void recv_and_hold(
             cmdq.push(c);
         }
     }
-
+    */
     // issue gpio commands in time sorted order 
     // set_command_time must be sent in temporal order, they are sent into a fifo queue on the usrp and will block until executed
     // clear_command_time does not clear or bypass the buffer as of 10/2014..

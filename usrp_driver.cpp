@@ -319,8 +319,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     uint32_t pulse_tx_samps = 0; 
                     // TODO: remove above...
                     
-                    //uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, shm_swinga, num_requested_samples, start_time, rx_worker_status)); 
-                    //uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+                    uhd_threads.create_thread(boost::bind(recv_and_hold,usrp, rx_stream, pulse_seq_ptrs, num_requested_samples, start_time, &rx_worker_status)); 
+                    uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+
                     swing = toggle_swing(swing); 
                 }
 
