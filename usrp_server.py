@@ -6,7 +6,7 @@
 # usrp_server handles one or more usrp_drivers
 
 import sys
-# python3 or greater is needed for direct transfers between shm and gpu memory
+# python3 or greater is needed to support direct transfers between shm and gpu memory
 if sys.hexversion < 0x030300F0:
     print('This code requires Python 3.3 or greater, exiting..')
     sys.exit(0)

@@ -5,7 +5,7 @@ CCpp=g++
 CFLAGS=-c -Wall -pthread -std=c++0x -g3
 LFLAGS  = -L"../iniparser3.0b" -L"${HOME}/uhd/host/build/lib" -L"/usr/local/cuda/lib64" -L"/usr/local/cuda/lib"
 common_libs=-lm -liniparser -lrt -luhd -lfftw3 -lcuda -lcudart
-linux_libs=-lboost_thread -lboost_system -pthread
+linux_libs=-lboost_thread -lboost_system -pthread -l argtable2
 INCLUDES=-I"../include/" -I"include/" -I"../tsg/include" -I"../iniparser3.0b/src/" \
 	 -I"${HOME}/uhd/host/include" -I"${HOME}/uhd/host/include/uhd/types" -I"${HOME}/uhd/host/include/uhd/usrp" \
 	 -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/base" -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/superdarn"
