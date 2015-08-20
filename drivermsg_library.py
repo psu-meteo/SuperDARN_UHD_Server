@@ -21,12 +21,12 @@ ARBYSERVER_PORT = int(55421)
 CUDADRIVER_PORT = int(55420)
 USRPDRIVER_PORT = int(55422)
 
+# parent class for driver socket messages
 class driver_command(object):
+
     # class to help manage sending data 
     class socket_data(object):
         def __init__(self, data, dtype, name, nitems = 1):
-            # if data is numpy array, do something
-            # otherwise
             self.data = dtype(data)
             self.dtype = dtype
             self.name = name
@@ -157,7 +157,7 @@ class cuda_setup_command(driver_command):
             pickle_send(sock, self.sequence)
 
        
-
+# re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
     def __init__(self, usrps, ctrlprm, sequence_manager):
         driver_command.__init__(self, usrps, UHD_SETUP)
@@ -170,6 +170,7 @@ class usrp_setup_command(driver_command):
         self.queue(num_requested_samples, np.uint64, 'num_requested_samples')
         self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
 
+# set rxfe (amplifier and attenuator) settings 
 class usrp_rxfe_setup_command(driver_command):
     def __init__(self, usrps, amp0 = 0, amp1 = 0, att = 0):
         driver_command.__init__(self, usrps, UHD_RXFE_SET)
@@ -177,23 +178,33 @@ class usrp_rxfe_setup_command(driver_command):
         self.queue(amp1, np.uint8)
         self.queue(att, np.uint8)
 
+# start usrp trigger
 class usrp_trigger_pulse_command(driver_command):
     def __init__(self, usrps):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
 
+# command usrp drivers to ready rx sample data into shared memory
 class usrp_ready_data_command(driver_command):
-    def __init__(self, usrps, channel):
+    def __init__(self, usrps, status = 0, antenna = 0, nsamples = 0, samples = None):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
-        # TODO: receive number of antennas
-        # TODO: receive antenna array
-        # TODO: receive antenna data, in order?
 
+        self.queue(status, np.int32, 'status')
+        self.queue(antenna, np.int32, 'antenna')
+        self.queue(nsamples, np.int32, 'nsamples')
+
+    def receive(self, sock):
+        super().receive(sock)
+        self.samples = recv_dtype(sock, np.complex64, nitems = self.payload['nsamples'])
+
+
+
+# command to prompt usrp drivers to run clear frequency sequence
 class usrp_clrfreq_command(driver_command):
     def __init__(self, usrps):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
         # TODO: what do I need to send here?
 
-
+# class with pulse sequence infomation
 class sequence(object):
     def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, txbbrate, ctrlprm):
         self.ctrlprm = ctrlprm

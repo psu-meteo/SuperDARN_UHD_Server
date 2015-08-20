@@ -29,6 +29,8 @@
 #include <uhd/exception.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/ini_parser.hpp>
 #include <boost/format.hpp>
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
@@ -50,8 +52,6 @@
 #define ARG_MAXERRORS 10
 
 // these should be in a config file
-#define TXSHM_SIZE 1280000000
-#define RXSHM_SIZE 1024000
 #define USRP_DRIVER_PORT 40041
 
 #define USRP_SETUP 's'
@@ -201,10 +201,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     
     uhd::set_thread_priority_safe(); 
 
-    std::string txsubdev, rxsubdev, ref, usrpargs;
+    std::string txsubdev, rxsubdev, ref;
     
-    size_t rxshm_size = RXSHM_SIZE; 
-    size_t txshm_size = TXSHM_SIZE;
+    size_t rxshm_size;
+    size_t txshm_size;
 
     int32_t verbose = 0; 
     int32_t rx_worker_status;
@@ -219,10 +219,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uint32_t swing = SWING0;
     size_t num_requested_samples = 0; 
     uint32_t npulses, nerrors;
-
+    uint32_t usrp_driver_base_port;
     int32_t sockopt;
     struct sockaddr_in sockaddr;
-    char *usrphost = NULL;
 
     uhd::time_spec_t get_data_t0;
     uhd::time_spec_t get_data_t1;
@@ -231,7 +230,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::vector<double> pulse_offsets;
 
     boost::thread_group uhd_threads;
-   
+
+    // process config file for port and SHM sizes
+    boost::property_tree::ptree pt;
+    boost::property_tree::ini_parser::read_ini("driver_config.ini", pt);
+    rxshm_size = std::stoi(pt.get<std::string>("shm_settings.rxshm_size"));
+    txshm_size = std::stoi(pt.get<std::string>("shm_settings.txshm_size"));
+    usrp_driver_base_port = std::stoi(pt.get<std::string>("network_settings.USRPDriverPort"));
+
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
     struct arg_int  *ai_ant    = arg_int0(NULL, "antenna", NULL,"Antenna position index for the USRP (0-19)"); 
@@ -265,9 +271,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         return 0;
     }
     ant = ai_ant->ival[0];
-    std::string usrpargs(as_host->sval[1]);
+    std::string usrpargs(as_host->sval[0]);
     usrpargs = "addr0=" + usrpargs; 
-    //usrphost = malloc((strlen(as_host->sval[0]) + 1) * sizeof(char));
      
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
@@ -301,7 +306,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     sockaddr.sin_family = AF_INET;
     // TODO: maybe limit addr to interface connected to usrp_server
     sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    sockaddr.sin_port = htonl(USRP_DRIVER_PORT);
+    sockaddr.sin_port = htonl(usrp_driver_base_port + ant);
     sockopt = 1;
     setsockopt(driversock, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(int32_t));
 
@@ -402,18 +407,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
 
             case READY_DATA: {
-                uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
+                uint32_t i;
 
-                sock_send_int32_t(driversock, status);
-                sock_send_int32_t(driversock, nantennas);
-                // TODO: send antenna information 
-                sock_send_int32_t(driversock, status);
-                sock_send_int32_t(driversock, status);
-                // TODO: send int32_t status
-                // TODO: send number of antennas
-                // TODO: send antennas 
+                uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
+                sock_send_int32(driversock, ant);
+                sock_send_int32(driversock, 0);//nsamples);  send send number of samples
+                
+                sock_send_int32(driversock, ant); // send samples
+                // TODO: optimize this?
                 // TODO: send back data..
-                unlock_semaphore(swing, sem_swinga);
+                for(i = 0; i < 0; i++) { // i < nsamples
+                    //sock_send_int32(driversock, ant);
+                    ;
+                }
                 state = ST_READY; 
                 break;
                 }

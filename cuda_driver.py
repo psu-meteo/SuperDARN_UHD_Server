@@ -467,7 +467,7 @@ def main():
     
     # parse gpu config file
     cudadriverconfig = configparser.ConfigParser()
-    cudadriverconfig.read('cudadriver_config.ini')
+    cudadriverconfig.read('driver_config.ini')
     shm_settings = cudadriverconfig['shm_settings']
     cuda_settings = cudadriverconfig['cuda_settings']
     network_settings = cudadriverconfig['network_settings']
