@@ -47,18 +47,21 @@
 #define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
 #define NSWINGS 2 // swings are slots in the swing buffer
 
+#define TRIGGER_BUSY 'b'
+#define TRIGGER_PROCESS 'p'
+
 #define START_OFFSET .05
 
 #define ARG_MAXERRORS 10
-
-// these should be in a config file
-#define USRP_DRIVER_PORT 40041
 
 #define USRP_SETUP 's'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
+
+#define TXDIR 1
+#define RXDIR 0
 
 enum driver_states
 {
@@ -70,12 +73,18 @@ enum driver_states
 namespace po = boost::program_options;
 int32_t driversock = 0;
 
-void *open_sample_shm(int32_t ant, int32_t side, int32_t swing, size_t shm_size) {
+void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, size_t shm_size) {
     void *pshm = NULL;
     char shm_device[80];
     int32_t shm_fd;
+    
+    if(dir == TXDIR) {
+        sprintf(shm_device,"/shm_tx_ant_%d_side_%d_swing_%d", ant, side, swing);
+    }
+    else {
+        sprintf(shm_device,"/shm_rx_ant_%d_side_%d_swing_%d", ant, side, swing);
+    }
 
-    sprintf(shm_device,"/shm_ant_%d_side_%d_swing_%d", ant, side, swing);
     shm_fd = shm_open(shm_device, O_RDWR, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {
         fprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d\n", errno);
@@ -153,13 +162,13 @@ uint32_t sock_get_uint32(int32_t sock)
    return d;
 }
 
-uint32_t sock_send_int32(int32_t sock, int32_t d)
+ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
         fprintf(stderr, "error receiving uint32_t");
    }
-   return d;
+   return status;
 }
 
 
@@ -181,6 +190,15 @@ uint8_t sock_get_uint8(int32_t sock)
         fprintf(stderr, "error receiving uint8_t");
    }
    return d;
+}
+
+ssize_t sock_send_uint8(int8_t sock, uint8_t d)
+{
+   ssize_t status = send(sock, &d, sizeof(uint8_t), 0);
+   if(status != sizeof(uint8_t)) {
+        fprintf(stderr, "error receiving uint8_t");
+   }
+   return status;
 }
 
 
@@ -218,8 +236,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uint32_t ant = 0;
     uint32_t swing = SWING0;
     size_t num_requested_samples = 0; 
+    uint32_t pulse_tx_samps = 0;  
     uint32_t npulses, nerrors;
+
     uint32_t usrp_driver_base_port;
+
     int32_t sockopt;
     struct sockaddr_in sockaddr;
 
@@ -240,10 +261,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
-    struct arg_int  *ai_ant    = arg_int0(NULL, "antenna", NULL,"Antenna position index for the USRP (0-19)"); 
-    struct arg_str  *as_host   = arg_str0(NULL, "host", NULL,"Hostname or IP address of USRP to control (e.g usrp1)"); 
+    struct arg_int  *ai_ant    = arg_int0(NULL, "antenna", NULL, "Antenna position index for the USRP (0-19)"); 
+    struct arg_str  *as_host   = arg_str0(NULL, "host", NULL, "Hostname or IP address of USRP to control (e.g usrp1)"); 
     struct arg_end  *ae_argend = arg_end(ARG_MAXERRORS);
     void* argtable[] = {al_help, ai_ant, as_host, ae_argend};
+
+    std::vector<std::complex<int16_t> *> pulse_seq_ptrs; // TODO: not intialized
 
     nerrors = arg_parse(argc,argv,argtable);
     if (nerrors > 0) {
@@ -284,11 +307,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     signal(SIGINT, siginthandler);
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
-    shm_swingarx = open_sample_shm(ant, SIDEA, SWING0, rxshm_size);
-    shm_swingbrx = open_sample_shm(ant, SIDEA, SWING1, rxshm_size);
+    shm_swingarx = open_sample_shm(ant, RXDIR, SIDEA, SWING0, rxshm_size);
+    shm_swingbrx = open_sample_shm(ant, RXDIR, SIDEA, SWING1, rxshm_size);
 
-    shm_swingatx = open_sample_shm(ant, SIDEA, SWING0, txshm_size);
-    shm_swingatx = open_sample_shm(ant, SIDEA, SWING0, txshm_size);
+    shm_swingatx = open_sample_shm(ant, TXDIR, SIDEA, SWING0, txshm_size);
+    shm_swingatx = open_sample_shm(ant, TXDIR, SIDEA, SWING0, txshm_size);
 
     // open shared rx sample shared memory buffer semaphores created by cuda_driver.py
     sem_swinga = open_sample_semaphore(ant, SWING0);
@@ -357,7 +380,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
                 usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
                 boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
-                
+
+                // TODO: set the number of samples in a pulse. this is calculated from the pulse duration and the sampling rate 
+                // when do we know this? after USRP_SETUP
+           
                 state = ST_READY; 
                 break;
                 }
@@ -377,10 +403,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             case TRIGGER_PULSE: {
                 std::vector<uhd::time_spec_t> pulse_times (pulse_offsets.size());
                 if (state != ST_READY) {
-                    ;
-                    // TODO: return busy message
+                    sock_send_uint8(driversock, TRIGGER_BUSY);
                 }
                 else {
+                    sock_send_uint8(driversock, TRIGGER_PROCESS);
                     state = ST_PULSE;
                     lock_semaphore(swing, sem_swinga);
                     // todo: num_requested_samples
@@ -392,9 +418,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     // TODO: arbitrarily create arguements for testing.. these shouldn't be here
                     // create vector pointers to arrays of of complex int16_ts..
-                    std::vector<std::complex<int16_t> *> pulse_seq_ptrs; // TODO: not intialized
 
-                    uint32_t pulse_tx_samps = 0; 
                     // TODO: remove above...
                     
                     uhd_threads.create_thread(boost::bind(recv_and_hold,usrp, rx_stream, pulse_seq_ptrs, num_requested_samples, start_time, &rx_worker_status)); 

@@ -46,7 +46,6 @@ void tx_worker(
         //Initialize the temporary pointers according to the argument passed to the function
         std::vector<std::complex<int16_t> *> temp_ptrs(pulse_seq_ptrs.size());
         // pulse_seq_ptrs is length 8
-        //
         if (debug) std::cout << "num tx channels: " << tx_stream->get_num_channels() << std::endl;
         if (debug) std::cout << "sequence length : " << pulse_length << std::endl;
         if (debug) std::cout << "number of pulses : " << pulse_times.size() << std::endl;

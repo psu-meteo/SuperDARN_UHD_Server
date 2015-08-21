@@ -36,5 +36,5 @@ $(EXECUTABLE): $(CPP_OBJECTS)
 	$(CCpp) $(CFLAGS) $< -o $@ $(LFLAGS) $(INCLUDES)
 
 clean:
-	rm -rf *.o $(EXECUTABLE)
+	rm -rf *.o *.pyc $(EXECUTABLE)
 

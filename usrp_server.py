@@ -58,6 +58,9 @@ GPS_SCHEDULE_SINGLE_SCAN = 's'
 GPS_MSG_ERROR = 'X'
 CLEAN_EXIT = 'x'
 
+TRIGGER_BUSY = 'b'
+TRIGGER_PROCESS = 'p'
+
 # human readable descriptions of commands for status messages
 ARBY_COMMAND_STRS = {
         REGISTER_SEQ : 'register sequence', \
@@ -311,6 +314,13 @@ class trigger_handler(dmsg_handler):
         if len(self.sequence_manager.sequences):
             cmd = usrp_trigger_pulse_command(self.usrpsocks)
             cmd.transmit()
+            
+            state = chr(recv_dtype(usrpsock, np.uint8))
+
+            if state == TRIGGER_BUSY:
+                print 'could not trigger, usrp driver is busy'
+                # TODO HANDLE THIS WELL...
+           
 
 
 class posttrigger_handler(dmsg_handler):
@@ -409,12 +419,9 @@ class recv_get_data_handler(dmsg_handler):
                     main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
                     back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
 
-            # TODO: create beamform_main, a complex vector NANTS long with the phasing 
+            # create beamform_main, a complex vector NANTS long with the phasing 
             beamform_main = np.ones(len(MAIN_ANTENNAS))
             beamform_back = np.ones(len(MAIN_ANTENNAS))
-            # could be per-channel, I suppose
-            # do rx beamforming
-            # if this bottlenecks, it should be straightforward to vectorize..
             for i in range(nbb_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
@@ -436,7 +443,7 @@ class recv_get_data_handler(dmsg_handler):
 
                 back_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
 
-                
+            # transmit status to arby_server    
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
             transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
             transmit_dtype(self.arbysock, np.int32(0)) # buffer number
