@@ -59,6 +59,7 @@
 #define CLRFREQ 'c'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
+#define EXIT 'e'
 
 #define TXDIR 1
 #define RXDIR 0
@@ -211,7 +212,6 @@ void siginthandler(int sigint)
 }
 
 
-
 int UHD_SAFE_MAIN(int argc, char *argv[]){
     // example usage:
     // ./usrp_driver --antenna 1 --host usrp1 
@@ -249,7 +249,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::time_spec_t start_time;
     
     std::vector<double> pulse_offsets;
-
     boost::thread_group uhd_threads;
 
     // process config file for port and SHM sizes
@@ -296,13 +295,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     ant = ai_ant->ival[0];
     std::string usrpargs(as_host->sval[0]);
     usrpargs = "addr0=" + usrpargs; 
-     
+    
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
 
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
+
+    // init rxfe
+    kodiak_init_rxfe(usrp);
     
     signal(SIGINT, siginthandler);
     
@@ -311,15 +313,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     shm_swingbrx = open_sample_shm(ant, RXDIR, SIDEA, SWING1, rxshm_size);
 
     shm_swingatx = open_sample_shm(ant, TXDIR, SIDEA, SWING0, txshm_size);
-    shm_swingatx = open_sample_shm(ant, TXDIR, SIDEA, SWING0, txshm_size);
+    shm_swingbtx = open_sample_shm(ant, TXDIR, SIDEA, SWING1, txshm_size);
 
     // open shared rx sample shared memory buffer semaphores created by cuda_driver.py
     sem_swinga = open_sample_semaphore(ant, SWING0);
     sem_swingb = open_sample_semaphore(ant, SWING1);
 
-    // init rxfe
-    kodiak_init_rxfe(usrp);
-
+    
     // open existing shared memory created by cuda_driver.py
     // swing a and swing b
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
@@ -465,12 +465,28 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 break;
                 }
 
+            case EXIT: {
+                close(driversock);
+
+                munmap(shm_swingarx, rxshm_size);
+                munmap(shm_swingbrx, rxshm_size);
+                munmap(shm_swingatx, txshm_size);
+                munmap(shm_swingbtx, txshm_size);
+                sem_close(&sem_swinga); 
+                sem_close(&sem_swingb); 
+                // TODO: close usrp streams?
+                exit(1);
+
+                
+                 break;
+                }
+
             default: {
+                printf("unrecognized command, exiting..\n");
+                exit(1);
                 break;
             }
         }
-
-        // create state machine to test triggering, simulating commands
     }
     
     return 0;

@@ -9,6 +9,7 @@ UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
 UHD_CLRFREQ = ord('c')
+UHD_EXIT = ord('e')
 
 CUDA_SETUP = ord('s')
 CUDA_PROCESS = ord('p')
@@ -203,6 +204,13 @@ class usrp_clrfreq_command(driver_command):
     def __init__(self, usrps):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
         # TODO: what do I need to send here?
+
+# prompt the usrp driver to cleanly shut down, useful for testing
+class usrp_exit_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_EXIT)
+        # TODO: what do I need to send here?
+
 
 # class with pulse sequence infomation
 class sequence(object):
