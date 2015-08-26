@@ -204,12 +204,14 @@ cudamsg_handlers = {\
         CUDA_EXIT: cuda_exit_handler}
 
 
-def sem_namer(swing, side, direction = 'rx'):
-    name = 'semaphore_{}_side_{}_swing_{}'.format(direction, int(side), int(swing))
+def sem_namer(ant, swing):
+    name = 'semaphore_ant_{}_swing_{}'.format(int(ant), int(swing))
+    print(name)
     return name
 
 def shm_namer(antenna, swing, side, direction = 'rx'):
     name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+    print(name)
     return name
 
 def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
@@ -220,8 +222,8 @@ def create_shm(antenna, swing, side, shm_size, direction = 'rx'):
     shm_list.append(name)
     return mapfile
 
-def create_sem(swing, side, direction):
-    name = sem_namer(swing, side, direction)
+def create_sem(ant, swing):
+    name = sem_namer(ant, swing)
     sem = posix_ipc.Semaphore(name, posix_ipc.O_CREAT)
     sem.release()
     sem_list.append(sem)
@@ -498,9 +500,8 @@ def main():
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
 
-    rx_semaphore_list[SIDEA].append(create_sem(SWING0, SIDEA, direction = RXDIR))
-    rx_semaphore_list[SIDEA].append(create_sem(SWING1, SIDEA, direction = RXDIR))
-    tx_semaphore_list.append(create_sem(SWING0, SIDEA, direction = TXDIR))
+    rx_semaphore_list[SIDEA].append(create_sem(ant, swing))
+    rx_semaphore_list[SIDEA].append(create_sem(ant, swing))
     
     # create sigin_handler for graceful-ish cleanup on exit
     signal.signal(signal.SIGINT, sigint_handler)

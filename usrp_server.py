@@ -318,7 +318,7 @@ class trigger_handler(dmsg_handler):
             state = chr(recv_dtype(usrpsock, np.uint8))
 
             if state == TRIGGER_BUSY:
-                print 'could not trigger, usrp driver is busy'
+                print('could not trigger, usrp driver is busy')
                 # TODO HANDLE THIS WELL...
            
 

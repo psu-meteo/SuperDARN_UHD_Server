@@ -86,6 +86,7 @@ void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, siz
         sprintf(shm_device,"/shm_rx_ant_%d_side_%d_swing_%d", ant, side, swing);
     }
 
+    fprintf(stderr, "usrp_driver opening: %s\n", shm_device);
     shm_fd = shm_open(shm_device, O_RDWR, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {
         fprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d\n", errno);
@@ -109,6 +110,7 @@ sem_t open_sample_semaphore(int32_t ant, int32_t swing) {
     sem_t *sem = NULL;
     sprintf(sem_name,"/semaphore_ant_%d_swing_%d", ant, swing);
     
+    fprintf(stderr, "usrp_driver opening: %s\n", sem_name);
     sem = sem_open(sem_name, 0);
 
     if (sem == SEM_FAILED) {
@@ -205,6 +207,7 @@ ssize_t sock_send_uint8(int8_t sock, uint8_t d)
 
 void siginthandler(int sigint)
 {
+    // probably unsafe to munmap and sem_close in signal handler..
     // rc = munmap(pSharedMemory, (size_t)params.size)
     // rc = sem_close(the_semaphore); 
     close(driversock);
@@ -450,8 +453,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
             case CLRFREQ: {
                // TODO: synchronize clr_freq scan.. 
-               /*
-               rx_clrfreq_rval= recv_clr_freq(
+               /*rx_clrfreq_rval= recv_clr_freq(
                                 usrp,
                                 rx_stream,
                                 center,
@@ -459,9 +461,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                                 (int) client.filter_bandwidth/1e3,
                                 clrfreq_parameters.nave,
                                 10,
-                                &pwr2.front()); 
+                                &pwr2.front()); */
                 // TODO: send back raw samples for beamforming on server
-                */
                 break;
                 }
 
