@@ -206,12 +206,10 @@ cudamsg_handlers = {\
 
 def sem_namer(ant, swing):
     name = 'semaphore_ant_{}_swing_{}'.format(int(ant), int(swing))
-    print(name)
     return name
 
 def shm_namer(antenna, swing, side, direction = 'rx'):
     name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
-    print(name)
     return name
 
 def create_shm(antenna, swing, side, shm_size, direction = 'rx'):

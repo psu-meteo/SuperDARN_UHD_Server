@@ -58,6 +58,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
+
     '''
     def test_cuda_setup(self):
         print('testing cuda setup')

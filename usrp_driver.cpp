@@ -27,6 +27,8 @@
 #include <uhd/usrp/multi_usrp.hpp>
 #include <uhd/transport/udp_simple.hpp>
 #include <uhd/exception.hpp>
+#include <uhd/utils/msg.hpp>
+
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -46,6 +48,7 @@
 #define SIDEB 1
 #define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
 #define NSWINGS 2 // swings are slots in the swing buffer
+#define VERBOSE 1
 
 #define TRIGGER_BUSY 'b'
 #define TRIGGER_PROCESS 'p'
@@ -63,6 +66,7 @@
 
 #define TXDIR 1
 #define RXDIR 0
+#define SUPRESS_UHD_PRINTS 1
 
 enum driver_states
 {
@@ -73,6 +77,11 @@ enum driver_states
 
 namespace po = boost::program_options;
 int32_t driversock = 0;
+int32_t driverconn = 0;
+
+void uhd_term_message_handler(uhd::msg::type_t type, const std::string &msg){
+    ;
+}
 
 void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, size_t shm_size) {
     void *pshm = NULL;
@@ -147,20 +156,20 @@ uint32_t toggle_swing(uint32_t swing) {
 
 double sock_get_float64(int32_t sock)
 {
-   double d;
+   double d = 0;
    ssize_t status = recv(sock, &d, sizeof(double), 0);
    if(status != sizeof(double)) {
-        fprintf(stderr, "error receiving float64");
+        fprintf(stderr, "error receiving float64\n");
    }
    return d;
 }
 
 uint32_t sock_get_uint32(int32_t sock)
 {
-   uint32_t d;
+   uint32_t d = 0;
    ssize_t status = recv(sock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
-        fprintf(stderr, "error receiving uint32_t");
+        fprintf(stderr, "error receiving uint32_t\n");
    }
    return d;
 }
@@ -169,7 +178,7 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
-        fprintf(stderr, "error receiving uint32_t");
+        fprintf(stderr, "error receiving uint32_t\n");
    }
    return status;
 }
@@ -177,20 +186,20 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
 
 uint64_t sock_get_uint64(int32_t sock)
 {
-   uint64_t d;
+   uint64_t d = 0;
    ssize_t status = recv(sock, &d, sizeof(uint64_t), 0);
    if(status != sizeof(uint64_t)) {
-        fprintf(stderr, "error receiving uint64_t");
+        fprintf(stderr, "error receiving uint64_t\n");
    }
    return d;
 }
 
 uint8_t sock_get_uint8(int32_t sock)
 {
-   uint8_t d;
-   ssize_t status = recv(sock, &d, sizeof(uint8_t), 0);
+   uint8_t d = 0;
+   ssize_t status = recv(sock, &d, sizeof(uint8_t), MSG_WAITALL);
    if(status != sizeof(uint8_t)) {
-        fprintf(stderr, "error receiving uint8_t");
+        fprintf(stderr, "err=%d: %s\n", errno, strerror(errno));
    }
    return d;
 }
@@ -199,7 +208,7 @@ ssize_t sock_send_uint8(int8_t sock, uint8_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint8_t), 0);
    if(status != sizeof(uint8_t)) {
-        fprintf(stderr, "error receiving uint8_t");
+        fprintf(stderr, "error sending uint8_t\n");
    }
    return status;
 }
@@ -246,6 +255,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     int32_t sockopt;
     struct sockaddr_in sockaddr;
+    struct sockaddr_storage client_addr;
+    socklen_t addr_size;
 
     uhd::time_spec_t get_data_t0;
     uhd::time_spec_t get_data_t1;
@@ -269,6 +280,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     void* argtable[] = {al_help, ai_ant, as_host, ae_argend};
 
     std::vector<std::complex<int16_t> *> pulse_seq_ptrs; // TODO: not intialized
+
+    if (SUPRESS_UHD_PRINTS) {
+        uhd::msg::register_handler(&uhd_term_message_handler);
+    }
 
     nerrors = arg_parse(argc,argv,argtable);
     if (nerrors > 0) {
@@ -305,6 +320,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
+    // TODO: retry uhd connection if fails..
 
     // init rxfe
     kodiak_init_rxfe(usrp);
@@ -329,36 +345,52 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     
     // bind to socket for communication with usrp_server.py
     driversock = socket(AF_INET, SOCK_STREAM, 0);
+    if(driversock < 0){
+        perror("opening stream socket\n");
+        exit(1);
+    }
+
+    sockopt = 1;
+    setsockopt(driversock, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(int32_t));
+
     sockaddr.sin_family = AF_INET;
     // TODO: maybe limit addr to interface connected to usrp_server
     sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     sockaddr.sin_port = htonl(usrp_driver_base_port + ant);
-    sockopt = 1;
-    setsockopt(driversock, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(int32_t));
-
+    
     if( bind(driversock, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0){
             perror("binding tx stream socket");
             exit(1);
     }
+    
+    // wait for connection...
+    listen(driversock, 1);
+    
+    // and accept it
+    fprintf(stderr, "waiting for socket connection\n");
+    addr_size = sizeof(client_addr);
+    driverconn = accept(driversock, (struct sockaddr *) &client_addr, &addr_size);
+    printf("accepted socket connection");
 
-  
     while(true) {
-        uint8_t command = sock_get_uint8(driversock);
+        // wait for transport endpoint to connect?
+        
+        uint8_t command = sock_get_uint8(driverconn);
 
         switch(command) {
             case USRP_SETUP: {
                 double txrate, rxrate, txfreq, rxfreq;
                 
-                txfreq = sock_get_float64(driversock);
-                rxfreq = sock_get_float64(driversock);
-                txrate = sock_get_float64(driversock);
-                rxrate = sock_get_float64(driversock);
-                npulses = sock_get_uint32(driversock);
-                num_requested_samples = sock_get_uint64(driversock);
+                txfreq = sock_get_float64(driverconn);
+                rxfreq = sock_get_float64(driverconn);
+                txrate = sock_get_float64(driverconn);
+                rxrate = sock_get_float64(driverconn);
+                npulses = sock_get_uint32(driverconn);
+                num_requested_samples = sock_get_uint64(driverconn);
                 
                 pulse_offsets.resize(npulses);
                 for(uint32_t i = 0; i < npulses; i++) {
-                    pulse_offsets[i] = sock_get_float64(driversock); 
+                    pulse_offsets[i] = sock_get_float64(driverconn); 
                 }
                 
                 usrp->set_rx_rate(rxrate);
@@ -392,9 +424,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
             case RXFE_SET: {
                 RXFESettings rf_settings;
-                rf_settings.amp1 = sock_get_uint8(driversock);
-                rf_settings.amp2 = sock_get_uint8(driversock);
-                uint8_t att = sock_get_uint8(driversock);
+                rf_settings.amp1 = sock_get_uint8(driverconn);
+                rf_settings.amp2 = sock_get_uint8(driverconn);
+                uint8_t att = sock_get_uint8(driverconn);
                 rf_settings.att1 = (att >> 0) & 0x01;
                 rf_settings.att2 = (att >> 1) & 0x01;
                 rf_settings.att3 = (att >> 2) & 0x01;
@@ -406,10 +438,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             case TRIGGER_PULSE: {
                 std::vector<uhd::time_spec_t> pulse_times (pulse_offsets.size());
                 if (state != ST_READY) {
-                    sock_send_uint8(driversock, TRIGGER_BUSY);
+                    sock_send_uint8(driverconn, TRIGGER_BUSY);
                 }
                 else {
-                    sock_send_uint8(driversock, TRIGGER_PROCESS);
+                    sock_send_uint8(driverconn, TRIGGER_PROCESS);
                     state = ST_PULSE;
                     lock_semaphore(swing, sem_swinga);
                     // todo: num_requested_samples
@@ -437,14 +469,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 uint32_t i;
 
                 uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
-                sock_send_int32(driversock, ant);
-                sock_send_int32(driversock, 0);//nsamples);  send send number of samples
+                sock_send_int32(driverconn, ant);
+                sock_send_int32(driverconn, 0);//nsamples);  send send number of samples
                 
-                sock_send_int32(driversock, ant); // send samples
+                sock_send_int32(driverconn, ant); // send samples
                 // TODO: optimize this?
                 // TODO: send back data..
                 for(i = 0; i < 0; i++) { // i < nsamples
-                    //sock_send_int32(driversock, ant);
+                    //sock_send_int32(driverconn, ant);
                     ;
                 }
                 state = ST_READY; 
@@ -467,7 +499,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
 
             case EXIT: {
-                close(driversock);
+                close(driverconn);
 
                 munmap(shm_swingarx, rxshm_size);
                 munmap(shm_swingbrx, rxshm_size);
@@ -483,7 +515,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 }
 
             default: {
-                printf("unrecognized command, exiting..\n");
+                printf("unrecognized command: %d, %c, exiting..\n", command, command);
                 exit(1);
                 break;
             }

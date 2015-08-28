@@ -29,18 +29,19 @@ rxshm_size = 160000000
 txshm_size = 51200000
 
 
-
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
     sys.exit(0)
 
 def start_usrpserver():
     # open up ports..
+    make = subprocess.call(['make'])
+
     time.sleep(.5)
     if not START_DRIVER:
         return -1
     usrp_driver = subprocess.Popen(['./usrp_driver', '--antenna', str(ANTENNA_UNDER_TEST), '--host', 'usrp' + str(ANTENNA_UNDER_TEST)])
-    time.sleep(2)
+    time.sleep(5)
     return usrp_driver.pid
 
 def stop_usrpserver(sock, pid):
@@ -72,9 +73,22 @@ class USRP_ServerTestCases(unittest.TestCase):
         time.sleep(1)
 
         self.pid = start_usrpserver()
+        time.sleep(1)
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.serversock.connect(('localhost', USRPDRIVER_PORT))
+        max_connect_attempts = 5
+        for i in range(max_connect_attempts):
+            print('attempting connection to usrp_driver')
+            try:
+                self.serversock.connect(('localhost', USRPDRIVER_PORT + ANTENNA_UNDER_TEST))
+                break;
+            except:
+                print('connecting to usrp driver failed on attempt ' + str(i + 1))
+                time.sleep(3)
 
+                if (i == max_connect_attempts - 1):
+                    self.tearDown()
+                    print('connecting to usrp driver failed, exiting')
+                    sys.exit(1)
 
     def tearDown(self):
         for shm in shm_list:
@@ -89,6 +103,7 @@ class USRP_ServerTestCases(unittest.TestCase):
     
     def test_usrp_setup(self):
         pass
+
     '''
     def test_usrp_shm(self):
         pass

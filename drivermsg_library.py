@@ -20,7 +20,7 @@ NO_COMMAND = ord('n')
 
 ARBYSERVER_PORT = int(55421)
 CUDADRIVER_PORT = int(55420)
-USRPDRIVER_PORT = int(55422)
+USRPDRIVER_PORT = int(54420) # + ant
 
 # parent class for driver socket messages
 class driver_command(object):
