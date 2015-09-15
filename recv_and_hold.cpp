@@ -15,6 +15,15 @@
 
 #include "recv_and_hold.h"
 
+#define DEBUG 1
+#ifdef DEBUG
+#define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
+#else
+#define DEBUG_PRINT(...) do{ } while ( false )
+#endif
+
+
+
 #define SYNC_PINS 0x02
 #define TR_PINS 0x18
 #define MIMIC_PINS 0x1800 
@@ -65,12 +74,14 @@ void recv_and_hold(
     uhd::time_spec_t start_time,
     int32_t *return_status
 ){
+
+    DEBUG_PRINT("entering RECV_AND_HOLD\n");
     std::vector<std::vector<std::complex<short> > >  temp_buffs;
     std::vector<std::complex<short> *> temp_buff_ptrs;
     
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
     std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
-
+    size_t num_rx_samps;
     //setup streaming
     uhd::rx_metadata_t md;
     float timeout = 0.1;
@@ -81,6 +92,8 @@ void recv_and_hold(
     stream_cmd.time_spec = start_time+RX_OFFSET; // why 450 microseconds...?
     //stream_cmd.time_spec = start_time+010e-6;
     
+    DEBUG_PRINT("RECV_AND_HOLD queing GPIO commands\n");
+
     // setup gpio direction and control
     usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,SYNC_PINS);
     usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,TR_PINS);
@@ -165,7 +178,18 @@ void recv_and_hold(
     // for more complicated pulse sequences, we may need to fill the buffer partway through the pulse sequence.. 
     
     md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
-    size_t num_rx_samps = rx_stream->recv(client_buff_ptrs, num_requested_samples, md, timeout);
+
+	uhd::time_spec_t debugt = usrp->get_time_now();
+    DEBUG_PRINT("RECV_AND_HOLD recv samples, requesting %d samples at usrp time %.4f\n", num_requested_samples, debugt);
+    if(num_requested_samples) {
+        num_rx_samps = rx_stream->recv(client_buff_ptrs, num_requested_samples, md, timeout);
+    }
+    else {
+		std::cerr << "RECV_AND_HOLD, Error, no samples requested!" << "\n";;
+    }
+
+    DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");
+
 	if (num_rx_samps != num_requested_samples){
         *return_status=-1;
 		uhd::time_spec_t rx_error_time = usrp->get_time_now();
@@ -198,6 +222,8 @@ void recv_and_hold(
     " encountered at " << rx_error_time.get_real_secs() << std::endl;
     *return_status=-1;
     }
+
+    DEBUG_PRINT("RECV_AND_HOLD finished\n");
 
     //for (size_t i=0;i<usrp->get_rx_num_channels();i++)
     //	client_buff_ptrs[i] = &temp_buffs[i].front();

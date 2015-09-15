@@ -14,6 +14,14 @@
 #include "burst_worker.h"
 
 #define TEST_TXWORKER 0
+#define DEBUG 1
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); }  while( false )
+#else
+#define DEBUG_PRINT(...) do{ } while ( false )
+#endif
+
 
 extern int verbose;
 int debug=0;
@@ -31,6 +39,8 @@ void tx_worker(
 
     struct timeval t0,t1;
     gettimeofday(&t0,NULL);
+
+    DEBUG_PRINT("BURST_WORKER starting up\n");
 
     for(size_t i = 0; i < pulse_times.size(); i++) {
         //setup the metadata flags to send the first buffer's worth of data
@@ -58,6 +68,7 @@ void tx_worker(
         size_t nacc_samps = 0;
         size_t spb = tx_stream->get_max_num_samps();
 
+        DEBUG_PRINT("BURST_WORKER starting pulse\n");
         //Now go for it!
         while(nacc_samps < pulse_length){
             size_t samps_to_send = std::min(pulse_length - nacc_samps, spb);
@@ -82,12 +93,15 @@ void tx_worker(
         }
         
         if (debug) std::cout << (got_async_burst_ack? "success" : "fail") << std::endl;
+
+        DEBUG_PRINT("BURST_WORKER finished pulse\n");
     }
 
     gettimeofday(&t1,NULL);
     double elapsed=(t1.tv_sec-t0.tv_sec)*1E6;
     elapsed+=(t1.tv_usec-t0.tv_usec);
     std::cout << "finished transmitting pulse sequence, tx worker time (us): " << elapsed << "\n";
+    DEBUG_PRINT("BURST_WORKER finished\n");
 
  
 }

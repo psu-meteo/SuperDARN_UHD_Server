@@ -2,12 +2,16 @@
 import numpy as np
 import uuid
 import collections
+import pdb
 from socket_utils import *
 
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
+UHD_TRIGGER_BUSY = ord('b')
+UHD_TRIGGER_PROCESS = ord('p')
+UHD_SETUP_READY = ord('y')
 UHD_CLRFREQ = ord('c')
 UHD_EXIT = ord('e')
 
@@ -56,8 +60,22 @@ class driver_command(object):
             for item in self.dataqueue:
                 item.transmit(clientsock)
 
+    # ask all clients for a return value, compare against command
+    # normally, client will indicate success by sending the command byte back to the server 
+    def client_return(self, dtype = np.uint8, check_return = True):
+        returns = []
+        for client in self.clients:
+            r = recv_dtype(client, dtype)
+            if check_return:
+                assert(r == self.command)
+
+            returns.append(r)
+
+        return returns
+
     def receive(self, sock):
         for item in self.dataqueue:
+            print('receiving {}'.format(item.name))
             self.payload[item.name] = item.receive(sock)
 
 class server_ctrlprm(driver_command):
@@ -160,16 +178,21 @@ class cuda_setup_command(driver_command):
        
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, ctrlprm, sequence_manager):
+    def __init__(self, usrps, ctrlprm, sequence, rfrate):
         driver_command.__init__(self, usrps, UHD_SETUP)
-
+        txfreq = ctrlprm['tfreq'] * 1000
+        rxfreq = ctrlprm['rfreq'] * 1000
+        txrate = rfrate
+        rxrate = rfrate
+        npulses = sequence.npulses
+        num_rf_samples = (rfrate / sequence.txbbrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
         self.queue(rxrate, np.float64, 'rxrate')
-        self.queue(npulses, np.uint32, 'npulses')
-        self.queue(num_requested_samples, np.uint64, 'num_requested_samples')
-        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
+        self.queue(npulses, np.uint32, npulses)
+        self.queue(num_rf_samples, np.uint64, 'num_requested_samples')
+        self.queue(sequence.pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
 
 # set rxfe (amplifier and attenuator) settings 
 class usrp_rxfe_setup_command(driver_command):

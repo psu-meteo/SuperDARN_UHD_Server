@@ -131,11 +131,12 @@ class sequenceManager(object):
         self.loaded_seq_id = self.stored_seq_id
 
 class dmsg_handler(object):
-    def __init__(self, arbysock, usrpsocks, cudasocks, usrp_config, sequence_manager):
+    def __init__(self, arbysock, usrpsocks, cudasocks, usrp_config, cuda_config, sequence_manager):
         self.arbysock = arbysock
         self.usrpsocks = usrpsocks 
         self.cudasocks = cudasocks 
         self.usrp_config = usrp_config
+        self.cuda_config = cuda_config
         self.sequence_manager = sequence_manager 
         self.status = 0;
 
@@ -292,10 +293,14 @@ class exit_handler(dmsg_handler):
 class pretrigger_handler(dmsg_handler):
     def process(self):
         beam = self.ctrlprm['tbeam'] 
+
+        # extract sampling info from cuda driver
+        rfrate = self.cuda_config['FSampTX']
+        
         sequence = self.sequence_manager.getSequence(self.ctrlprm['channel'])
         # provide fresh samples to usrp_driver.cpp shared memory if beam or sequence has changed
         if (self.sequence_manager.sequenceUpdateCheck(beam)):
-            cmd = usrp_setup_command(self.usrpsocks, self.ctrlprm, sequence)
+            cmd = usrp_setup_command(self.usrpsocks, self.ctrlprm, sequence, rfrate)
             cmd.transmit()
             self.sequence_manager.sequencesLoaded(beam)
 
@@ -498,7 +503,7 @@ class settings_handler(dmsg_handler):
         # set RF settings
         kodiak_set_rxfe(self.usrpsocks, rf_settings);
 
-def kodiak_set_rxfe(handler, rf_settings):
+def kodiak_set_rxfe(usrpsocks, rf_settings):
     amp0 = rf_settings[1] # amp1 in RXFESettings struct
     amp1 = rf_settings[2] # amp2 in RXFESettings struct
     att_p5dB = np.uint8((rf_settings[4] > 0))
@@ -507,7 +512,7 @@ def kodiak_set_rxfe(handler, rf_settings):
     att_4dB = np.uint8((rf_settings[7] > 0))
     att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
 
-    cmd = usrp_rxfe_setup_command(self.usrpsocks, amp0, amp1, att)
+    cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
 
 class full_clrfreq_handler(dmsg_handler):
     # not applicable to USRP setup?
@@ -571,6 +576,11 @@ def main():
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
     
+    cuda_config = configparser.ConfigParser()
+    cuda_config.read('driver_config.ini')
+    cuda_config = cudadriverconfig['cuda_settings']
+
+
     # list of registered sequences
     sequence_manager = sequenceManager()
 
@@ -620,7 +630,7 @@ def main():
         if(VERBOSE):
             print('received {} command from arbyserver, processing'.format(ARBY_COMMAND_STRS[chr(dmsg['cmd'])]))
         try:
-            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks, usrp_config, sequence_manager)
+            handler = dmsg_handlers[chr(dmsg['cmd'])](arbysock, usrp_driver_socks, cuda_driver_socks, usrp_config, cuda_config, sequence_manager)
         except KeyError:
             # TODO: recover..
             warnings.warn("Warning, unrecognized arbyserver command: {}".format(dmsg['cmd']))

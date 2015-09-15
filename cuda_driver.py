@@ -51,6 +51,7 @@ sem_list = []
 
 swing = SWING0
 
+
 # python3 or greater is needed for direct transfers between shm and gpu memory
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
@@ -486,7 +487,7 @@ def main():
     # create command socket server to communicate with usrp_server.py
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    cmd_sock.bind((network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))   
+    cmd_sock.bind((network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
    
     # get size of shared memory buffer per-antenna in bytes from cudadriver_config.ini
     rxshm_size = shm_settings.getint('rxshm_size') 
