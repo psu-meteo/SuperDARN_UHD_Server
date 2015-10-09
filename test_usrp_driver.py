@@ -14,7 +14,7 @@ from drivermsg_library import *
 from socket_utils import *
 from cuda_driver import *
 
-START_DRIVER = True
+START_DRIVER = False
 ANTENNA_UNDER_TEST = 1
 
 rx_shm_list = [[],[]]
@@ -86,7 +86,7 @@ class USRP_ServerTestCases(unittest.TestCase):
                 print('connecting to usrp driver failed on attempt ' + str(i + 1))
                 time.sleep(3)
 
-                if (i == max_connect_attempts - 1):
+                if i == (max_connect_attempts - 1):
                     subprocess.Popen(['pkill', 'usrp_driver'])
                     print('connecting to usrp driver failed, exiting')
                     sys.exit(1)
@@ -99,7 +99,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             sem.release()
             sem.unlink()
 
-        stop_usrpserver(self.serversock, self.pid)
+        #stop_usrpserver(self.serversock, self.pid)
         self.serversock.close()
     '''
     # test setting up usrp.. 
@@ -162,14 +162,20 @@ class USRP_ServerTestCases(unittest.TestCase):
             assert(r == UHD_TRIGGER_PULSE) 
 
         cprint('checking trigger pulse data', 'blue')
-
         # request pulse data
         transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
         cmd = usrp_ready_data_command([self.serversock])
+
+        print('sleeping for a few seconds..')
+        time.sleep(10)
+        print('finished sleeping, looking for pulse data')
+
         cmd.receive(self.serversock) # get pulse data
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_READY_DATA) 
+
+        cprint('finished test trigger pulse', 'green')
 
 
 

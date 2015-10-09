@@ -10,7 +10,7 @@ INCLUDES=-I"../include/" -I"include/" -I"../tsg/include" -I"../iniparser3.0b/src
 	 -I"${HOME}/uhd/host/include" -I"${HOME}/uhd/host/include/uhd/types" -I"${HOME}/uhd/host/include/uhd/usrp" \
 	 -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/base" -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/superdarn"
 
-CPP_SOURCES=usrp_driver.cpp dio.cpp burst_worker.cpp recv_clr_freq.cpp recv_and_hold.cpp
+CPP_SOURCES=usrp_driver.cpp dio.cpp burst_worker.cpp recv_clr_freq.cpp recv_and_hold.cpp usrp_utils.cpp
 #CUDA_SOURCE0=rx_cuda.cu
 #CUDA_SOURCE1=tx_cuda.cu
 
@@ -37,4 +37,7 @@ $(EXECUTABLE): $(CPP_OBJECTS)
 
 clean:
 	rm -rf *.o *.pyc $(EXECUTABLE)
+
+debug:
+	gdb --args $(EXECUTABLE) --host usrp1 --ant 1 --intclk
 

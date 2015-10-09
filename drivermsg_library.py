@@ -4,6 +4,7 @@ import uuid
 import collections
 import pdb
 from socket_utils import *
+from termcolor import cprint
 
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
@@ -67,16 +68,17 @@ class driver_command(object):
         for client in self.clients:
             r = recv_dtype(client, dtype)
             if check_return:
-                assert(r == self.command)
-
+                assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
+            
             returns.append(r)
-
+        cprint('command return success', 'yellow')
         return returns
 
     def receive(self, sock):
         for item in self.dataqueue:
-            print('receiving {}'.format(item.name))
+            cprint('waiting for {}'.format(item.name), 'yellow')
             self.payload[item.name] = item.receive(sock)
+            cprint('found {}'.format(item.name), 'yellow')
 
 class server_ctrlprm(driver_command):
     def __init__(self, servers = None, ctrlprm_dict = None):
@@ -185,7 +187,7 @@ class usrp_setup_command(driver_command):
         txrate = rfrate
         rxrate = rfrate
         npulses = sequence.npulses
-        num_rf_samples = (rfrate / sequence.txbbrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)
+        num_rf_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)))
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
@@ -218,7 +220,7 @@ class usrp_ready_data_command(driver_command):
 
     def receive(self, sock):
         super().receive(sock)
-        self.samples = recv_dtype(sock, np.complex64, nitems = self.payload['nsamples'])
+        self.samples = recv_dtype(sock, np.uint16, nitems = 2 * self.payload['nsamples'])
 
 
 
