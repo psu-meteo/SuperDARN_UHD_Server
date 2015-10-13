@@ -72,8 +72,8 @@ public:
 void recv_and_hold(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
-    std::vector<void *> rx_data_buffers,
-    size_t num_requested_samples,
+    std::vector<std::complex<int16_t>> rx_data_buffer,
+    size_t num_requested_samps,
     uhd::time_spec_t start_time,
     int32_t *return_status
 ){
@@ -81,14 +81,15 @@ void recv_and_hold(
     DEBUG_PRINT("entering RECV_AND_HOLD\n");
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
     std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
-    size_t num_rx_samps;
 
     //setup streaming
     uhd::rx_metadata_t md;
-    float timeout = 1.0;
+    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
+
+    double timeout = 1.0;
     
     uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
-    stream_cmd.num_samps = num_requested_samples;
+    stream_cmd.num_samps = num_requested_samps;
     stream_cmd.stream_now = false;
     stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
    
@@ -125,10 +126,8 @@ void recv_and_hold(
     c.value = 0;
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END).get_real_secs();
     cmdq.push(c);
-
 	debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("RECV_AND_HOLD pushed gpio commands at usrp_time %2.4f\n", debugt);
-
     // issue gpio commands in time sorted order 
     // set_command_time must be sent in temporal order, they are sent into a fifo queue on the usrp and will block until executed
     // clear_command_time does not clear or bypass the buffer as of 10/2014..
@@ -154,29 +153,48 @@ void recv_and_hold(
     // for more complicated pulse sequences, we may need to fill the buffer partway through the pulse sequence.. 
     //
     // TODO: set timeout dynamically 
-    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
 
     */
     /*
 	debugt = usrp->get_time_now().get_real_secs();
 
-    DEBUG_PRINT("RECV_AND_HOLD recv samples, requesting %d samples at usrp time %.4f for time %.4f, timeout %2.4f\n", (int32_t) num_requested_samples, debugt, stream_cmd.time_spec.get_real_secs(), timeout);
-
-    if(num_requested_samples) {
-        num_rx_samps = rx_stream->recv(rx_data_buffers, num_requested_samples, md, timeout);
-    }
-    else {
-		std::cerr << "RECV_AND_HOLD, Error, no samples requested!" << "\n";;
-    }
+    DEBUG_PRINT("RECV_AND_HOLD recv samples, requesting %d samples at usrp time %.4f for time %.4f, timeout %2.4f\n", (int32_t) num_requested_samps, debugt, stream_cmd.time_spec.get_real_secs(), timeout);
     */
+    // reform using /home/kleinjt/repos/uhd/host/examples/rx_samples_to_file.cpp?
+    
+    size_t num_acc_samps = 0;
+    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
+
+    while(num_acc_samps < num_requested_samps) {
+        size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
+        size_t num_rx_samps = rx_stream->recv(&rx_data_buffer[num_acc_samps], samp_request, md, timeout);
+        
+        timeout = 0.1;
+
+        //handle the error codes
+        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
+        if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
+            throw std::runtime_error(str(boost::format(
+                "Receiver error %s"
+            ) % md.strerror()));
+        }
+        
+        if (DEBUG) {
+            std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+        }
+        num_acc_samps += num_rx_samps;
+    }
+
     DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");
 
-	if (num_rx_samps != num_requested_samples){
+	if (num_acc_samps != num_requested_samps){
         *return_status=-1;
 		uhd::time_spec_t rx_error_time = usrp->get_time_now();
-		std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";;
-		std::cerr << "Samples rx'ed: " << num_rx_samps << 
-			" (expected " << num_requested_samples << ")" << std::endl;
+		std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
+
+		std::cerr << "Error code: " << md.error_code << "\t";
+		std::cerr << "Samples rx'ed: " << num_acc_samps << 
+			" (expected " << num_requested_samps << ")" << std::endl;
 	}
 
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {

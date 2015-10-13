@@ -373,13 +373,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
-
-    std::vector<std::complex<int16_t>> rx_data_buffer(rx_stream->get_max_num_samps());
-    std::vector<void *> rx_data_buffers;
-
-    for (size_t ch = 0; ch < rx_stream->get_num_channels(); ch++)
-            rx_data_buffers.push_back(&rx_data_buffer.front()); //same buffer for each channel
-
+    // TODO: this should be sized for a maximum reasonable sample request 
+    std::vector<std::complex<int16_t>> rx_data_buffer;
 
     // init rxfe
     kodiak_init_rxfe(usrp);
@@ -472,7 +467,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     for(uint32_t i = 0; i < npulses; i++) {
                         pulse_offsets[i] = sock_get_float64(driverconn); 
                     }
-                    
+                             
+                    rx_data_buffer.resize(num_requested_samples);
+
                     usrp->set_rx_rate(rxrate);
                     usrp->set_tx_rate(txrate);
                     
@@ -558,7 +555,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
                         //uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, rx_data_buffers, num_requested_samples, start_time, &rx_worker_status)); 
-                        recv_and_hold(usrp, rx_stream, rx_data_buffers, num_requested_samples, start_time, &rx_worker_status); 
+                        recv_and_hold(usrp, rx_stream, rx_data_buffer, num_requested_samples, start_time, &rx_worker_status); 
                         //uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
