@@ -72,7 +72,7 @@ public:
 void recv_and_hold(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
-    std::vector<std::complex<int16_t>> rx_data_buffer,
+    std::vector<std::complex<int16_t>> *rx_data_buffer,
     size_t num_requested_samps,
     uhd::time_spec_t start_time,
     int32_t *return_status
@@ -167,7 +167,7 @@ void recv_and_hold(
 
     while(num_acc_samps < num_requested_samps) {
         size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
-        size_t num_rx_samps = rx_stream->recv(&rx_data_buffer[num_acc_samps], samp_request, md, timeout);
+        size_t num_rx_samps = rx_stream->recv(&((*rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
         
         timeout = 0.1;
 
@@ -178,11 +178,18 @@ void recv_and_hold(
                 "Receiver error %s"
             ) % md.strerror()));
         }
-        
+                
         if (DEBUG) {
             std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
         }
         num_acc_samps += num_rx_samps;
+    }
+
+    if (DEBUG) {
+        printf("rx_data_buffer addr: %p\n", (void *) rx_data_buffer);
+        for (size_t i = 0; i < 10; i++) {
+            std::cout << boost::format("i: %u, %f + j%f") % i % (*rx_data_buffer)[i].real() % (*rx_data_buffer)[i].imag() << std::endl;
+        }
     }
 
     DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");

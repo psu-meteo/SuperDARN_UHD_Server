@@ -59,7 +59,6 @@ def stop_usrpserver(sock, pid):
     time.sleep(10) # delay to let the usrp_driver settle..
     #pdb.set_trace()
     
-
 class USRP_ServerTestCases(unittest.TestCase):
     def setUp(self):
         antennas = [1]
@@ -167,7 +166,6 @@ class USRP_ServerTestCases(unittest.TestCase):
         cmd = usrp_ready_data_command([self.serversock])
 
         print('sleeping for a few seconds..')
-        time.sleep(10)
         print('finished sleeping, looking for pulse data')
 
         cmd.receive(self.serversock) # get pulse data
@@ -176,8 +174,16 @@ class USRP_ServerTestCases(unittest.TestCase):
             assert(r == UHD_READY_DATA) 
 
         cprint('finished test trigger pulse', 'green')
+        
+        # plot data
+        shm = rx_shm_list[0][0]
+        shm.seek(0)
+        ar = np.frombuffer(shm, dtype=np.int16, count=10000)
+        import matplotlib.pyplot as plt
+        pdb.set_trace()
 
 
+        
 
     '''
     # test clear frequency
@@ -186,10 +192,6 @@ class USRP_ServerTestCases(unittest.TestCase):
 
     def test_ready_data_process(self):
         pass
- 
-    def test_ready_data_busy(self):
-        pass
-  
          
     '''  
 if __name__ == '__main__':

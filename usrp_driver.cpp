@@ -68,6 +68,9 @@
 
 #define ARG_MAXERRORS 10
 
+// blast samples over socket for debugging, requries cooperation with drivermsg_library.py..
+#define SOCK_SAMPLES 0
+
 #define USRP_SETUP 's'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
@@ -554,9 +557,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        //uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, rx_data_buffers, num_requested_samples, start_time, &rx_worker_status)); 
-                        recv_and_hold(usrp, rx_stream, rx_data_buffer, num_requested_samples, start_time, &rx_worker_status); 
-                        //uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+                        uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, &rx_data_buffer, num_requested_samples, start_time, &rx_worker_status)); 
+                        //recv_and_hold(usrp, rx_stream, &rx_data_buffer, num_requested_samples, start_time, &rx_worker_status); 
+                        uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, pulse_tx_samps, usrp->get_tx_rate(), pulse_times)); 
+
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
                         swing = toggle_swing(swing); 
@@ -580,12 +584,24 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, num_requested_samples);     // nsamples;  send send number of samples
                     
-                    // TODO: optimize this?
-                    // TODO: send back data..
-                    //
-                    DEBUG_PRINT("READY_DATA returning data buffer\n");
-                    for(i = 0; i < num_requested_samples; i++) {
-                        sock_send_complex_int16(driverconn, rx_data_buffer[i]);
+                    if(SOCK_SAMPLES) {
+                        // TODO: optimize this?
+                        // TODO: send back data..
+                        DEBUG_PRINT("READY_DATA returning data buffer\n");
+                        for(i = 0; i < num_requested_samples; i++) {
+                            sock_send_complex_int16(driverconn, rx_data_buffer[i]);
+                        }
+                    }
+
+                    DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
+                    memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_samples);
+                    DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
+
+                    if(DEBUG) {
+                        for(uint32_t p_i = 0; p_i < 10; p_i++) {
+                            std::cout << boost::format("READY_DATA buf i[%d]: %f + j%f") % p_i % rx_data_buffer[p_i].real() % rx_data_buffer[p_i].imag() << std::endl;
+                            std::cout << boost::format("READY_DATA shm i[%d]: %f + j%f") % p_i % ((std::complex<int16_t> *) shm_swingarx)[p_i].real()  % ((std::complex<int16_t> *) shm_swingarx)[p_i].imag()   << std::endl; //(std::complex<int16_t> *) shm_swingarx[i].imag() << std::endl;
+                        }
                     }
                     state = ST_READY; 
 

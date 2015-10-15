@@ -218,9 +218,11 @@ class usrp_ready_data_command(driver_command):
         self.queue(antenna, np.int32, 'antenna')
         self.queue(nsamples, np.int32, 'nsamples')
 
-    def receive(self, sock):
+    def receive(self, sock, sock_samples = False):
         super().receive(sock)
-        self.samples = recv_dtype(sock, np.uint16, nitems = 2 * self.payload['nsamples'])
+        
+        if sock_samples:
+            self.samples = recv_dtype(sock, np.uint16, nitems = 2 * self.payload['nsamples'])
 
 
 
