@@ -187,13 +187,15 @@ class usrp_setup_command(driver_command):
         txrate = rfrate
         rxrate = rfrate
         npulses = sequence.npulses
-        num_rf_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)))
+        num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)))
+        num_tx_rf_samples = np.round(rfrate * 10e-6)# TODO: figure this out..
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, npulses)
-        self.queue(num_rf_samples, np.uint64, 'num_requested_samples')
+        self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
+        self.queue(num_tx_rf_samples, np.uint64, 'num_tx_rf_samples')
         self.queue(sequence.pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
 
 # set rxfe (amplifier and attenuator) settings 

@@ -24,14 +24,13 @@
 
 
 extern int verbose;
-int debug=0;
 
 /***********************************************************************
  * tx_worker function
  **********************************************************************/
 void tx_worker(
     uhd::tx_streamer::sptr tx_stream,
-    std::vector<std::complex<int16_t> *>& pulse_seq_ptrs,
+    std::vector<std::complex<int16_t> *> pulse_seq_ptrs,
     uint32_t pulse_length,
     double tx_rate,
     std::vector<uhd::time_spec_t> pulse_times 
@@ -54,16 +53,12 @@ void tx_worker(
         double timeout = pulse_duration + pulse_times[i].get_real_secs() + .0001;
 
         //Initialize the temporary pointers according to the argument passed to the function
-        std::vector<std::complex<int16_t> *> temp_ptrs(pulse_seq_ptrs.size());
+        std::vector<std::complex<int16_t> *> temp_ptrs(pulse_times.size());
         // pulse_seq_ptrs is length 8
-        if (debug) std::cout << "num tx channels: " << tx_stream->get_num_channels() << std::endl;
-        if (debug) std::cout << "sequence length : " << pulse_length << std::endl;
-        if (debug) std::cout << "number of pulses : " << pulse_times.size() << std::endl;
-        if (debug) std::cout << "pointer values: " << std::endl;
-
-        for (uint32_t t=0; t<pulse_seq_ptrs.size(); t++){
-            temp_ptrs[t] = pulse_seq_ptrs.at(t);
-        }
+        if (DEBUG) std::cout << "num tx channels: " << tx_stream->get_num_channels() << std::endl;
+        if (DEBUG) std::cout << "sequence length : " << pulse_length << std::endl;
+        if (DEBUG) std::cout << "number of pulses : " << pulse_times.size() << std::endl;
+        if (DEBUG) std::cout << "pointer values: " << std::endl;
 
         size_t nacc_samps = 0;
         size_t spb = tx_stream->get_max_num_samps();
@@ -72,19 +67,19 @@ void tx_worker(
         //Now go for it!
         while(nacc_samps < pulse_length){
             size_t samps_to_send = std::min(pulse_length - nacc_samps, spb);
-            size_t ntx_samps = tx_stream->send(temp_ptrs, samps_to_send, md, timeout);
+            size_t ntx_samps = tx_stream->send(pulse_seq_ptrs.at(i), samps_to_send, md, timeout);
 
             md.start_of_burst = false;
             md.has_time_spec = false;
 
-            if(debug) std::cout << boost::format("Sent packet: %u samples") % ntx_samps << std::endl;
+            if(DEBUG) std::cout << boost::format("Sent packet: %u samples") % ntx_samps << std::endl;
             nacc_samps += ntx_samps;
         }
 
         md.end_of_burst = true;
         tx_stream->send(temp_ptrs, 0, md, timeout);
 
-        if (debug) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
+        if (DEBUG) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
         uhd::async_metadata_t async_md;
         bool got_async_burst_ack = false;
 
@@ -92,7 +87,7 @@ void tx_worker(
             got_async_burst_ack = (async_md.event_code == uhd::async_metadata_t::EVENT_CODE_BURST_ACK);
         }
         
-        if (debug) std::cout << (got_async_burst_ack? "success" : "fail") << std::endl;
+        if (DEBUG) std::cout << (got_async_burst_ack? "success" : "fail") << std::endl;
 
         DEBUG_PRINT("BURST_WORKER finished pulse\n");
     }

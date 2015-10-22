@@ -176,11 +176,17 @@ class USRP_ServerTestCases(unittest.TestCase):
         cprint('finished test trigger pulse', 'green')
         
         # plot data
-        shm = rx_shm_list[0][0]
-        shm.seek(0)
-        ar = np.frombuffer(shm, dtype=np.int16, count=10000)
+        rx_shm = rx_shm_list[0][0]
+        rx_shm.seek(0)
+        ar = np.frombuffer(rx_shm, dtype=np.int16, count=10000)
+        import matplotlib.pyplot as plt
+
+        tx_shm = tx_shm_list[0]
+        tx_shm.seek(0)
+        ar = np.frombuffer(tx_shm, dtype=np.int16, count=10000)
         import matplotlib.pyplot as plt
         pdb.set_trace()
+
 
 
         

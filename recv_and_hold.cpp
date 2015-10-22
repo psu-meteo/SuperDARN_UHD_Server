@@ -185,13 +185,6 @@ void recv_and_hold(
         num_acc_samps += num_rx_samps;
     }
 
-    if (DEBUG) {
-        printf("rx_data_buffer addr: %p\n", (void *) rx_data_buffer);
-        for (size_t i = 0; i < 10; i++) {
-            std::cout << boost::format("i: %u, %f + j%f") % i % (*rx_data_buffer)[i].real() % (*rx_data_buffer)[i].imag() << std::endl;
-        }
-    }
-
     DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");
 
 	if (num_acc_samps != num_requested_samps){
