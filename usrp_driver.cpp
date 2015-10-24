@@ -64,8 +64,7 @@
 #define SETUP_READY 'y'
 #define TRIGGER_PROCESS 'p'
 
-#define START_OFFSET .45
-
+#define START_OFFSET .03
 #define ARG_MAXERRORS 10
 #define MAX_TX_PULSES 10
 
@@ -450,7 +449,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 if(connect_retrys-- < 0) {
                     exit(1);
                 }
-                sleep(5);
+                sleep(1);
                 break;
             }
             connect_retrys = MAX_SOCKET_RETRYS;
@@ -579,10 +578,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        //uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status)); 
+                        uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status)); 
                         //recv_and_hold(usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status); 
-                        //uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, num_tx_rf_samples, usrp->get_tx_rate(), pulse_times)); 
-                        tx_worker(tx_stream, pulse_seq_ptrs, num_tx_rf_samples, usrp->get_tx_rate(), pulse_times);
+                        uhd_threads.create_thread(boost::bind(tx_worker, tx_stream, pulse_seq_ptrs, num_tx_rf_samples, usrp->get_tx_rate(), pulse_times)); 
+                        //tx_worker(tx_stream, pulse_seq_ptrs, num_tx_rf_samples, usrp->get_tx_rate(), pulse_times);
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
                         swing = toggle_swing(swing); 

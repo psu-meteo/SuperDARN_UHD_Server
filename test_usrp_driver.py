@@ -143,48 +143,53 @@ class USRP_ServerTestCases(unittest.TestCase):
     '''
     # test trigger pulse read
     def test_trigger_pulse(self):
+        
+
         cprint('testing usrp trigger','red')
         seq = create_testsequence()
+
+        cprint('populating tx shm sample buffer','red')
+        tx_shm = tx_shm_list[0]
+        tx_shm.seek(0)
+        signal = np.arange(1000, dtype=np.int16)
+        tx_shm.write(signal.tobytes())
+
+
         cprint('sending setup command', 'blue')
         cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_SETUP)
+    
+        for i in range(100):
+            cprint('sending trigger pulse command', 'blue')
+            cmd = usrp_trigger_pulse_command([self.serversock])
+            cmd.transmit()
 
-        cprint('sending trigger pulse command', 'blue')
-        cmd = usrp_trigger_pulse_command([self.serversock])
-        cmd.transmit()
+            client_returns = cmd.client_return()
+            for r in client_returns:
+                assert(r == UHD_TRIGGER_PULSE) 
 
-        client_returns = cmd.client_return()
-        for r in client_returns:
-            assert(r == UHD_TRIGGER_PULSE) 
+            cprint('checking trigger pulse data', 'blue')
+            # request pulse data
+            transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
+            cmd = usrp_ready_data_command([self.serversock])
 
-        cprint('checking trigger pulse data', 'blue')
-        # request pulse data
-        transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
-        cmd = usrp_ready_data_command([self.serversock])
+            print('looking for pulse data')
+            cmd.receive(self.serversock) # get pulse data
+            client_returns = cmd.client_return()
+            for r in client_returns:
+                assert(r == UHD_READY_DATA) 
 
-        print('sleeping for a few seconds..')
-        print('finished sleeping, looking for pulse data')
-
-        cmd.receive(self.serversock) # get pulse data
-        client_returns = cmd.client_return()
-        for r in client_returns:
-            assert(r == UHD_READY_DATA) 
-
-        cprint('finished test trigger pulse', 'green')
-        
+            cprint('finished test trigger pulse', 'green')
+            
         # plot data
         rx_shm = rx_shm_list[0][0]
         rx_shm.seek(0)
         ar = np.frombuffer(rx_shm, dtype=np.int16, count=10000)
         import matplotlib.pyplot as plt
 
-        tx_shm = tx_shm_list[0]
-        tx_shm.seek(0)
-        ar = np.frombuffer(tx_shm, dtype=np.int16, count=10000)
-        import matplotlib.pyplot as plt
         pdb.set_trace()
 
 

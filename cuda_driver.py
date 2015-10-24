@@ -40,8 +40,7 @@ C = 3e8
 
 rx_shm_list = [[],[]]
 tx_shm_list = []
-rx_semaphore_list = [[],[]] # [side][swing]
-tx_semaphore_list = [] 
+semaphore_list = [[],[]] 
 swings = [SWING0, SWING1]
 sides = [SIDEA]
 
@@ -79,9 +78,8 @@ class cuda_setup_handler(cudamsg_handler):
     def process(self):
         # acquire rx/tx semaphores
         # (don't drag the samples rug out from under an ongoing transmission)
-        rx_semaphore_list[SIDEA][SWING0].acquire()
-        rx_semaphore_list[SIDEA][SWING1].acquire()
-        tx_semaphore_list[SIDEA].acquire()
+        semaphore_list[SIDEA][SWING0].acquire()
+        semaphore_list[SIDEA][SWING1].acquire()
         
         # get picked sequence information dict from usrp_server
         cmd = cuda_setup_command([self.sock])
@@ -100,9 +98,8 @@ class cuda_setup_handler(cudamsg_handler):
         self.gpu.txsamples_host_to_shm()
                 
         # release semaphores
-        rx_semaphore_list[SIDEA][SWING0].release()
-        rx_semaphore_list[SIDEA][SWING1].release()
-        tx_semaphore_list[SIDEA].release()
+        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING1].release()
     
     # generate baseband sample vectors from sequence information
     def generate_bbtx(self, shapefilter = None):
@@ -180,7 +177,7 @@ class cuda_get_data_handler(cudamsg_handler):
         samples = self.gpu.pull_rxdata()
         self.sock.sendall(samples.tobytes())
         # TODO: remove hardcoded swing/side
-        rx_semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING0].release()
 
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
@@ -193,7 +190,7 @@ class cuda_process_handler(cudamsg_handler):
         cmd = cuda_process_command([self.sock], SWING0)
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
-        rx_semaphore_list[SIDEA][SWING0].acquire()
+        semaphore_list[SIDEA][SWING0].acquire()
         
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
@@ -302,15 +299,15 @@ class ProcessingGPU(object):
         # calculate rx sample decimation rates
         nbbsamps_rx = int(sequence.ctrlprm['number_of_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate
-        nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
+        self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
         # compute decimation rate for RF to IF, this is fixed..
         # so, current worst case is 16 antennas with 2 channels, 10 MSPS sampling rate
         # block size of 1024
         # so, (1024 / 16 / 2) = 32
         # unrolled pre-reduction of 2 in rx kernels
         # so, decimation rate of 64
-        nifsamps_rx = int(np.round(nrfsamps_rx / self.rfifrate))
-        self.dmrate_rftoif = int(nrfsamps_rx / nifsamps_rx)
+        nifsamps_rx = int(np.round(self.nrfsamps_rx / self.rfifrate))
+        self.dmrate_rftoif = int(self.nrfsamps_rx / nifsamps_rx)
 
         # calculate tx upsample rates
         # bb rates based on tx sample stepping in sequence object (5e-6 seconds)
@@ -331,7 +328,7 @@ class ProcessingGPU(object):
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
         self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, nrfsamps_tx), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         
         # TODO: look into memorypool and freeing page locked memory?
         # https://stackoverflow.com/questions/7651450/how-to-create-page-locked-memory-from-a-existing-numpy-array-in-pycuda
@@ -375,25 +372,18 @@ class ProcessingGPU(object):
     def _intify(self, tup):
         return tuple([int(v) for v in tup])
 
-    # transfer rf samples from shared memory to gpu
+    # transfer rf samples from shm to memory pagelocked to gpu (TODO: make sure it is float32..)
     def rxsamples_shm_to_gpu(self, shm):
         shm.seek(0)
-        pdb.set_trace()
-        # TODO: fix error at this line of code
-        '''
-        *** Boost.Python.ArgumentError: Python argument types in
-            pycuda._driver.memcpy_dtoh_async(numpy.int64, mmap.mmap)
-            did not match C++ signature:
-            memcpy_dtoh_async(pycudaboost::python::api::object dest, unsigned long long src, pycudaboost::python::api::object stream=None)
-        '''
-        cuda.memcpy_dtoh_async(shm, self.rx_samples_rf, stream = self.streams[swing])
-
-        shm.flush()
+        for ant in range(self.nants):
+            for ch in range(self.nchans):
+                self.rx_samples_rf[ant][ch] = np.frombuffer(shm, dtype=float, count = self.nrfsamps_rx)
                
     # kick off async data processing
     def rxsamples_process(self):
-        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_s0, block = self.rx_block_0, grid = self.rx_grid_if, stream = self.streams[swing])
-        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_s1, block = self.rx_block_1, grid = self.rx_grid_bb, stream = self.streams[swing])
+        pdb.set_trace()
+        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_rfif, block = self.rx_block_if, grid = self.rx_grid_if, stream = self.streams[swing])
+        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
     
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
@@ -499,8 +489,8 @@ def main():
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
 
-    rx_semaphore_list[SIDEA].append(create_sem(ant, swing))
-    rx_semaphore_list[SIDEA].append(create_sem(ant, swing))
+        semaphore_list[SIDEA].append(create_sem(ant, SWING0))
+        semaphore_list[SIDEA].append(create_sem(ant, SWING1))
     
     # create sigin_handler for graceful-ish cleanup on exit
     signal.signal(signal.SIGINT, sigint_handler)
