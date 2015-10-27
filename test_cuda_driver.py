@@ -51,11 +51,13 @@ class CUDA_ServerTestCases(unittest.TestCase):
     
     
     def test_cuda_getdata(self):
-        print('testing get data')
+        print('testing get data, running setup command')
+
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
 
+        print('running get data command')
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
 

@@ -30,5 +30,5 @@ clean:
 debug:
 	gdb --args $(EXECUTABLE) --host usrp1 --ant 1 --intclk
 
-
-
+cudebug:
+	 cuda-gdb --args python3 -m pycuda.debug cuda_driver.py 

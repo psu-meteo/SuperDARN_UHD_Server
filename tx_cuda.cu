@@ -1,6 +1,7 @@
 // CUDA function for transmit beamforming 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <complex.h>
 // threadIdx.x - time
 // blockDim.x - number of times (bb?)
@@ -80,5 +81,6 @@ __global__ void interpolate_and_multiply(
         outdata[outidx] = (int16_t) (0.95*32768*irf_samples[threadIdx.x]);
         outdata[outidx+1] = (int16_t) (0.95*32768*qrf_samples[threadIdx.x]);
     }
+
 }
 

@@ -2,7 +2,26 @@
 #include <stdint.h>
 #include "assert.h"
 
-__global__ void multiply_and_add(float ***samples, float ***odata, float **filter)
+// was samples[threadIdx.y][blockIdx.y][tsamp];
+__device__ size_t rf_sample_idx(uint32_t tsamp)
+{
+    return (threadIdx.y * blockDim.y * blockDim.x) + (blockIdx.y * blockDim.x) + tsamp;
+}
+
+// was filter[threadIdx.y][tfilt]
+__device__ size_t rf_filter_idx(uint32_t tfilt)
+{
+    return 4 * threadIdx.x * threadIdx.y; 
+}
+
+// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
+__device__ size_t rf_output_idx(int32_t output_idx)
+{
+    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
+}
+
+
+__global__ void multiply_and_add(float *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block
     __shared__ float qtemp[1024];
@@ -20,18 +39,18 @@ __global__ void multiply_and_add(float ***samples, float ***odata, float **filte
     float stride = 1./8; // The number of filter taps is (1./stride) times the decimation rate
     tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
 
-    float i0 = samples[threadIdx.y][blockIdx.y][tsamp];
-    float q0 = samples[threadIdx.y][blockIdx.y][tsamp+1];
-    float i1 = samples[threadIdx.y][blockIdx.y][tsamp+2];
-    float q1 = samples[threadIdx.y][blockIdx.y][tsamp+3];
+    float i0 = samples[rf_sample_idx(tsamp)];
+    float q0 = samples[rf_sample_idx(tsamp+1)];
+    float i1 = samples[rf_sample_idx(tsamp+2)];
+    float q1 = samples[rf_sample_idx(tsamp+3)];
 
 
     // get filter values from global memory
     tfilt = 4*threadIdx.x;
-    float p0re = filter[threadIdx.y][tfilt];
-    float p0im = filter[threadIdx.y][tfilt+1];
-    float p1re = filter[threadIdx.y][tfilt+2];
-    float p1im = filter[threadIdx.y][tfilt+3];
+    float p0re = filter[rf_filter_idx(tfilt)];
+    float p0im = filter[rf_filter_idx(tfilt+1)];
+    float p1re = filter[rf_filter_idx(tfilt+2)];
+    float p1im = filter[rf_filter_idx(tfilt+3)];
 
     // mix samples with nco, perform first reduction
     itemp[tid] = p0re * i0 - p0im * q0 + p1re * i1 - p1im * q1;
@@ -65,13 +84,31 @@ __global__ void multiply_and_add(float ***samples, float ***odata, float **filte
 
 
      if (threadIdx.x == 0) {
-        odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
-        odata[threadIdx.y][blockIdx.y][output_idx+1] = (float) qtemp[tid];
+        odata[rf_output_idx(output_idx)] = (float) itemp[tid];
+        odata[rf_output_idx(output_idx+1)] = (float) qtemp[tid];
      }  
 }       
 
+// was samples[blockIdx.y][tsamp];
+__device__ size_t if_sample_idx(uint32_t tsamp)
+{
+    return (blockIdx.y * blockDim.x) + tsamp;
+}
 
-__global__ void multiply_mix_add(int16_t **samples, float ***odata, float **filter)
+// was filter[threadIdx.y][tfilt]
+__device__ size_t if_filter_idx(uint32_t tfilt)
+{
+    return 4 * threadIdx.x * threadIdx.y; 
+}
+
+// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
+__device__ size_t if_output_idx(int32_t output_idx)
+{
+    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
+}
+
+
+__global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];
     __shared__ float qtemp[1024];
@@ -97,15 +134,15 @@ __global__ void multiply_mix_add(int16_t **samples, float ***odata, float **filt
     assert(tsamp <= (4 * blockDim.x * gridDim.x));
 
     itemp[tid] =
-        filter[threadIdx.y][tfilt] * samples[blockIdx.y][tsamp] -
-        filter[threadIdx.y][tfilt+1] * samples[blockIdx.y][tsamp+1] +
-        filter[threadIdx.y][tfilt+2] * samples[blockIdx.y][tsamp+2] -
-        filter[threadIdx.y][tfilt+3] * samples[blockIdx.y][tsamp+3];
+        filter[if_filter_idx(tfilt)]   * samples[if_sample_idx(tsamp)] -
+        filter[if_filter_idx(tfilt+1)] * samples[if_sample_idx(tsamp+1)] +
+        filter[if_filter_idx(tfilt+2)] * samples[if_sample_idx(tsamp+2)] -
+        filter[if_filter_idx(tfilt+3)] * samples[if_sample_idx(tsamp+3)];
     qtemp[tid] =
-        filter[threadIdx.y][tfilt] * samples[blockIdx.y][tsamp+1] +
-        filter[threadIdx.y][tfilt+1] * samples[blockIdx.y][tsamp] +
-        filter[threadIdx.y][tfilt+2] * samples[blockIdx.y][tsamp+3] +
-        filter[threadIdx.y][tfilt+3] * samples[blockIdx.y][tsamp+2];
+        filter[if_filter_idx(tfilt)]   * samples[if_sample_idx(tsamp+1)] +
+        filter[if_filter_idx(tfilt+1)] * samples[if_sample_idx(tsamp)] +
+        filter[if_filter_idx(tfilt+2)] * samples[if_sample_idx(tsamp+3)] +
+        filter[if_filter_idx(tfilt+3)] * samples[if_sample_idx(tsamp+2)];
 
      __syncthreads();
 
@@ -152,8 +189,8 @@ __global__ void multiply_mix_add(int16_t **samples, float ***odata, float **filt
         /*Now do phase adjustment on the output samples*/
         // phase increment of the NCO can be calculated from two adjacent filter taps
         double phase_inc =
-            atan(filter[threadIdx.y][tfilt+3] / filter[threadIdx.y][tfilt+2]) -
-            atan(filter[threadIdx.y][tfilt+1] / filter[threadIdx.y][tfilt]);
+            atan(filter[if_filter_idx(tfilt+3)] / filter[if_filter_idx(tfilt+2)]) -
+            atan(filter[if_filter_idx(tfilt+1)] / filter[if_filter_idx(tfilt)]);
 
         /*Phase remainder exists because the NCO oscillator 
         may not complete an exact 360% rotation in a filter window*/
@@ -164,8 +201,8 @@ __global__ void multiply_mix_add(int16_t **samples, float ***odata, float **filt
         qtemp[tid] = ltemp * sin(phi_rem) + qtemp[tid] * cos(phi_rem);
 
         //deciding the output
-        odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
-        odata[threadIdx.y][blockIdx.y][output_idx+1] = (float) qtemp[tid];
+        odata[if_output_idx(output_idx)] = (float) itemp[tid];
+        odata[if_output_idx(output_idx+1)] = (float) qtemp[tid];
      }
 }
 

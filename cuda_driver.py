@@ -182,6 +182,7 @@ class cuda_get_data_handler(cudamsg_handler):
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
     def process(self):
+       pdb.set_trace()
        clean_exit() 
 
 # copy data to gpu, start processing
@@ -353,7 +354,7 @@ class ProcessingGPU(object):
         self.rx_grid_if = self._intify((nifsamps_rx, self.nants, 1))
         self.rx_grid_bb = self._intify((nbbsamps_rx, self.nants, 1))
         self.rx_block_if = self._intify((self.ntaps_rfif / 2, self.nchans, 1))
-        self.rx_block_bb = self._intify((1,nbbsamps_rx))
+        self.rx_block_bb = self._intify((nbbsamps_rx, 1, 1))
         
         # check if up/downsampling cuda kernels block sizes exceed hardware limits 
         max_blocksize = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
@@ -381,14 +382,21 @@ class ProcessingGPU(object):
                
     # kick off async data processing
     def rxsamples_process(self):
+        print('processing rf -> if')
+        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.cu_rx_filtertaps_rfif, block = self.rx_block_if, grid = self.rx_grid_if, stream = self.streams[swing])
+        print('processing if -> bb')
+        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
+
         pdb.set_trace()
-        self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.rx_filtertap_rfif, block = self.rx_block_if, grid = self.rx_grid_if, stream = self.streams[swing])
-        self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.rx_filtertap_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
-    
+        # so, kernel is failing
+        self.streams[swing].synchronize()
+        pdb.set_trace()
+
+
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
         self.streams[swing].synchronize()
-        cuda.memcpy_dtoh(self.cu_rx_samples_bb, self.rx_samples_bb)
+        cuda.memcpy_dtoh(self.rx_samples_bb, self.cu_rx_samples_bb)
         return self.rx_samples_bb
   
     # upsample baseband data on gpu
@@ -454,7 +462,7 @@ def main():
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
-    antennas = [int(usrpconfig[usrp]['array_idx']) for usrp in usrpconfig.sections()]  # TODO: fix for back array..
+    antennas = [0]#int(usrpconfig[usrp]['array_idx']) for usrp in usrpconfig.sections()]  # TODO: fix for back array..
     
     # parse gpu config file
     cudadriverconfig = configparser.ConfigParser()
@@ -507,6 +515,7 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
+        print('we got a command: ' + str(cmd))
         handler = cudamsg_handlers[cmd](server_conn, gpu, antennas, array_info, hardware_limits)
         handler.process()
     
