@@ -9,9 +9,14 @@ import pdb
 import time
 import subprocess
 
+from termcolor import cprint
+
 from drivermsg_library import *
 from socket_utils import *
+from shm_library import *
+
 START_DRIVER = False 
+
 
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
@@ -36,22 +41,38 @@ def stop_cudaserver(sock, pid):
     subprocess.Popen(['pkill', str(pid)])
     time.sleep(1)
     
-
 class CUDA_ServerTestCases(unittest.TestCase):
     def setUp(self):
         time.sleep(1)
         self.pid = start_cudaserver()
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.serversock.connect(('localhost', CUDADRIVER_PORT))
+
+        max_connect_attempts = 5 
+        for i in range(max_connect_attempts): 
+            print('attempting connection to usrp_driver') 
+            try: 
+                self.serversock.connect(('localhost', CUDADRIVER_PORT))
+                break;
+            except:
+                print('connecting to cuda driver failed on attempt ' + str(i + 1))
+                time.sleep(5)
+
         self.cudasocks = [] # TODO...
+        rx_shm_list[0].append(shm_mmap(shm_namer(ANTENNA, SWING0, SIDEA, direction = 'rx')))
+        tx_shm_list.append(shm_mmap(shm_namer(ANTENNA, SWING0, SIDEA, direction = 'tx')))
 
     def tearDown(self):
+        global rx_shm_list, tx_shm_list
         stop_cudaserver(self.serversock, self.pid)
         self.serversock.close()
-    
-    
+        rx_shm_list[0][0].close()
+        rx_shm_list[0] = []
+        tx_shm_list[0].close()
+        tx_shm_list = []
+   
+    ''' 
     def test_cuda_getdata(self):
-        print('testing get data, running setup command')
+        cprint('testing get data', 'red')
 
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
@@ -61,18 +82,28 @@ class CUDA_ServerTestCases(unittest.TestCase):
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
 
-    '''
     def test_cuda_setup(self):
-        print('testing cuda setup')
+        cprint('testing cuda setup', 'red')
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
+    '''
+    def test_cuda_tx_shm(self):
+        cprint('testing cudsa transmit sample generation', 'red')
+        seq = create_testsequence()
+        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
+        setupcmd.transmit()
+        
 
 
-    # TODO: test sample generation on test transmit pulse sequence
-    def test_cuda_shm(self):
-        print('checking tx samples')
-    
+
+
+    '''
+ 
+    # TODO: test removing channels
+    def test_channel_remove(self):
+        print('testing removing a channel from a gpu')
+   
     # TODO: test shared memory
     def test_cuda_shm(self):
         print('testing tx sample shared memory')
@@ -86,9 +117,6 @@ class CUDA_ServerTestCases(unittest.TestCase):
     def test_cuda_multichannel(self):
         print('testing adding multiple channels')
 
-    # TODO: test removing channels
-    def test_channel_remove(self):
-        print('testing removing a channel from a gpu')
 
     '''
        

@@ -285,7 +285,7 @@ def create_testsequence():
     'trise': 100, \
     'number_of_samples' : 100, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 1000, \
+    'baseband_samplerate' : 100000, \
     'filter_bandwidth' : 0, \
     'match_filter' : 0, \
     'rfreq' : 10000, \

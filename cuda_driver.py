@@ -91,7 +91,6 @@ class cuda_setup_handler(cudamsg_handler):
         self.beam = self.sequence.ctrlprm['tbeam']
         self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
         self.generate_bbtx()
-
         self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
 
         # copy upconverted rf samples to shared memory from GPU memory to shared memory 
@@ -112,7 +111,7 @@ class cuda_setup_handler(cudamsg_handler):
         trise = self.sequence.ctrlprm['trise']
         tpulse = self.sequence.pulse_lens[0]
         tfreq = self.sequence.ctrlprm['tfreq'] * 1000
-        tbuffer = int(self.hardware_limits['min_tr_to_pulse'])
+        tbuffer = float(self.hardware_limits['min_tr_to_pulse']) / 1e6 # convert microseconds tbuffer in config file to seconds
 
         assert tbuffer >= int(self.hardware_limits['min_tr_to_pulse']) / 1e6, 'time between TR gate and RF pulse too short for hardware'
         assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length is too short for hardware'
@@ -125,7 +124,7 @@ class cuda_setup_handler(cudamsg_handler):
         nantennas = len(self.antennas)
         
         # tbuffer is the time between tr gate and transmit pulse 
-        nsamples = (tpulse + 2 * tbuffer) * bbrate
+        nsamples = np.round((tpulse + 2 * tbuffer) * bbrate)
         padding = np.zeros(tbuffer * bbrate)
         pulse = np.ones(tpulse * bbrate)
         pulsesamps = np.complex64(np.concatenate([padding, pulse, padding]))
@@ -164,7 +163,7 @@ class cuda_setup_handler(cudamsg_handler):
 
                 # update baseband pulse sample array for antenna
                 bbtx[ant][pulse] = psamp
-        
+
         self.bb_vec = bbtx 
 
 
@@ -182,7 +181,6 @@ class cuda_get_data_handler(cudamsg_handler):
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
     def process(self):
-       pdb.set_trace()
        clean_exit() 
 
 # copy data to gpu, start processing
@@ -361,9 +359,12 @@ class ProcessingGPU(object):
         assert self._blocksize(self.tx_block) <= max_blocksize, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
         assert self._blocksize(self.rx_block_if) <= max_blocksize, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
         assert self._blocksize(self.rx_block_bb) <= max_blocksize, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-
+    
         # upsample baseband samples on GPU, write samples to shared memory
-        samples = self.interpolate_and_multiply(fc, sequence.ctrlprm['channel'])
+        self.interpolate_and_multiply(fc, sequence.ctrlprm['channel'])
+        pdb.set_trace()
+        cuda.Context.synchronize()
+
 
     # calculates the threads in a block from a block size tuple
     def _blocksize(self, block):
@@ -387,25 +388,18 @@ class ProcessingGPU(object):
         print('processing if -> bb')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
-        pdb.set_trace()
-        # so, kernel is failing
-        self.streams[swing].synchronize()
-        pdb.set_trace()
-
-
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
         self.streams[swing].synchronize()
         cuda.memcpy_dtoh(self.rx_samples_bb, self.cu_rx_samples_bb)
         return self.rx_samples_bb
-  
+    
     # upsample baseband data on gpu
     def interpolate_and_multiply(self, fc, channel = 0):
         self._set_mixerfreq(fc, channel)
         self._set_phasedelay(fc, channel)
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
-        # TODO: add stream.synchronize() before copying samples
     
     # copy rf samples to shared memory for transmission by usrp driver
     def txsamples_host_to_shm(self):
@@ -515,7 +509,6 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
-        print('we got a command: ' + str(cmd))
         handler = cudamsg_handlers[cmd](server_conn, gpu, antennas, array_info, hardware_limits)
         handler.process()
     
