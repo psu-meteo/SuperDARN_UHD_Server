@@ -34,9 +34,15 @@ __device__ size_t outdata_idx(void) {
 // [pulse][sample]
 // index into input baseband samples
 __device__ size_t indata_idx(int32_t offset) {
-    return 2*blockIdx.x + offset;
+    return 2 * blockIdx.x + offset;
 }
 
+// dummy function for setting breakpoints...
+// this source file hops around in a /tmp outside of the gdb path, so setting breakpoints on line numbers is hard
+// instead, break on db (debug..).
+__device__ int dbf(void) {
+    return 0;
+}
 // so, structure indata and outdata 
 __global__ void interpolate_and_multiply(
     float* indata,
@@ -80,6 +86,8 @@ __global__ void interpolate_and_multiply(
         }
         outdata[outidx] = (int16_t) (0.95*32768*irf_samples[threadIdx.x]);
         outdata[outidx+1] = (int16_t) (0.95*32768*qrf_samples[threadIdx.x]);
+        dbf();
+        // see nonzero samples on grid 1,  block (5,0,0), thread (0,0,0), device 0, sm 5, warp 0, lane 0
     }
 
 }

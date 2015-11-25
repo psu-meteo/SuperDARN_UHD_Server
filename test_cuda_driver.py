@@ -52,7 +52,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
             print('attempting connection to usrp_driver') 
             try: 
                 self.serversock.connect(('localhost', CUDADRIVER_PORT))
-                break;
+                break
             except:
                 print('connecting to cuda driver failed on attempt ' + str(i + 1))
                 time.sleep(5)
@@ -89,7 +89,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
         setupcmd.transmit()
     '''
     def test_cuda_tx_shm(self):
-        cprint('testing cudsa transmit sample generation', 'red')
+        cprint('testing cuda transmit sample generation', 'red')
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()

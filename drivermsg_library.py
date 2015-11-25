@@ -187,15 +187,13 @@ class usrp_setup_command(driver_command):
         txrate = rfrate
         rxrate = rfrate
         npulses = sequence.npulses
-        num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.txbbrate)))
-        num_tx_rf_samples = np.round(rfrate * 10e-6)# TODO: figure this out..
+        num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.ctrlprm['baseband_samplerate'])))
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, npulses)
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
-        self.queue(num_tx_rf_samples, np.uint64, 'num_tx_rf_samples')
         self.queue(sequence.pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
 
 # set rxfe (amplifier and attenuator) settings 
@@ -243,14 +241,13 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence infomation
 class sequence(object):
-    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, txbbrate, ctrlprm):
+    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
-        self.txbbrate = txbbrate 
         self.ready = True # TODO: what is ready flag for?
         
         # validate input sequence
@@ -300,7 +297,7 @@ def create_testsequence():
     tr_to_pulse_delay = 50e-6
     pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
 
-    txbbrate = 1/(5e-6)
+    txbbrate = ctrlprm['baseband_samplerate']
     pulse_lens = [300e-6, 300e-6, 300e-6]
     phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens] # 
     pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
@@ -310,5 +307,5 @@ def create_testsequence():
     usrp_config.read('usrp_config.ini')
 
 
-    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, txbbrate, ctrlprm)
+    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
     return seq
