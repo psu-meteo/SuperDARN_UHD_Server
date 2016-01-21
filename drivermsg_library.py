@@ -29,7 +29,6 @@ USRPDRIVER_PORT = int(54420) # + ant
 
 # parent class for driver socket messages
 class driver_command(object):
-
     # class to help manage sending data 
     class socket_data(object):
         def __init__(self, data, dtype, name, nitems = 1):
@@ -100,7 +99,7 @@ class server_ctrlprm(driver_command):
             ctrlprm_dict['tbeamwidth'] = 0
             ctrlprm_dict['tfreq'] = 0
             ctrlprm_dict['trise'] = 0
-            ctrlprm_dict['number_of_samples'] = 0
+            ctrlprm_dict['number_of_baseband_samples'] = 0
             ctrlprm_dict['buffer_index'] = 0
             ctrlprm_dict['baseband_samplerate'] = 0
             ctrlprm_dict['filter_bandwidth'] = 0
@@ -126,7 +125,7 @@ class server_ctrlprm(driver_command):
         self.queue(ctrlprm_dict['tfreq'], np.int32, 'tfreq')
         self.queue(ctrlprm_dict['trise'], np.int32, 'trise')
 
-        self.queue(ctrlprm_dict['number_of_samples'], np.int32, 'number_of_samples')
+        self.queue(ctrlprm_dict['number_of_baseband_samples'], np.int32, 'number_of_baseband_samples')
         self.queue(ctrlprm_dict['buffer_index'], np.int32, 'buffer_index')
 
         self.queue(ctrlprm_dict['baseband_samplerate'], np.float32, 'baseband_samplerate')
@@ -187,13 +186,21 @@ class usrp_setup_command(driver_command):
         txrate = rfrate
         rxrate = rfrate
         npulses = sequence.npulses
-        num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_samples'] / sequence.ctrlprm['baseband_samplerate'])))
+
+        # calculate the number of RF receive samples 
+        num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_baseband_samples'] / sequence.ctrlprm['baseband_samplerate'])))
+
+        # calculate the number of RF transmit samples
+        tx_time = sum(sequence.pulse_lens) + 2 * sequence.npulses * sequence.tr_to_pulse_delay
+        num_requested_tx_samples = np.uint64(np.round((rfrate)  * tx_time))
+        pdb.set_trace()
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, npulses)
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
+        self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
         self.queue(sequence.pulse_offsets_vector, np.float64, 'pulse_offsets_vector') # vector..
 
 # set rxfe (amplifier and attenuator) settings 
@@ -239,22 +246,24 @@ class usrp_exit_command(driver_command):
         # TODO: what do I need to send here?
 
 
-# class with pulse sequence infomation
+# class with pulse sequence information
 class sequence(object):
     def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
-        self.pulse_lens = pulse_lens
+        self.pulse_lens = pulse_lens # length of pulses, in seconds
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
+        self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
+        self.tx_time = sum(self.pulse_lens) + 2 * self.npulses * self.tr_to_pulse_delay
         
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
             raise ValueError('rfreq != tfreq, this behavior is not yet supported')
 
-        if self.ctrlprm['number_of_samples'] <= 0:
+        if self.ctrlprm['number_of_baseband_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')
 
         if self.npulses == 0:
@@ -280,9 +289,9 @@ def create_testsequence():
     'tbeamwidth': 0, \
     'tfreq': 10000, \
     'trise': 100, \
-    'number_of_samples' : 100, \
+    'number_of_baseband_samples' : 200, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 100000, \
+    'baseband_samplerate' : 2000, \
     'filter_bandwidth' : 0, \
     'match_filter' : 0, \
     'rfreq' : 10000, \

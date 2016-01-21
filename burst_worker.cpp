@@ -58,12 +58,12 @@ void tx_worker(
         if (DEBUG) std::cout << "num tx channels: " << tx_stream->get_num_channels() << std::endl;
         if (DEBUG) std::cout << "sequence length : " << pulse_length << std::endl;
         if (DEBUG) std::cout << "number of pulses : " << pulse_times.size() << std::endl;
-        if (DEBUG) std::cout << "pointer values: " << std::endl;
 
         size_t nacc_samps = 0;
         size_t spb = tx_stream->get_max_num_samps();
 
         DEBUG_PRINT("BURST_WORKER starting pulse\n");
+        if (DEBUG) std::cout << "pulse: [" << pulse_seq_ptrs.at(0)[0] << pulse_seq_ptrs.at(0)[1] << pulse_seq_ptrs.at(0)[2] << "]\n";
         //Now go for it!
         while(nacc_samps < pulse_length){
             size_t samps_to_send = std::min(pulse_length - nacc_samps, spb);
@@ -95,7 +95,7 @@ void tx_worker(
     gettimeofday(&t1,NULL);
     double elapsed=(t1.tv_sec-t0.tv_sec)*1E6;
     elapsed+=(t1.tv_usec-t0.tv_usec);
-    std::cout << "finished transmitting pulse sequence, tx worker time (us): " << elapsed << "\n";
+    std::cout << "finished transmitting pulse sequence, elapsed tx worker time (us): " << elapsed << "\n";
     DEBUG_PRINT("BURST_WORKER finished\n");
 
  

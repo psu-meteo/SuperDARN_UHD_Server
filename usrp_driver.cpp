@@ -471,7 +471,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     pulse_offsets.resize(npulses);
                     for(uint32_t i = 0; i < npulses; i++) {
+                        DEBUG_PRINT("USRP_SETUP waiting for pulse offset %d of %d\n", i+1, npulses);
                         pulse_offsets[i] = sock_get_float64(driverconn); 
+                        DEBUG_PRINT("USRP_SETUP received %f pulse offset\n", pulse_offsets[i]);
                     }
                              
                     rx_data_buffer.resize(num_requested_rx_samples);

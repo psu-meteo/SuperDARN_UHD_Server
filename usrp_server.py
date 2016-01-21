@@ -369,7 +369,7 @@ class recv_get_data_handler(dmsg_handler):
         send_int32(rawsock, rx.get_num_bb_samples());
         // send samples
         for(int32_t iant = 0; iant < nants; iant++) {
-            send_data(rawsock, bb_vec_ptrs[iant], client.number_of_samples  * 2 * sizeof(int
+            send_data(rawsock, bb_vec_ptrs[iant], client.number_of_baseband_samples  * 2 * sizeof(int
         }
         // send length of seq_buf
         send_data(rawsock, &seqbufsize, sizeof(int32_t));
@@ -391,7 +391,7 @@ class recv_get_data_handler(dmsg_handler):
     # get_data, get samples for radar/channel 
     def process(self):
         self._recv_ctrlprm()
-        nbb_samples = self.ctrlprm['number_of_samples']
+        nbb_samples = self.ctrlprm['number_of_baseband_samples']
         
         #  check if any sequences are registered
         if not len(self.sequence_manager.sequences):
@@ -452,11 +452,11 @@ class recv_get_data_handler(dmsg_handler):
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
             transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
             transmit_dtype(self.arbysock, np.int32(0)) # buffer number
-            transmit_dtype(self.arbysock, np.int32(self.ctrlprm['number_of_samples'])) # number of baseband samples
+            transmit_dtype(self.arbysock, np.int32(self.ctrlprm['number_of_baseband_samples'])) # number of baseband samples
 
             # send samples over socket for self.channel on main and back array
-            transmit_dtype(self.arbysock, main_beamformed, self.ctrlprm['number_of_samples']) # TODO: send main data for channel
-            transmit_dtype(self.arbysock, back_beamformed, self.ctrlprm['number_of_samples']) # TODO: send back data for channel
+            transmit_dtype(self.arbysock, main_beamformed, self.ctrlprm['number_of_baseband_samples']) # TODO: send main data for channel
+            transmit_dtype(self.arbysock, back_beamformed, self.ctrlprm['number_of_baseband_samples']) # TODO: send back data for channel
             
             if (DUMP_RAW):
                 self.dump_raw()

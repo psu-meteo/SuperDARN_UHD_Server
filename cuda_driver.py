@@ -295,7 +295,7 @@ class ProcessingGPU(object):
         cidx = self.channel_to_idx[channel] 
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(sequence.ctrlprm['number_of_samples']) # number of recv samples
+        nbbsamps_rx = int(sequence.ctrlprm['number_of_baseband_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
         # compute decimation rate for RF to IF, this is fixed..

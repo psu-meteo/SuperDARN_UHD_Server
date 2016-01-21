@@ -179,13 +179,14 @@ void recv_and_hold(
             ) % md.strerror()));
         }
                 
-        if (DEBUG) {
-            std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
-        }
+        //if (DEBUG) {
+        //    std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+        //}
         num_acc_samps += num_rx_samps;
     }
 
     DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");
+    if(DEBUG) std::cout << boost::format("RECV_AND_HOLD: %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
 	if (num_acc_samps != num_requested_samps){
         *return_status=-1;

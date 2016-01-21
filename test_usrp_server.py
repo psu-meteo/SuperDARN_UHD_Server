@@ -42,7 +42,7 @@ CTRLPRM_DEFAULT = {\
     'tbeamwidth': 0, \
     'tfreq': 0, \
     'trise': 0, \
-    'number_of_samples' : 0, \
+    'number_of_baseband_samples' : 0, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 0, \
     'filter_bandwidth' : 0, \
