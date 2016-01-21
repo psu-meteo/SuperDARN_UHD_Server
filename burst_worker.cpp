@@ -51,13 +51,17 @@ void tx_worker(
         
         double pulse_duration = pulse_length / tx_rate;
         double timeout = pulse_duration + pulse_times[i].get_real_secs() + .0001;
-
+              
+        
         //Initialize the temporary pointers according to the argument passed to the function
         std::vector<std::complex<int16_t> *> temp_ptrs(pulse_times.size());
-        // pulse_seq_ptrs is length 8
-        if (DEBUG) std::cout << "num tx channels: " << tx_stream->get_num_channels() << std::endl;
-        if (DEBUG) std::cout << "sequence length : " << pulse_length << std::endl;
-        if (DEBUG) std::cout << "number of pulses : " << pulse_times.size() << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER pulse " << i << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER num tx channels: " << tx_stream->get_num_channels() << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER sequence length : " << pulse_length << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER number of pulses : " << pulse_times.size() << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER pulse time : " << pulse_times[i].get_real_secs() << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER pulse timeout : " << timeout << std::endl;
+        if (DEBUG) std::cout << "BURST_WORKER pulse duration (microseconds) : " << pulse_duration * 1e6 << std::endl;
 
         size_t nacc_samps = 0;
         size_t spb = tx_stream->get_max_num_samps();
@@ -78,7 +82,7 @@ void tx_worker(
 
         md.end_of_burst = true;
         tx_stream->send(temp_ptrs, 0, md, timeout);
-
+    
         if (DEBUG) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
         uhd::async_metadata_t async_md;
         bool got_async_burst_ack = false;

@@ -626,8 +626,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
-                   // TODO: synchronize clr_freq scan.. 
-                   /*rx_clrfreq_rval= recv_clr_freq(
+                    // TODO: synchronize clr_freq scan.. 
+                    /* rx_clrfreq_rval = recv_clr_freq(
                                     usrp,
                                     rx_stream,
                                     center,

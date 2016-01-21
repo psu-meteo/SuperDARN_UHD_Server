@@ -155,7 +155,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         # create test tone
         tone = 50e3 # 50 khz tone..
         amplitude = np.iinfo(np.int16).max / 8 # 1/8 of max amplitude
-        samplet = np.arange(0,seq.tx_time,1/RFRATE)[:-1]
+        samplet = np.arange(0,seq.npulses * seq.tx_time,1/RFRATE)[:-1]
         sample_real = np.int16(amplitude * np.cos(2 * np.pi * tone * samplet))
         sample_imag = np.int16(amplitude * np.sin(2 * np.pi * tone * samplet))
         sample_tx = np.zeros(2 * len(samplet), dtype=np.int16)
@@ -200,12 +200,8 @@ class USRP_ServerTestCases(unittest.TestCase):
         rx_shm.seek(0)
         ar = np.frombuffer(rx_shm, dtype=np.int16, count=num_rx_samples)
         arp = np.sqrt(np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2)
-
+        print(arp[:100000:1000])
         print('max arp: ' + str(np.max(arp)))
-
-        pdb.set_trace()
-
-
 
         
 

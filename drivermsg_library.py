@@ -190,10 +190,10 @@ class usrp_setup_command(driver_command):
         # calculate the number of RF receive samples 
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (sequence.ctrlprm['number_of_baseband_samples'] / sequence.ctrlprm['baseband_samplerate'])))
 
-        # calculate the number of RF transmit samples
-        tx_time = sum(sequence.pulse_lens) + 2 * sequence.npulses * sequence.tr_to_pulse_delay
+        # calculate the number of RF transmit samples per-pulse
+        tx_time = sequence.pulse_lens[0] + 2 * sequence.tr_to_pulse_delay
         num_requested_tx_samples = np.uint64(np.round((rfrate)  * tx_time))
-        pdb.set_trace()
+
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
@@ -257,7 +257,7 @@ class sequence(object):
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
-        self.tx_time = sum(self.pulse_lens) + 2 * self.npulses * self.tr_to_pulse_delay
+        self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
         
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
