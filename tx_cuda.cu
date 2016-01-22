@@ -27,9 +27,10 @@ __device__ __constant__ float txphasedelay_rads[MAXANTS * MAXFREQS];
 __device__ size_t outdata_idx(void) {
     size_t upsamp_idx = threadIdx.x;
     size_t upsamp_offset = blockIdx.x * blockDim.x;
-    size_t pulse_offset = blockDim.x * gridDim.x * blockIdx.z;
+    size_t pulse_offset = 0;//blockDim.x * gridDim.x * blockIdx.z;
     size_t antenna_offset = blockIdx.y * blockDim.x * gridDim.z * gridDim.x;
-    return antenna_offset + pulse_offset + upsamp_offset + upsamp_idx;
+    // multiply by two for interleaved i/q
+    return 2 * (antenna_offset + pulse_offset + upsamp_offset + upsamp_idx);
 }
 // [pulse][sample]
 // index into input baseband samples
@@ -84,8 +85,8 @@ __global__ void interpolate_and_multiply(
             irf_samples[threadIdx.x] += irf_samples[threadIdx.x + i*blockDim.x];
             qrf_samples[threadIdx.x] += qrf_samples[threadIdx.x + i*blockDim.x];
         }
-        outdata[outidx] = (int16_t) (0.95*32768*irf_samples[threadIdx.x]);
-        outdata[outidx+1] = (int16_t) (0.95*32768*qrf_samples[threadIdx.x]);
+        outdata[outidx] = (int16_t) (0.95 * 32768 * irf_samples[threadIdx.x] / MAXFREQS);
+        outdata[outidx+1] = (int16_t) (0.95 * 32768 * qrf_samples[threadIdx.x] / MAXFREQS);
         dbf();
         // see nonzero samples on grid 1,  block (5,0,0), thread (0,0,0), device 0, sm 5, warp 0, lane 0
     }

@@ -84,9 +84,8 @@ class cuda_setup_handler(cudamsg_handler):
         # get picked sequence information dict from usrp_server
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
-
         self.sequence = cmd.sequence
-    
+
         # extract some information from the picked dict, generate baseband samples
         self.beam = self.sequence.ctrlprm['tbeam']
         self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
@@ -147,7 +146,6 @@ class cuda_setup_handler(cudamsg_handler):
         
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, len(pulsesamps))))
-        
         for ant in self.antennas:
             for pulse in range(npulses):
                 # compute pulse compression 
@@ -341,7 +339,7 @@ class ProcessingGPU(object):
 
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
-        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_tx), np.uint16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_tx), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         
         # TODO: look into memorypool and freeing page locked memory?
@@ -386,8 +384,8 @@ class ProcessingGPU(object):
         import matplotlib.pyplot as plt
         plt.plot(self.tx_rf_outdata[0][0])
         plt.savefig('pulse.pdf')
+        print('finished pulse generation, breakpoint..')
         pdb.set_trace()
-
 
     # calculates the threads in a block from a block size tuple
     def _blocksize(self, block):
@@ -419,7 +417,6 @@ class ProcessingGPU(object):
     
     # upsample baseband data on gpu
     def interpolate_and_multiply(self, fc, channel = 0):
-        pdb.set_trace()
         self._set_mixerfreq(fc, channel)
         self._set_phasedelay(fc, channel)
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
@@ -436,7 +433,6 @@ class ProcessingGPU(object):
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
     def _set_mixerfreq(self, fc, channel):
         self.mixer_freqs[channel] = np.float64(2 * np.pi * (self.fsamptx - fc) / self.fsamptx)
-        pdb.set_trace()
         cuda.memcpy_htod(self.cu_txfreq_rads, self.mixer_freqs)
     
 
@@ -445,7 +441,6 @@ class ProcessingGPU(object):
         for ant in range(self.nants):
             self.phase_delays[channel][ant] = np.float32(np.mod(2 * np.pi * 1e-9 * self.tdelays[ant] * fc, 2 * np.pi)) 
 
-        pdb.set_trace()
         cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
  
     def _rect_filter_s0():

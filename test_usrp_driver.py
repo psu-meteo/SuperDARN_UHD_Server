@@ -200,8 +200,11 @@ class USRP_ServerTestCases(unittest.TestCase):
         rx_shm.seek(0)
         ar = np.frombuffer(rx_shm, dtype=np.int16, count=num_rx_samples)
         arp = np.sqrt(np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2)
-        print(arp[:100000:1000])
-        print('max arp: ' + str(np.max(arp)))
+        print('sampled power')
+        print(arp[:200000:1000])
+
+        print('sampled phase')
+        pdb.set_trace() 
 
         
 

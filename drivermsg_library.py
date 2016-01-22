@@ -287,14 +287,14 @@ def create_testsequence():
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0, \
-    'tfreq': 10000, \
+    'tfreq': 10010, \
     'trise': 100, \
     'number_of_baseband_samples' : 200, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 2000, \
+    'baseband_samplerate' : 50000, \
     'filter_bandwidth' : 0, \
     'match_filter' : 0, \
-    'rfreq' : 10000, \
+    'rfreq' : 10010, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
@@ -311,10 +311,10 @@ def create_testsequence():
     phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens] # 
     pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
 
-
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
 
 
     seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
+
     return seq
