@@ -264,7 +264,7 @@ class ServerTestCases(unittest.TestCase):
         nbb_samples = ctrlprm['number_of_baseband_samples']
         main_samples = np.zeros(nbb_samples, dtype=np.float64)
         back_samples = np.zeros(nbb_samples, dtype=np.float64)
-
+        transmit_dtype(self.usrpsock, main_samples) # transmit number of requested antennas
 
         print('waiting for sample metadata')
         # receive shm/socket config
@@ -276,7 +276,7 @@ class ServerTestCases(unittest.TestCase):
         print('waiting for samples')
         # receive sample vector
         main_beamformed = recv_dtype(self.arbysock, np.uint32, nsamples)
-        back_beamformed = recv_dtype(self.arbysock, np.uint32, nsamples)
+        #back_beamformed = recv_dtype(self.arbysock, np.uint32, nsamples)
 
         # TODO: is this expected to be sent again?
         drivertype = recv_dtype(self.arbysock, np.int32)

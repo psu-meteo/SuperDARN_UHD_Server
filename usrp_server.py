@@ -32,6 +32,7 @@ from socket_utils import *
 
 VERBOSE = 0
 STATE_TIME = 5 # microseconds
+DUMP_RAW = False
 
 MAXANTENNAS_MAIN = 32
 MAXANTENNAS_BACK = 4
@@ -421,27 +422,28 @@ class recv_get_data_handler(dmsg_handler):
                 antennas = recv_dtype(usrpsock, np.uint16, nantennas)
                 
                 if isinstance(antennas, (np.ndarray, np.generic)):
-                    antennas = np.array(antennas)
+                    antennas = np.array([antennas])
 
-                pdb.set_trace()
                 for ant in antennas: 
                     main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
                     #back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
             
             print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(self.status))
-            # create beamform_main, a complex vector NANTS long with the phasing 
-            beamform_main = np.ones(len(MAIN_ANTENNAS))
+            # TODO: create beamform_main, a complex vector NANTS long with the phasing 
+            beamform_main = np.ones(len(antennas))
             #beamform_back = np.ones(len(MAIN_ANTENNAS))
+
             for i in range(nbb_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
                 
-                for ant in MAIN_ANTENNAS:
+                for ant in range(antennas):
                     itemp += np.real(main_samples[ant][i]) * np.real(beamform_main[ant]) - \
                              np.imag(main_samples[ant][i]) * np.imag(beamform_main[ant]) 
                     qtemp += np.real(main_samples[ant][i]) * np.imag(beamform_main[ant]) + \
                              np.imag(main_samples[ant][i]) * np.real(beamform_main[ant])
-                main_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
+                
+                main_beamformed[i] = complex_ui32_pack(itemp, qtemp)
 
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
@@ -452,7 +454,7 @@ class recv_get_data_handler(dmsg_handler):
                 #    qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
                 #             np.imag(back_samples[ant][i]) * np.real(beamform_back[ant]) 
                 #
-                #back_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
+                #back_beamformed[i] = complex_ui32_pack(itemp, qtemp)
 
             # transmit status to arby_server    
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
@@ -461,8 +463,8 @@ class recv_get_data_handler(dmsg_handler):
             transmit_dtype(self.arbysock, np.int32(self.ctrlprm['number_of_baseband_samples'])) # number of baseband samples
 
             # send samples over socket for self.channel on main and back array
-            transmit_dtype(self.arbysock, main_beamformed, self.ctrlprm['number_of_baseband_samples']) # TODO: send main data for channel
-            transmit_dtype(self.arbysock, back_beamformed, self.ctrlprm['number_of_baseband_samples']) # TODO: send back data for channel
+            transmit_dtype(self.arbysock, main_beamformed) # TODO: send main data for channel
+            #transmit_dtype(self.arbysock, back_beamformed) # TODO: send back data for channel
             
             if (DUMP_RAW):
                 self.dump_raw()

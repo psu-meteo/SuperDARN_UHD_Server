@@ -4,7 +4,7 @@ import socket
 
 # pack i/q samples into uint32 for sending samples over the network
 # between usrp_server and arbyserver
-def _complex_ui32_pack(isamp, qsamp):
+def complex_ui32_pack(isamp, qsamp):
     i_mask = 0xffff0000
     q_mask = 0x0000ffff
     packed_sample = (i_mask & (np.uint16(isamp) << 16)) + (q_mask & np.uint16(qsamp))
