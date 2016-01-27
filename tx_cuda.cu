@@ -27,7 +27,7 @@ __device__ __constant__ float txphasedelay_rads[MAXANTS * MAXFREQS];
 __device__ size_t outdata_idx(void) {
     size_t upsamp_idx = threadIdx.x;
     size_t upsamp_offset = blockIdx.x * blockDim.x;
-    size_t pulse_offset = 0;//blockDim.x * gridDim.x * blockIdx.z;
+    size_t pulse_offset = blockDim.x * gridDim.x * blockIdx.z;
     size_t antenna_offset = blockIdx.y * blockDim.x * gridDim.z * gridDim.x;
     // multiply by two for interleaved i/q
     return 2 * (antenna_offset + pulse_offset + upsamp_offset + upsamp_idx);
@@ -61,14 +61,14 @@ __global__ void interpolate_and_multiply(
     //Calculate the increment between two adjacent rf samples
     float inc_i;
     float inc_q;
-    inc_i = (indata[indata_idx(I_OFFSET)+2] - indata[indata_idx(I_OFFSET)]) / blockDim.x;
-    inc_q = (indata[indata_idx(Q_OFFSET)+2] - indata[indata_idx(Q_OFFSET)]) / blockDim.x;
+    inc_i = (indata[indata_idx(I_OFFSET)+2] - indata[indata_idx(I_OFFSET)]) / blockDim.x; // baseband sample - 
+    inc_q = (indata[indata_idx(Q_OFFSET)+2] - indata[indata_idx(Q_OFFSET)]) / blockDim.x; // 
 
-    /*Calculate the sample's phase value due to NCO mixing and beamforming*/
+    /* Calculate the sample's phase value due to NCO mixing and beamforming */
     float phase = fmod((double)(blockDim.x*blockIdx.x + threadIdx.x)*txfreq_rads[threadIdx.y], 2*M_PI) +
         blockIdx.y*txphasedelay_rads[threadIdx.y];
 
-    /*Calculate the output sample vectors, one for each freq/beam channel*/
+    /* Calculate the output sample vectors, one for each freq/beam channel */
     unsigned int localInx = threadIdx.y*blockDim.x+threadIdx.x;
     irf_samples[localInx] =
         (indata[indata_idx(I_OFFSET)] + threadIdx.x*inc_i) * cos(phase) -
@@ -78,6 +78,7 @@ __global__ void interpolate_and_multiply(
         (indata[indata_idx(Q_OFFSET)] + threadIdx.x*inc_q) * cos(phase);
 
     /* Now linearly combine all freq/beam channels into a single vector */
+    // TODO: Will this synchronization work for multiple channels?
     __syncthreads();
     size_t outidx = outdata_idx();
     if(threadIdx.y == 0){
@@ -88,7 +89,6 @@ __global__ void interpolate_and_multiply(
         outdata[outidx] = (int16_t) (0.95 * 32768 * irf_samples[threadIdx.x] / MAXFREQS);
         outdata[outidx+1] = (int16_t) (0.95 * 32768 * qrf_samples[threadIdx.x] / MAXFREQS);
         dbf();
-        // see nonzero samples on grid 1,  block (5,0,0), thread (0,0,0), device 0, sm 5, warp 0, lane 0
     }
 
 }

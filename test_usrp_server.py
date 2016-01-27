@@ -21,7 +21,7 @@ import usrp_server
 from drivermsg_library import *
 from socket_utils import *
 HOST = '127.0.0.1'
-START_SERVER = False 
+START_SERVER = True 
 
 
 S_BIT = np.uint8(0x01) # sample impulses 
@@ -40,15 +40,15 @@ CTRLPRM_DEFAULT = {\
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0, \
-    'tfreq': 0, \
-    'trise': 0, \
-    'number_of_baseband_samples' : 0, \
+    'tfreq': 10010, \
+    'trise': 100, \
+    'number_of_baseband_samples' : 500, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 0, \
+    'baseband_samplerate' : 200000, \
     'filter_bandwidth' : 0, \
     'match_filter' : 0, \
     'rfreq' : 0, \
-    'rbeam' : 0, \
+    'rbeam' : 10010, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
     'rbeamwidth' : 0, \
@@ -113,15 +113,12 @@ class ServerTestCases(unittest.TestCase):
         drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-    ''' 
+    '''
+
     def test_registerseq(self):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
 
-        # send ctrlprm
-        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
-        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
-        ctrlprm_struct.transmit()
-    
+   
         
         # create test sequence
         # ###_______###_______##%%______
@@ -140,6 +137,15 @@ class ServerTestCases(unittest.TestCase):
         pulselen = 300e-6
         t_seq = smsep * nsamples
 
+        # create ctrlprm struct
+        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
+
+        # populate ctlprm structs
+
+        # send ctrlprm
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit()
+ 
         # create decompress vector, then run length encode..
 
         # create sample_mask, S_BIT every 60 bins
@@ -210,7 +216,6 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
-
     def test_ctrlprogend(self):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_END)
         
@@ -225,43 +230,60 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
     
+    '''
     def test_get_data(self):
         # first, register sequence
         print('testing get_data')
         self.test_registerseq()
 
+        print('registered test sequence')
         # next, request data for that channel
         send_servercmd(self.arbysock, usrp_server.RECV_GET_DATA)
         
+        print('requesting data')
+        # next, request data for that channel
         # send ctrlprm
         ctrlprm = copy.copy(CTRLPRM_DEFAULT)
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
         ctrlprm_struct.transmit()
 
+        print('waiting for sample status')
         # check status
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
+        print('received status: ' + str(status))
 
-        # pretend to be a usrp driver..
-        # send nantennas (int16)
-        # send antenna numbers (int16 list)
-        # send main and back samples as complex floats64s for main/back
+        # pretend to be a usrp driver, send status okay..
+        transmit_dtype(self.usrpsock, np.int32(1))
+    
 
+        # pretend to be a usrp driver, antenna data samples
+        transmit_dtype(self.usrpsock, np.int32(1)) # transmit number of requested antennas
+        transmit_dtype(self.usrpsock, np.int32(0)) # transmit array of requested antenna indexes
+        # and some samples
+        nbb_samples = ctrlprm['number_of_baseband_samples']
+        main_samples = np.zeros(nbb_samples, dtype=np.float64)
+        back_samples = np.zeros(nbb_samples, dtype=np.float64)
+
+
+        print('waiting for sample metadata')
         # receive shm/socket config
         shm_config = recv_dtype(self.arbysock, np.int32)
         frame_header = recv_dtype(self.arbysock, np.int32)
         buffer_number = recv_dtype(self.arbysock, np.int32)
         nsamples = recv_dtype(self.arbysock, np.int32)
     
+        print('waiting for samples')
         # receive sample vector
-        main_beamformed = recv_dtype(self.arbysock, np.uint32)
-        back_beamformed = recv_dtype(self.arbysock, np.uint32)
+        main_beamformed = recv_dtype(self.arbysock, np.uint32, nsamples)
+        back_beamformed = recv_dtype(self.arbysock, np.uint32, nsamples)
 
         # TODO: is this expected to be sent again?
-
-        drivertype  = recv_dtype(self.arbysock, np.int32)
+        drivertype = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         print('get data test complete')
+
+    '''
     def test_trigger(self):
         send_servercmd(self.arbysock, usrp_server.TRIGGER)
         status = recv_dtype(self.arbysock, np.int32)

@@ -24,6 +24,7 @@ import pycuda.autoinit
 
 from socket_utils import *
 from drivermsg_library import *
+import dsp_filters
 
 # import pycuda stuff
 SWING0 = 0
@@ -89,7 +90,7 @@ class cuda_setup_handler(cudamsg_handler):
         # extract some information from the picked dict, generate baseband samples
         self.beam = self.sequence.ctrlprm['tbeam']
         self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
-        self.generate_bbtx()
+        self.generate_bbtx(shapefilter = dsp_filters.gaussian_pulse)
         self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
 
         # copy upconverted rf samples to shared memory from GPU memory to shared memory 
@@ -153,7 +154,7 @@ class cuda_setup_handler(cudamsg_handler):
                  
                 # apply filtering function
                 if shapefilter != None:
-                    psamp = shapefilter(psamp)
+                    psamp = shapefilter(psamp, trise, bbrate)
                 
                 # apply phasing
                 beamforming_phase = rad_to_rect(beamforming_shift[ant])
@@ -310,9 +311,9 @@ class ProcessingGPU(object):
         nbbsamps_tx_pulse = int(bbtx.shape[2]) # number of baseband samples for all pulses 
 
         nbbsamps_tx = bbtx.size
-        nrfsamps_tx = int(np.ceil(self.fsamptx * nbbsamps_tx / bbrate)) # number of rf samples for all pulses 
+        nrfsamps_tx = 2 * int(np.ceil(self.fsamptx * nbbsamps_tx / bbrate)) # number of rf samples for all pulses (2x for I/Q)
         
-        tx_upsample_rate = int(nrfsamps_tx / nbbsamps_tx)
+        tx_upsample_rate = int(nrfsamps_tx / nbbsamps_tx) / 2.
 
         self.npulses = len(sequence.pulse_lens)
 
@@ -382,7 +383,16 @@ class ProcessingGPU(object):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        plt.plot(self.tx_rf_outdata[0][0])
+        txpulse = self.tx_rf_outdata[0][0]
+        arp = np.sqrt(np.float32(txpulse[0::2]) ** 2 + np.float32(txpulse[1::2]) ** 2)
+
+        plt.subplot(3,1,1)
+        plt.plot(txpulse)
+        plt.subplot(3,1,2)
+        plt.plot(arp)
+        plt.subplot(3,1,3)
+        plt.plot(txpulse[0:5000:2])
+        plt.plot(txpulse[1:5000:2])
         plt.savefig('pulse.pdf')
         print('finished pulse generation, breakpoint..')
         pdb.set_trace()

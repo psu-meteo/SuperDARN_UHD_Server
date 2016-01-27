@@ -84,10 +84,8 @@ ARBY_COMMAND_STRS = {
         GPS_MSG_ERROR : 'gps message error', \
         CLEAN_EXIT : 'clean exit'}
 
-#TODO: cleanup/eliminate global variables
 CMD_ERROR = np.int32(10)
 USRP_DRIVER_ERROR = np.int32(11)
-#iseq = 0
 
 
 def getDriverMsg(arbysock):
@@ -217,7 +215,6 @@ class register_seq_handler(dmsg_handler):
             phase_masks.append(phase_mask[pstart:pend])
             pulse_masks.append(rf_pulse[pstart:pend])
             pulse_lens.append((pend - pstart) * STATE_TIME) 
-        
         # add sequence to sequence list..
         seq = sequence(self.usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
         self.sequence_manager.addSequence(seq)
@@ -398,35 +395,43 @@ class recv_get_data_handler(dmsg_handler):
             self.status = CMD_ERROR
         
         transmit_dtype(self.arbysock, np.int32(self.status)) 
-
+        print('USRP_SERVER GET_DATA: sent status: ' + str(self.status))
         if not self.status: 
             cmd = usrp_ready_data_command(self.usrpsocks, self.ctrlprm['channel'])
             # TODO: iseq += 1
-            
-            main_samples = np.complex64(np.zeros((NANTENNAS_MAIN, nbb_samples)))
+            # TODO: form main samples
+            main_samples = np.complex64(np.zeros((MAXANTENNAS_MAIN, nbb_samples)))
             main_beamformed = np.uint32(np.zeros(nbb_samples))
-            back_samples = np.complex64(np.zeros((NANTENNAS_BACK, nbb_samples)))
+            back_samples = np.complex64(np.zeros((MAXANTENNAS_BACK, nbb_samples)))
             main_beamformed = np.uint32(np.zeros(nbb_samples))
             
+            print('USRP_SERVER GET_DATA: checking for USRP_DRIVERS, status: ' + str(self.status))
             # check status of usrp drivers
             for usrpsock in self.usrpsocks:
                 rx_status = recv_dtype(usrpsock, np.int32)
                 if rx_status != 1:
                     warnings.warn('USRP driver status {} in GET_DATA'.format(rx_status))
                     self.status = USRP_DRIVER_ERROR
-                    
+            
+            print('USRP_SERVER GET_DATA: waiting for samples from USRP_DRIVERS, status: ' + str(self.status))
             # grab samples
             for usrpsock in self.usrpsocks:
                 # receive antennas controlled by usrp driver
                 nantennas = recv_dtype(usrpsock, np.uint16)
-                antennas = np.recv_dtype(usrpsock, np.uint16, nantennas)
+                antennas = recv_dtype(usrpsock, np.uint16, nantennas)
+                
+                if isinstance(antennas, (np.ndarray, np.generic)):
+                    antennas = np.array(antennas)
+
+                pdb.set_trace()
                 for ant in antennas: 
                     main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
-                    back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
-
+                    #back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
+            
+            print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(self.status))
             # create beamform_main, a complex vector NANTS long with the phasing 
             beamform_main = np.ones(len(MAIN_ANTENNAS))
-            beamform_back = np.ones(len(MAIN_ANTENNAS))
+            #beamform_back = np.ones(len(MAIN_ANTENNAS))
             for i in range(nbb_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
@@ -440,13 +445,14 @@ class recv_get_data_handler(dmsg_handler):
 
                 itemp = np.int16(0)
                 qtemp = np.int16(0) 
-                for ant in NBACK_ANTENNAS:
-                    itemp += np.real(back_samples[ant][i]) * np.real(beamform_back[ant]) - \
-                             np.imag(back_samples[ant][i]) * np.imag(beamform_back[ant]) 
-                    qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
-                             np.imag(back_samples[ant][i]) * np.real(beamform_back[ant])
-
-                back_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
+                
+                #for ant in NBACK_ANTENNAS:
+                #    itemp += np.real(back_samples[ant][i]) * np.real(beamform_back[ant]) - \
+                #             np.imag(back_samples[ant][i]) * np.imag(beamform_back[ant]) 
+                #    qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
+                #             np.imag(back_samples[ant][i]) * np.real(beamform_back[ant]) 
+                #
+                #back_beamformed[i] = _complex_ui32_pack(itemp, qtemp)
 
             # transmit status to arby_server    
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
@@ -578,10 +584,10 @@ def main():
     
     cuda_config = configparser.ConfigParser()
     cuda_config.read('driver_config.ini')
-    cuda_config = cudadriverconfig['cuda_settings']
+    cuda_config = cuda_config['cuda_settings']
 
 
-    # list of registered sequences
+    # TODO: list of registered sequences
     sequence_manager = sequenceManager()
 
     # open USRPs drvers and initialize them

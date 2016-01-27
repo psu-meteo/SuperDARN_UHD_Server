@@ -75,9 +75,7 @@ class driver_command(object):
 
     def receive(self, sock):
         for item in self.dataqueue:
-            cprint('waiting for {}'.format(item.name), 'yellow')
             self.payload[item.name] = item.receive(sock)
-            cprint('found {}'.format(item.name), 'yellow')
 
 class server_ctrlprm(driver_command):
     def __init__(self, servers = None, ctrlprm_dict = None):
@@ -258,11 +256,11 @@ class sequence(object):
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
-        
+         
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
             raise ValueError('rfreq != tfreq, this behavior is not yet supported')
-
+        
         if self.ctrlprm['number_of_baseband_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')
 
@@ -289,9 +287,9 @@ def create_testsequence():
     'tbeamwidth': 0, \
     'tfreq': 10010, \
     'trise': 100, \
-    'number_of_baseband_samples' : 200, \
+    'number_of_baseband_samples' : 500, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 50000, \
+    'baseband_samplerate' : 200000, \
     'filter_bandwidth' : 0, \
     'match_filter' : 0, \
     'rfreq' : 10010, \
@@ -308,7 +306,7 @@ def create_testsequence():
 
     txbbrate = ctrlprm['baseband_samplerate']
     pulse_lens = [300e-6, 300e-6, 300e-6]
-    phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens] # 
+    phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
     pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
 
     usrp_config = configparser.ConfigParser()
