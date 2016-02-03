@@ -700,6 +700,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         num_acc_samps += num_rx_samps;
                     }
 
+                    if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
+                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
+                        std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
+                    }
+                    if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW){
+                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
+                        std::cerr << "Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
+                    }
+                    if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
+                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
+                        std::cerr << "Unexpected error code " << md.error_code <<
+                    " encountered at " << rx_error_time.get_real_secs() << std::endl;
+                    }
+
                     // send back samples                   
                     for(i = 0; i < 2 * num_clrfreq_samples) {
                         sock_send_int16(driverconn, rx_data_buffer[i]);
