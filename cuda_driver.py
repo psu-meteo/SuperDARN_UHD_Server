@@ -25,7 +25,7 @@ import pycuda.autoinit
 from socket_utils import *
 from drivermsg_library import *
 import dsp_filters
-
+from phasing_utils import *
 # import pycuda stuff
 SWING0 = 0
 SWING1 = 1
@@ -57,10 +57,6 @@ if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
     sys.exit(0)
 
-
-# returns a complex number from a phase in radians
-def rad_to_rect(rad):
-    return np.exp(1j * rad)
 
 class cudamsg_handler(object):
     def __init__(self, serversock, gpu, antennas, array_info, hardware_limits):
@@ -134,16 +130,14 @@ class cuda_setup_handler(cudamsg_handler):
         x_spacing = float(self.array_info['x_spacing']) # meters
         beamnum = self.sequence.ctrlprm['tbeam']
 
-        # calculate beamforming shift..
-        center_beam = (nbeams - 1.0) / 2.
+        # convert beam number of radian angle
+        bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
 
-        # calculate beam azimuth, in radians
-        bmazm = np.deg2rad(90 + (beamnum - center_beam) * beam_sep)
+        # calculate antenna-to-antenna phase shift for steering at a frequency
+        pshift = calc_phase_increment(bmazm, tfreq)
 
-        # translate to phase increment
-        wavelength = C / tfreq
-        pshift = (2 * np.pi * x_spacing * np.sin(bmazm)) / wavelength
-        beamforming_shift = [a * pshift for a in self.antennas]
+        # calculate a complex number representing the phase shift for each antenna
+        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antennas]
         
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, len(pulsesamps))))
@@ -157,8 +151,7 @@ class cuda_setup_handler(cudamsg_handler):
                     psamp = shapefilter(psamp, trise, bbrate)
                 
                 # apply phasing
-                beamforming_phase = rad_to_rect(beamforming_shift[ant])
-                psamp *= beamforming_phase 
+                psamp *= beamforming_shift[ant]
 
                 # update baseband pulse sample array for antenna
                 bbtx[ant][pulse] = psamp

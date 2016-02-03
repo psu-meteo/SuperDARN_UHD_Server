@@ -140,8 +140,6 @@ class ServerTestCases(unittest.TestCase):
         # create ctrlprm struct
         ctrlprm = copy.copy(CTRLPRM_DEFAULT)
 
-        # populate ctlprm structs
-
         # send ctrlprm
         ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
         ctrlprm_struct.transmit()
@@ -283,26 +281,43 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         print('get data test complete')
 
-    '''
     def test_trigger(self):
         send_servercmd(self.arbysock, usrp_server.TRIGGER)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
 
 
-    def test_pretrigger(self):
-        pass
-    
+    def test_pretrigger_newbeam(self):
+        # load test sequence
+        self.test_registerseq()
 
+        # send pretrigger command
+        send_servercmd(self.arbysock, usrp_server.PRETRIGGER)
+
+        # send ctrlprm
+        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit()
+       
+        # accept new usrp setup command as usrp_driver
+        cmd = usrp_setup_command([self.usrpsock], CTRLPRM_DEFAULT, 0, 10000)
+        cmd.receive()
+
+        # receive bad_tx data 
+        badtx_len = recv_dtype(self.arbysock, np.int32)
+        badtx_start = recv_dtype(self.arbysock, np.int32)
+        badtx_dur = recv_dtype(self.arbysock, np.int32)
+
+    
+    '''
+    # TODO: write this test
     def test_posttrigger(self):
         pass
 
+    # TODO: write this test
     def test_clrfreq(self):
         pass
 
-    
-    def test_rxfereset(self):
-        pass
 
     '''
 

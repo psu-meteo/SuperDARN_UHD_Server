@@ -76,6 +76,7 @@
 #define CLRFREQ 'c'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
+#define UHD_GETTIME 'm'
 #define EXIT 'e'
 
 #define TXDIR 1
@@ -201,10 +202,20 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
-        fprintf(stderr, "error receiving uint32_t\n");
+        fprintf(stderr, "error sending uint32_t\n");
    }
    return status;
 }
+
+ssize_t sock_send_float64(int32_t sock, double d)
+{
+   ssize_t status = send(sock, &d, sizeof(double), 0);
+   if(status != sizeof(double)) {
+        fprintf(stderr, "error sending float64\n");
+   }
+   return status;
+}
+
 
 // break up a complex int16 into real and imag, send over the socket..
 ssize_t sock_send_complex_int16(int32_t sock, std::complex<int16_t> d)
@@ -527,6 +538,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
                         boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
                     }
+
                     // TODO: set the number of samples in a pulse. this is calculated from the pulse duration and the sampling rate 
                     // when do we know this? after USRP_SETUP
                
@@ -603,7 +615,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, sending metadata\n");
 
-                    sock_send_int32(driverconn, state);     // send status
+                    sock_send_int32(driverconn, state);  // send status
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, num_requested_rx_samples);     // nsamples;  send send number of samples
                     
@@ -624,21 +636,82 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     break;
                     }
 
+                case UHD_GETTIME: {
+                        DEBUG_PRINT("entering UHD_GETTIME command\n");
+                        start_time = usrp->get_time_now();
+
+                        uint32_t real_time = start_time.get_real_secs();
+                        double frac_time = start_time.get_frac_secs();
+
+                        sock_send_uint32(driverconn, real_time);
+                        sock_send_float64(driverconn, frac_time);
+
+                        DEBUG_PRINT("UHD_GETTIME current UHD time: %.2f %.2f command\n", real_time, frac_time);
+                        sock_send_uint8(driverconn, UHD_GETTIME);
+                    }
+
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
-                    // TODO: synchronize clr_freq scan.. 
-                    /* rx_clrfreq_rval = recv_clr_freq(
-                                    usrp,
-                                    rx_stream,
-                                    center,
-                                    usable_bandwidth,
-                                    (int) client.filter_bandwidth/1e3,
-                                    clrfreq_parameters.nave,
-                                    10,
-                                    &pwr2.front()); */
-                    // TODO: send back raw samples for beamforming on server
+                    uhd::rx_metadata_t md;
+                    float timeout = .1;
+                    uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
+                    uint32_t clrfreq_time_full = sock_get_uint32(driverconn);
+                    double clrfreq_time_frac = sock_get_float64(driverconn);
+                    double clrfreq_cfreq = sock_get_float64(driverconn);
+                    double clrfreq_rate = sock_get_float64(driverconn);
+
+                    uhd::time_spec_t clrfreq_start_time = uhd::time_spec_t(clrfreq_time_full, clrfreq_time_frac)
+                    
+                    std::vector<std::complex<int16_t>> clrfreq_data_buffer
+                    clrfreq_data_buffer.resize(num_clrfreq_samples)
+
+                    // TODO: does this take too long?
+                    usrp->set_rx_rate(clrfreq_rate);
+                    usrp->set_rx_freq(clrfreq_cfreq);
+                     
+                    // set up for USRP sampling
+                    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
+                    uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
+                    stream_cmd.num_samps = num_clrfreq_samples;
+                    stream_cmd.stream_now = false;
+                    stream_cmd.time_spec = clrfreq_start_time;
+                    
+                    size_t num_acc_samps = 0;
+                    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
+
+                    // and start grabbin'
+                    while(num_acc_samps < num_requested_samps) {
+                        size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
+                        size_t num_rx_samps = rx_stream->recv(&((rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
+
+                        timeout = 0.1;
+
+                        //handle the error codes
+                        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
+                        if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
+                            throw std::runtime_error(str(boost::format(
+                                "Receiver error %s"
+                            ) % md.strerror()));
+                        }
+
+                        //if (DEBUG) {
+                        //    std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_se
+                        //}
+                        num_acc_samps += num_rx_samps;
+                    }
+
+                    // send back samples                   
+                    for(i = 0; i < 2 * num_clrfreq_samples) {
+                        sock_send_int16(driverconn, rx_data_buffer[i]);
+                    }
+
+                    // restore usrp rates
+                    usrp->set_rx_rate(rxrate);
+                    usrp->set_rx_freq(rxfreq);
+
                     sock_send_uint8(driverconn, CLRFREQ);
                     break;
+
                     }
 
                 case EXIT: {

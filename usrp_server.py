@@ -27,8 +27,7 @@ import posix_ipc
 
 from drivermsg_library import *
 from socket_utils import *
-# see posix_ipc python library
-# http://semanchuk.com/philip/posix_ipc/
+from phasing_utils import * 
 
 VERBOSE = 0
 STATE_TIME = 5 # microseconds
@@ -111,7 +110,7 @@ class sequenceManager(object):
     def getSequence(self, channel):
         for sequence in self.sequences:
             if sequence.ctrlprm['channel'] == channel:
-                return channel
+                return sequence 
 
         warnings.warn('Sequence for channel {} not found!'.format(channel))
         return None
@@ -290,15 +289,17 @@ class exit_handler(dmsg_handler):
 
 class pretrigger_handler(dmsg_handler):
     def process(self):
+        self._recv_ctrlprm()
         beam = self.ctrlprm['tbeam'] 
 
         # extract sampling info from cuda driver
-        rfrate = self.cuda_config['FSampTX']
-        
+        rfrate = np.int32(self.cuda_config['FSampTX'])
+        print('rf rate parsed from ini: ' + str(rfrate))
+
         sequence = self.sequence_manager.getSequence(self.ctrlprm['channel'])
-        # provide fresh samples to usrp_driver.cpp shared memory if beam or sequence has changed
         if (self.sequence_manager.sequenceUpdateCheck(beam)):
             cmd = usrp_setup_command(self.usrpsocks, self.ctrlprm, sequence, rfrate)
+            # TODO: pretrigger test crashes with broken pipe on cmd.transmit()
             cmd.transmit()
             self.sequence_manager.sequencesLoaded(beam)
 
@@ -429,33 +430,38 @@ class recv_get_data_handler(dmsg_handler):
                     #back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
             
             print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(self.status))
-            # TODO: create beamform_main, a complex vector NANTS long with the phasing 
-            beamform_main = np.ones(len(antennas))
+            
+            bmazm = calc_beam_azm_rad(self.ctrlprm.nbeams, self.ctrlprm.bmnum, self.ctrlprm.beam_sep)
+
+            # calculate antenna-to-antenna phase shift for steering at a frequency
+            pshift = calc_phase_increment(bmazm, self.ctrlprm.tfreq * 1000.)
+
+            # calculate a complex number representing the phase shift for each antenna
+            beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
+
+ 
             #beamform_back = np.ones(len(MAIN_ANTENNAS))
+            
+            def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
+                beamform_samples = np.ones(len(antennas))
 
-            for i in range(nbb_samples):
-                itemp = np.int16(0)
-                qtemp = np.int16(0) 
-                
-                for ant in range(antennas):
-                    itemp += np.real(main_samples[ant][i]) * np.real(beamform_main[ant]) - \
-                             np.imag(main_samples[ant][i]) * np.imag(beamform_main[ant]) 
-                    qtemp += np.real(main_samples[ant][i]) * np.imag(beamform_main[ant]) + \
-                             np.imag(main_samples[ant][i]) * np.real(beamform_main[ant])
-                
-                main_beamformed[i] = complex_ui32_pack(itemp, qtemp)
+                for i in range(n_samples):
+                    itemp = np.int16(0)
+                    qtemp = np.int16(0) 
+                    
+                    for ant in range(antennas):
+                        itemp += np.real(beamform_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
+                                 np.imag(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant]) 
+                        qtemp += np.real(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
+                                 np.imag(beamform_samples[ant][i]) * np.real(phasing_matrix[ant])
+                    
+                    beamformed[i] = complex_ui32_pack(itemp, qtemp)
 
-                itemp = np.int16(0)
-                qtemp = np.int16(0) 
-                
-                #for ant in NBACK_ANTENNAS:
-                #    itemp += np.real(back_samples[ant][i]) * np.real(beamform_back[ant]) - \
-                #             np.imag(back_samples[ant][i]) * np.imag(beamform_back[ant]) 
-                #    qtemp += np.real(back_samples[ant][i]) * np.imag(beamform_back[ant]) + \
-                #             np.imag(back_samples[ant][i]) * np.real(beamform_back[ant]) 
-                #
-                #back_beamformed[i] = complex_ui32_pack(itemp, qtemp)
+            main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas)
+            back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
 
+
+            
             # transmit status to arby_server    
             transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
             transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
@@ -473,27 +479,99 @@ class recv_get_data_handler(dmsg_handler):
 # TODO: port this..
 class clrfreq_handler(dmsg_handler):
     def process(self):
+        MIN_CLRFREQ_DELAY = .2
+        MAX_CLRFREQ_AVERAGE = 10
+        MAX_CLRFREQ_BANDWIDTH = 512
+        MAX_CLRFREQ_USABLE_BANDWIDTH = 300
+        CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
+        
         fstart = recv_dtype(self.arbysock, np.int32) # kHz
         fstop = recv_dtype(self.arbysock, np.int32) # kHz
         filter_bandwidth = recv_dtype(self.arbysock, np.float32) # kHz (c/(2 * rsep))
         power_threshold = recv_dtype(self.arbysock, np.float32) # (typically .9, threshold before changing freq)
         nave = recv_dtype(self.arbysock, np.int32) # (typically .9, threshold before changing freq)
-        self._rect_ctrlprm()
+        self._recv_ctrlprm()
 
-        nave = 0
-        usable_bandwidth = clrfreq_parameters.end - clrfreq_parameters.start
-        usable_bandwidth = np.floor(usable_bandwidth/2) * 2
+        usable_bandwidth = fstart - fstop 
+        usable_bandwidth = np.floor(usable_bandwidth/2.0) * 2 # mimic behavior of gc316 driver, why does the old code do this?
+        cfreq = (fstart + (fstop-fstart/2.0)) # calculate center frequency of clrfreq search in KHz
+        
+        # TODO: create 'pwr3' double array of width usable_bandwidth with kHz resolution
+        # mimic behavior of gc316 drivers, if requested search bandwidth is broader than 1024 KHz, force it to 512 KHz?
+        # calculate the number of points in the FFT
+        num_clrfreq_samples = np.int32(pow(2,np.ceil(np.log10(1.25 * usable_bandwidth)/np.log10(2))))
+        if num_clrfreq_samples > MAX_CLRFREQ_BANDWIDTH:
+            num_clrfreq_samples = MAX_CLRFREQ_BANDWIDTH 
+            usable_bandwidth = MAX_CLRFREQ_USABLE_BANDWIDTH 
+        
+        # mimic behavior of gc316 drivers, cap nave at 10
+        if nave > MAX_CLRFREQ_AVERAGE:
+            nave = MAX_CLRFREQ_AVERAGE
 
-        # TODO: send clrfreq request to usrp drivers, let them handle sampling and return raw samples
-        # TODO: do beamforming here on samples, create 'pwr2' double array of width usable_bandwidth with kHz resolution
+        fstart = np.ceil(cfreq - usable_bandwidth / 2.0)
+        fstop = np.ceil(cfreq + usable_bandwidth / 2.0)
+
+        unusable_sideband = np.int32((num_clrfreq_samples - usable_bandwidth)/2.0)
+        clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.cfloat64)
+ 
+        # calculate center frequency of beamforming, form 
+        # apply narrowband beamforming around center frequency
+        bmazm = calc_beam_azm_rad(self.ctrlprm.nbeams, self.ctlrprm.beamnum, self.ctrlprm.beam_sep)
+        pshift = calc_phase_increment(bmazm, cfreq)
+
+        pwr2 = np.zeros(num_clrfreq_samples) 
+
+        for ai in range(nave):
+            # gather current UHD time
+            gettime_cmd = usrp_get_time_command(self.usrpsocks)
+            gettime_cmd.transmit()
+            usrptimes = []
+            for usrpsock in self.usrpsocks:
+                usrptimes.append(gettime_cmd.recv_time())
+            # TODO: check usrp time command
+            pdb.set_trace()
+
+            # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds 
+            clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
+
+            # request clrfreq sample dump
+            clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, clrfreq_freq, clrfreq_rate)
+            clrfreq_cmd.transmit() 
+            
+            # grab raw samples, apply beamforming
+            for usrpsock in self.usrpsocks:
+                # receive 
+                nantennas = recv_dtype(usrpsock, np.uint16)
+                antennas = recv_dtype(usrpsock, np.uint16, nantennas)
+                
+                if isinstance(antennas, (np.ndarray, np.generic)):
+                    antennas = np.array([antennas])
+
+                for ant in antennas: 
+                    phase_rotation = rad_to_rect(ant * pshift)
+                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.cfloat64, num_samples) 
+            
+            
+            # return fft of width usable_bandwidth, kHz resolution
+            c_fft = np.fft(combined_samples)
+            # compute power.. 
+            pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
+            pwr2 += pc_fft
+            pdb.set_trace()
+            # todo: convert fft to power spectrum
          
+        pwr2 /= nave
+
+        pdb.set_trace() # check sideband trimming
+        pwr = pwr2[sideband-1:-sideband]
+        
         transmit_dtype(self.arbysock, np.int32(fstart)) # kHz
         transmit_dtype(self.arbysock, np.int32(fstop)) # kHz
         transmit_dtype(self.arbysock, np.float32(filter_bandwidth)) # kHz (c/(2 * rsep))
         transmit_dtype(self.arbysock, np.float32(power_threshold)) # (typically .9, threshold before changing freq)
         transmit_dtype(self.arbysock, np.int32(nave)) # (typically .9, threshold before changing freq)
-        transmit_dtype(self.arbysock, np.int32(usable_bandwidth)) # kHz?
-        transmit_dtype(self.arbysock, np.float64(pwr2)) # length usable_bandwidth array?
+        transmit_dtype(self.arbysock, np.float64(usable_bandwidth)) # kHz?
+        transmit_dtype(self.arbysock, np.float64(pwr)) # length usable_bandwidth array?
 
 class rxfe_reset_handler(dmsg_handler):
     def process(self):

@@ -143,8 +143,6 @@ class USRP_ServerTestCases(unittest.TestCase):
     '''
     # test trigger pulse read
     def test_trigger_pulse(self):
-        
-
         cprint('testing usrp trigger','red')
         seq = create_testsequence()
 

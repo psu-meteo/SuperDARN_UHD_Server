@@ -14,6 +14,7 @@ UHD_TRIGGER_BUSY = ord('b')
 UHD_TRIGGER_PROCESS = ord('p')
 UHD_SETUP_READY = ord('y')
 UHD_CLRFREQ = ord('c')
+UHD_GETTIME = ord('m')
 UHD_EXIT = ord('e')
 
 CUDA_SETUP = ord('s')
@@ -229,13 +230,28 @@ class usrp_ready_data_command(driver_command):
         if sock_samples:
             self.samples = recv_dtype(sock, np.uint16, nitems = 2 * self.payload['nsamples'])
 
-
-
+# command to query usrp time
+class usrp_get_time_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_GETTIME)
+    
+    def recv_time(self, sock):
+        self.full_sec = recv_dtype(sock, np.uint32)
+        self.frac_sec = recv_dtype(sock, np.float64)
+        return self.full_sec + np.float128(np.frac_sec)
+    
 # command to prompt usrp drivers to run clear frequency sequence
 class usrp_clrfreq_command(driver_command):
-    def __init__(self, usrps):
+    def __init__(self, usrps, num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate, nave = 1):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
-        # TODO: what do I need to send here?
+            
+        num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate, nave = 1):
+
+        self.queue(num_clrfreq_samples, np.int32)
+        self.queue(np.float64(np.int(clrfreq_uhd_time)), np.float64)
+        self.queue(np.float64(np.mod(clrfreq_uhd_time,1)), np.float64)
+        self.queue(clrfreq_freq, np.float64)
+        self.queue(clrfreq_rate, np.float64)
 
 # prompt the usrp driver to cleanly shut down, useful for testing
 class usrp_exit_command(driver_command):
