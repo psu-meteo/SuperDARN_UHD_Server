@@ -637,17 +637,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                 case UHD_GETTIME: {
-                        DEBUG_PRINT("entering UHD_GETTIME command\n");
-                        start_time = usrp->get_time_now();
+                    DEBUG_PRINT("entering UHD_GETTIME command\n");
+                    start_time = usrp->get_time_now();
 
-                        uint32_t real_time = start_time.get_real_secs();
-                        double frac_time = start_time.get_frac_secs();
+                    uint32_t real_time = start_time.get_real_secs();
+                    double frac_time = start_time.get_frac_secs();
 
-                        sock_send_uint32(driverconn, real_time);
-                        sock_send_float64(driverconn, frac_time);
+                    sock_send_uint32(driverconn, real_time);
+                    sock_send_float64(driverconn, frac_time);
 
-                        DEBUG_PRINT("UHD_GETTIME current UHD time: %.2f %.2f command\n", real_time, frac_time);
-                        sock_send_uint8(driverconn, UHD_GETTIME);
+                    DEBUG_PRINT("UHD_GETTIME current UHD time: %.2f %.2f command\n", real_time, frac_time);
+                    sock_send_uint8(driverconn, UHD_GETTIME);
+                    break;
                     }
 
                 case CLRFREQ: {
@@ -736,13 +737,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     munmap(shm_swingbrx, rxshm_size);
                     munmap(shm_swingatx, txshm_size);
                     munmap(shm_swingbtx, txshm_size);
-                    sem_close(&sem_swinga); 
-                    sem_close(&sem_swingb); 
+                    sem_close(&sem_swinga);
+                    sem_close(&sem_swingb);
                     // TODO: close usrp streams?
                     exit(1);
-
                     
-                     break;
+                    break;
                     }
 
                 default: {

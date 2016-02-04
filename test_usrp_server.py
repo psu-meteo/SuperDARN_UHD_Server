@@ -114,7 +114,7 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
     '''
-
+    '''
     def test_registerseq(self):
         send_servercmd(self.arbysock, usrp_server.REGISTER_SEQ)
 
@@ -198,7 +198,7 @@ class ServerTestCases(unittest.TestCase):
         drivertype  = recv_dtype(self.arbysock, np.int32)
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
-    
+    ''' 
     '''
     def test_ctrlprgready(self):
         send_servercmd(self.arbysock, usrp_server.CTRLPROG_READY)
@@ -228,6 +228,8 @@ class ServerTestCases(unittest.TestCase):
         status = recv_dtype(self.arbysock, np.int32)
         self.assertTrue(status == 0)
     
+    '''
+
     '''
     def test_get_data(self):
         # first, register sequence
@@ -309,17 +311,64 @@ class ServerTestCases(unittest.TestCase):
         badtx_dur = recv_dtype(self.arbysock, np.int32)
 
     
-    '''
     # TODO: write this test
     def test_posttrigger(self):
         pass
 
-    # TODO: write this test
-    def test_clrfreq(self):
-        pass
-
-
     '''
+
+    def test_clrfreq_narrow(self):
+        send_servercmd(self.arbysock, usrp_server.CLRFREQ)
+       
+        fstart = 10000
+        fstop =  10100
+        filter_bandwidth = 1
+        power_threshold = .9
+        nave = 1
+
+        # send clrfreq struct
+        transmit_dtype(self.arbysock, np.int32(fstart)) # kHz
+        transmit_dtype(self.arbysock, np.int32(fstop)) # kHz
+        transmit_dtype(self.arbysock, np.float32(filter_bandwidth)) # kHz (c/(2 * rsep))
+        transmit_dtype(self.arbysock, np.float32(power_threshold)) # (typically .9, threshold before changing freq)
+        transmit_dtype(self.arbysock, np.int32(nave)) 
+
+        
+        # and send a ctlrprm
+        ctrlprm = copy.copy(CTRLPRM_DEFAULT)
+        ctrlprm_struct = server_ctrlprm(self.arbysock, ctrlprm)
+        ctrlprm_struct.transmit()
+    
+        print('test_clrfreq_narrow - waiting for UHD_GETTIME command')
+        # pretend to be USRP, send back current time
+        assert(recv_dtype(self.usrpsock, np.uint8) == usrp_server.UHD_GETTIME)
+        transmit_dtype(self.usrpsock, np.int32(10))
+        transmit_dtype(self.usrpsock, np.float64(.5))
+        transmit_dtype(self.usrpsock, np.uint8(usrp_server.UHD_GETTIME))
+        
+        print('test_clrfreq_narrow - waiting for CLRFREQ command to usrp_driver')
+        assert(recv_dtype(self.usrpsock, np.uint8) == UHD_CLRFREQ)
+        uhd_num_clrfreq_samples = recv_dtype(self.usrpsock, np.int32)
+        uhd_time_full = recv_dtype(self.usrpsock, np.int32)
+        uhd_time_frac = recv_dtype(self.usrpsock, np.float64)
+        uhd_clr_rate = recv_dtype(self.usrpsock, np.float64)
+   
+        
+        print('test_clrfreq_narrow - sending fake clrfreq samples')
+        clrfreq_samples = np.zeros(uhd_num_clrfreq_samples, dtype = np.complex64)
+        transmit_dtype(self.usrpsock, clrfreq_samples) 
+
+        print('test_clrfreq_narrow - waiting for updated clrfreq frequencies')
+        fstart = recv_dtype(self.arbysock, np.int32) # kHz
+        fstop = recv_dtype(self.arbysock, np.int32) # kHz
+        filter_bandwidth = recv_dtype(self.arbysock, np.float32) # kHz (c/(2 * rsep))
+        power_threshold = recv_dtype(self.arbysock, np.float32) # (typically .9, threshold before changing freq)
+        nave = recv_dtype(self.arbysock, np.int32) # (typically .9, threshold before changing freq)
+
+        usable_bandwidth = recv_dtype(self.arbysock, np.float64)
+        pwr = recv_dtype(self.arbysock, np.float64, nitems = usable_bandwidth) # length usable_bandwidth array?
+        
+        assert recv_dtype(self.arbysock, np.uint8) == usrp_server.UHD_CLRFREQ, 'CLRFREQ should return CLRFREQ command upon success'
 
 if __name__ == '__main__':
     unittest.main()

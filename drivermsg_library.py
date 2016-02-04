@@ -238,17 +238,14 @@ class usrp_get_time_command(driver_command):
     def recv_time(self, sock):
         self.full_sec = recv_dtype(sock, np.uint32)
         self.frac_sec = recv_dtype(sock, np.float64)
-        return self.full_sec + np.float128(np.frac_sec)
+        return self.full_sec + self.frac_sec
     
 # command to prompt usrp drivers to run clear frequency sequence
 class usrp_clrfreq_command(driver_command):
-    def __init__(self, usrps, num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate, nave = 1):
+    def __init__(self, usrps, num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
-            
-        num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate, nave = 1):
-
         self.queue(num_clrfreq_samples, np.int32)
-        self.queue(np.float64(np.int(clrfreq_uhd_time)), np.float64)
+        self.queue(np.int32(np.int(clrfreq_uhd_time)), np.int32)
         self.queue(np.float64(np.mod(clrfreq_uhd_time,1)), np.float64)
         self.queue(clrfreq_freq, np.float64)
         self.queue(clrfreq_rate, np.float64)

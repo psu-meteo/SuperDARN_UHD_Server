@@ -35,6 +35,8 @@ DUMP_RAW = False
 
 MAXANTENNAS_MAIN = 32
 MAXANTENNAS_BACK = 4
+RADAR_NBEAMS = 16 # TODO: set this from config files..
+RADAR_BEAMWIDTH = 3.24 # TODO... set this from a config file
 
 # arby server commands
 REGISTER_SEQ = '+'
@@ -431,10 +433,10 @@ class recv_get_data_handler(dmsg_handler):
             
             print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(self.status))
             
-            bmazm = calc_beam_azm_rad(self.ctrlprm.nbeams, self.ctrlprm.bmnum, self.ctrlprm.beam_sep)
+            bmazm = calc_beam_azm_rad(RADAR_NBEAMS, self.ctrlprm['tbeam'], RADAR_BEAMWIDTH)
 
             # calculate antenna-to-antenna phase shift for steering at a frequency
-            pshift = calc_phase_increment(bmazm, self.ctrlprm.tfreq * 1000.)
+            pshift = calc_phase_increment(bmazm, self.ctrlprm['tfreq'] * 1000.)
 
             # calculate a complex number representing the phase shift for each antenna
             beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
@@ -492,11 +494,11 @@ class clrfreq_handler(dmsg_handler):
         nave = recv_dtype(self.arbysock, np.int32) # (typically .9, threshold before changing freq)
         self._recv_ctrlprm()
 
-        usable_bandwidth = fstart - fstop 
+        usable_bandwidth = fstop - fstart 
         usable_bandwidth = np.floor(usable_bandwidth/2.0) * 2 # mimic behavior of gc316 driver, why does the old code do this?
         cfreq = (fstart + (fstop-fstart/2.0)) # calculate center frequency of clrfreq search in KHz
+        assert usable_bandwidth > 0, "usable bandwidth for clear frequency search must be greater than 0" 
         
-        # TODO: create 'pwr3' double array of width usable_bandwidth with kHz resolution
         # mimic behavior of gc316 drivers, if requested search bandwidth is broader than 1024 KHz, force it to 512 KHz?
         # calculate the number of points in the FFT
         num_clrfreq_samples = np.int32(pow(2,np.ceil(np.log10(1.25 * usable_bandwidth)/np.log10(2))))
@@ -512,11 +514,11 @@ class clrfreq_handler(dmsg_handler):
         fstop = np.ceil(cfreq + usable_bandwidth / 2.0)
 
         unusable_sideband = np.int32((num_clrfreq_samples - usable_bandwidth)/2.0)
-        clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.cfloat64)
+        clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
  
         # calculate center frequency of beamforming, form 
         # apply narrowband beamforming around center frequency
-        bmazm = calc_beam_azm_rad(self.ctrlprm.nbeams, self.ctlrprm.beamnum, self.ctrlprm.beam_sep)
+        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, self.ctrlprm['tbeam'], RADAR_BEAMWIDTH)
         pshift = calc_phase_increment(bmazm, cfreq)
 
         pwr2 = np.zeros(num_clrfreq_samples) 
@@ -527,15 +529,15 @@ class clrfreq_handler(dmsg_handler):
             gettime_cmd.transmit()
             usrptimes = []
             for usrpsock in self.usrpsocks:
-                usrptimes.append(gettime_cmd.recv_time())
-            # TODO: check usrp time command
-            pdb.set_trace()
+                usrptimes.append(gettime_cmd.recv_time(usrpsock))
 
             # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds 
             clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
 
             # request clrfreq sample dump
-            clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, clrfreq_freq, clrfreq_rate)
+            # TODO: what is the clear frequency rate? (c / (2 * rsep?))
+            clrfreq_rate = 1000
+            clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
             clrfreq_cmd.transmit() 
             
             # grab raw samples, apply beamforming
@@ -549,7 +551,7 @@ class clrfreq_handler(dmsg_handler):
 
                 for ant in antennas: 
                     phase_rotation = rad_to_rect(ant * pshift)
-                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.cfloat64, num_samples) 
+                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.complex64, num_samples) 
             
             
             # return fft of width usable_bandwidth, kHz resolution
@@ -601,38 +603,42 @@ def kodiak_set_rxfe(usrpsocks, rf_settings):
     cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
 
 class full_clrfreq_handler(dmsg_handler):
-    # not applicable to USRP setup?
-    # I don't see this used anywhere
-    pass
+    def process(self):
+        pdb.set_trace()
+        raise NotImplementedError('full clrfreq handler is unimplemented')
 
 class get_status_handler(dmsg_handler):
     def process(self):
         # TODO, low priority, send back fault status read from usrps
+        raise NotImplementedError('fault status handler is unimplemented')
+        pdb.set_trace()
         pass
 
 class dio_table_settings_handler(dmsg_handler):
     # not applicable to USRP setup
-    pass
+    def process(self):
+        raise NotImplementedError('dio settings handler is unimplemented')
+        pdb.set_trace()
 
 class gps_get_soft_time_handler(dmsg_handler):
-    # not applicable to USRP setup
-    pass
-
+    def process(self):
+        raise NotImplementedError('gps get soft time handler is unimplemented')
+    
 class gps_get_event_time_handler(dmsg_handler):
-    # not applicable to USRP setup
-    pass
+    def process(self):
+        raise NotImplementedError('gps event handler is unimplemented')
 
 class gps_schedule_single_scan_handler(dmsg_handler):
-    # not applicable to USRP setup
-    pass
+    def process(self):
+        raise NotImplementedError('gps scan handler is unimplemented')
 
 class gps_msg_error_handler(dmsg_handler):
-    # not applicable to USRP setup
-    pass
+    def process(self):
+        raise NotImplementedError('gps is unimplemented')
 
 class gpstrigger_handler(dmsg_handler):
-    # not applicable to USRP setup
-    pass
+    def process(self):
+        raise NotImplementedError('gps trigger is unimplemented')
 
 
 dmsg_handlers = {\
