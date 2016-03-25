@@ -32,7 +32,7 @@ GET_DATA = 'd'
 WAIT_FOR_DATA = 'w'
 
 RMSG_SUCCESS = True
-RMSG_FAILURE = False
+MSG_FAILURE = False
 
 class rosmsg_command(driver_command):
     def __init__(self, client, command = NO_COMMAND):

@@ -1,24 +1,63 @@
 # so, hook usrp_tcp_driver into site library
 # todo, write mock arbyserver that can handle these commands
-# TODO: write mock arby server that can feed normalscan with false data..
+# TODO: write mock arby server that can feed multiple normalscans with false data..
 
 import sys
+import threading
+import logging
+
 from rosmsg import *
 
-class RadarChannelManager:
+MAX_CHANNELS = 10
+
+class RadarChannelHandler:
     # create new channel
-    def __init__(self):
+    rmsg_handlers = {\
+        SET_RADAR_CHAN : self.SetRadarChanHandler, \
+        SET_INACTIVE : self.SetInactiveHandler, \
+        SET_ACTIVE : self.SetActiveHandler, \
+        QUERY_INI_SETTINGS : self.QueryIniSettingsHandler, \
+        GET_SITE_SETTINGS : self.GetSiteSettingsHandler, \
+        UPDATE_SITE_SETTINGS : self.UpdateSiteSettingsHandler,\
+        GET_PARAMETERS : self.GetParametersHandler,\
+        SET_PARAMETERS : self.SetParametersHandler,\
+        PING : self.PingHandler,\
+        OKAY : self.OkayHandler,\
+        NOOP : self.NoopHandler,\
+        QUIT : self.QuitHandler,\
+        REGISTER_SEQ: self.RegisterSeqHandler,\
+        REMOVE_SEQ: self.RemoteSeqHandler,\
+        REQUEST_ASSIGNED_FREQ: self.RequestAssignedFreqHandler,\
+        REQUEST_CLEAR_FREQ_SEARCH: self.RequestClearFreqSearchHandler,\
+        LINK_RADAR_CHAN : self.LinkRadarChanHandler,\
+        SET_READY_FLAG: self.SetReadyFlagHandler,\
+        UNSET_READY_FLAG: self.UnsetReadyFlagHandler,\
+        SET_PROCESSING_FLAG: self.SetProcessingFlagHandler,\
+        UNSET_PROCESSING_FLAG: self.UnsetProcessingFlagHandler,\
+        GET_DATA: self.GetDataHandler,\
+        WAIT_FOR_DATA: self.WaitForDataHandler}
+
+    def __init__(self, conn):
         self.active = False
         self.ready = False
-        pass
+        self.conn = conn
+
+    def run(self):
+        while True:
+
+            rmsg = rosmsg_command(self.conn)
+            rmsg.receive()
+
+            if rmsg.payload['type'] in rmsg_handlers:	
+                rmsg_handlers(rmsg.payload['type'])(rmsg)
+            else:
+                SiteDefaultHandler(rmsg)
 
 
     def close(self):
+        # TODO
         pass
     
-    def __del__(self):
-        pass
-
     def DefaultHandler(self, rmsg):
         rmsg.payload['status'] = RMSG_SUCCESS
 
@@ -140,59 +179,35 @@ class RMsgManager:
 
     def run(self):
 
-        cmd_sock.listen(5)
+        client_sock.listen(MAX_CHANNELS)
+        client_threads = []
 
-        while(True):
-            server_conn, addr = cmd_sock.accept()
-            cmd = recv_dtype(server_conn, np.uint8)
-            handler = cudamsg_handlers[cmd](server_conn, gpu, antennas, array_info, hardware_limits)
-            handler.process()
+        def spawn_channel(conn):
+            # start new radar channel handler
+            channel = radar_channel_manager(conn)
+            channel.run()
+            conn.close()
 
-    def start(self):
-        rmsg = rosmsg_command(sock)
-        rmsg.receive()
-        if rmsg.payload['type'] in rmsg_handlers:	
-            rmsg_handlers(rmsg.payload['type'])(rmsg)
-        else:
-            SiteDefaultHandler(rmsg)
-        rmsg.transmit()
+        while True:
+            client_conn, addr = client_sock.accept()
+            
+            ct = threading.Thread(target = spawn_channel, args = (client_conn,))
+            client_threads.append(ct)
+            ct.start()
+        
+        client_sock.close() 
 
-        # receive rosmsg
-        # run handler
-        # send rosmsg
-
-    rmsg_handlers = {\
-        SET_RADAR_CHAN : pass, \
-        SET_INACTIVE : pass, \
-        SET_ACTIVE : pass, \
-        QUERY_INI_SETTINGS : pass, \
-        GET_SITE_SETTINGS : pass, \
-        UPDATE_SITE_SETTINGS : pass,\
-        GET_PARAMETERS : pass,\
-        SET_PARAMETERS : pass,\
-        PING : pass,\
-        OKAY : pass,\
-        NOOP : pass,\
-        QUIT : pass,\
-        REGISTER_SEQ: pass,\
-        REMOVE_SEQ: pass,\
-        REQUEST_ASSIGNED_FREQ: pass,\
-        REQUEST_CLEAR_FREQ_SEARCH: pass,\
-        LINK_RADAR_CHAN : pass,\
-        SET_READY_FLAG: pass,\
-        UNSET_READY_FLAG: pass,\
-        SET_PROCESSING_FLAG: pass,\
-        UNSET_PROCESSING_FLAG: pass,\
-        GET_DATA: pass,\
-        WAIT_FOR_DATA: pass}
 
 def main():
+    # maybe switch to multiprocessing with manager process
+    logging.debug('main()')
     # so, open server and listen on port
     # capture rmsg commands, return bogus data
     # try running two control programs.. 
 
 if '__name__' == '__main__':
     main()
+    logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] (%(threadName)-10s) %(message)s',)
     rmsg_port = 45000 
     rmsg_manager(port)
     rmsg_manager.start()
