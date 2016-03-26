@@ -1,4 +1,5 @@
-from drivermsg_library import driver_command
+from drivermsg_library import driver_command, NO_COMMAND
+import numpy as np
 
 SET_RADAR_CHAN = 'R'
 SET_INACTIVE = 'a'
@@ -35,7 +36,7 @@ RMSG_SUCCESS = True
 MSG_FAILURE = False
 
 class rosmsg_command(driver_command):
-    def __init__(self, client, command = NO_COMMAND):
+    def __init__(self, client):
         driver_command.__init__(self, [client], NO_COMMAND)
         
         rosmsg_dict = {}
