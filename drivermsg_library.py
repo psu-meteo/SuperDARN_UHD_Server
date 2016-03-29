@@ -33,13 +33,19 @@ class driver_command(object):
     # class to help manage sending data 
     class socket_data(object):
         def __init__(self, data, dtype, name, nitems = 1):
-            self.data = dtype(data)
-            self.dtype = dtype
             self.name = name
             self.nitems = nitems
+            
+            # handle numpy dtypes as strings or objects
+            if isinstance(dtype, str):
+                self.dtype = dtype
+                self.data = np.dtype(dtype).type(data)
+            else:
+                self.dtype = dtype
+                self.data = dtype(data)
 
         def transmit(self, sock):
-            return transmit_dtype(sock, self.data)
+            return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
             return recv_dtype(sock, self.dtype, self.nitems)

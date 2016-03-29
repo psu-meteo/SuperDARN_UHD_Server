@@ -85,8 +85,8 @@ class RadarChannelHandler:
         rmsg.transmit()
 
     def RequestAssignedFreqHandler(self, rmsg):
-        send_dtype(self.conn, np.int32(self.tfreq))
-        send_dtype(self.conn, np.float32(self.noise))
+        transmit_dtype(self.conn, np.int32(self.tfreq))
+        transmit_dtype(self.conn, np.float32(self.noise))
         rmsg.payload['status'] = RMSG_SUCCESS
         rmsg.transmit()
 
@@ -138,24 +138,25 @@ class RadarChannelHandler:
         # TODO: write this
         self.dataprm.transmit(self.conn)
         # TODO: find main/back samples..
-        self.transmit_dtype(self.conn, np.uint32(main_samples))
-        self.transmit_dtype(self.conn, np.uint32(back_samples))
+        transmit_dtype(self.conn, main_samples, '>u4')
+        transmit_dtype(self.conn, back_samples, '>u4')
      
-        send_dtype(self.conn, np.uint32(badtrdat_len))
-        send_dtype(self.conn, np.uint32(badtrdat_start_usec)) # length badtrdat_len
-        send_dtype(self.conn, np.uint32(badtrdat_duration_usec)) # length badtrdat_len
+        transmit_dtype(self.conn, badtrdat_len, '>u4')
+        transmit_dtype(self.conn, badtrdat_start_usec, '>u4') # length badtrdat_len
+        transmit_dtype(self.conn, badtrdat_duration_usec, '>u4') # length badtrdat_len
     
-        send_dtype(self.conn, np.int32(num_transmitters))
-        send_dtype(self.conn, np.int32(txstatus_agc)) # length num_transmitters
-        send_dtype(self.conn, np.int32(txstatus_lowpwr)) # length num_transmitters
+        transmit_dtype(self.conn, num_transmitters, '>i4')
+        transmit_dtype(self.conn, txstatus_agc, '>i4') # length num_transmitters
+        transmit_dtype(self.conn, txstatus_lowpwr, '>i4') # length num_transmitters
         
         rmsg.payload['status'] = RMSG_SUCCESS
         rmsg.transmit()
 
     def SetRadarChanHandler(self, rmsg):
-        rnum = recv_dtype(self.conn, np.int32)
-        cnum = recv_dtype(self.conn, np.int32)
-
+        pdb.set_trace()
+        # TODO: handle endianness
+        rnum = recv_dtype(self.conn, '>i4')
+        cnum = recv_dtype(self.conn, '>i4')
         if(debug):
             print('radar num: {}, radar chan: {}'.format(rnum, cnum))
 
@@ -167,14 +168,14 @@ class RadarChannelHandler:
         rmsg.transmit()
 
     def QueryIniSettingsHandler(self, rmsg):
-        data_length = recv_dtype(self.conn, np.int32)
+        data_length = recv_dtype(self.conn, '>i4')
         ini_name = recv_dtype(self.conn, str, nitems = data_length)
         requested_type = recv_dtype(self.conn, np.uint8)
 
         # TODO: look up ini name in ini files
-        send_dtype(self.conn, requested_type)
-        send_dtype(self.conn, requested_length) # appears to be unused by site library
-        send_dtype(self.conn, payload) # always 4 bytes..
+        transmit_dtype(self.conn, requested_type, '>i4')
+        transmit_dtype(self.conn, requested_length, '>i4') # appears to be unused by site library
+        transmit_dtype(self.conn, payload) 
 
         rmsg.payload['status'] = RMSG_SUCCESS
         rmsg.transmit()
