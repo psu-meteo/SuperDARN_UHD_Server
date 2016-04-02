@@ -8,6 +8,8 @@ import threading
 import logging
 import pdb
 import socket
+from termcolor import cprint
+
 
 from socket_utils import *
 from rosmsg import *
@@ -18,11 +20,40 @@ RMSG_SUCCESS = 0
 
 debug = True
 
+def rmsg_return_success(func):
+    def success_wrapper(self, rmsg):
+        func(self, rmsg)
+        
+        rmsg.set_data('status', RMSG_SUCCESS)
+        rmsg.set_data('type', rmsg.payload['type'])
+        rmsg.transmit()
+
+    return success_wrapper
+
+def rmsg_return_failure(func):
+    def failure_wrapper(self, rmsg):
+        func(self, rmsg)
+        
+        rmsg.set_data('status', RMSG_FAILURE)
+        rmsg.set_data('type', rmsg.payload['type'])
+        rmsg.transmit()
+
+    return failure_wrapper
+
+
+
 class RadarChannelHandler:
     def __init__(self, conn):
         self.active = False
         self.ready = False
         self.conn = conn
+
+        self.ctrlprm_struct = ctrlprm_struct(self.conn)
+        self.seqprm_struct = seqprm_struct(self.conn)
+        self.clrfreq_struct = clrfreqprm_struct(self.conn)
+        self.rprm_struct = rprm_struct(self.conn)
+        self.dataprm_struct = dataprm_struct(self.conn)
+
 
     def run(self):
 
@@ -43,7 +74,7 @@ class RadarChannelHandler:
         #   REMOVE_SEQ: self.RemoveSeqHandler,\
             REQUEST_ASSIGNED_FREQ: self.RequestAssignedFreqHandler,\
             REQUEST_CLEAR_FREQ_SEARCH: self.RequestClearFreqSearchHandler,\
-        #   LINK_RADAR_CHAN : self.LinkRadarChanHandler,\
+            LINK_RADAR_CHAN : self.LinkRadarChanHandler,\
             SET_READY_FLAG: self.SetReadyFlagHandler,\
             UNSET_READY_FLAG: self.UnsetReadyFlagHandler,\
         #   SET_PROCESSING_FLAG: self.SetProcessingFlagHandler,\
@@ -54,10 +85,15 @@ class RadarChannelHandler:
 
         while True:
             rmsg = rosmsg_command(self.conn)
+            print('waiting for command')
             rmsg.receive(self.conn)
-            command = chr(rmsg.payload['type'])
-            print('received command: {}'.format(command))
-
+            command = chr(rmsg.payload['type'] & 0xFF) # for some reason, libtst is sending out 4 byte commands with junk..
+            try:
+                cprint('received command: {}, {}'.format(command, RMSG_COMMAND_NAMES[command]), 'red')
+            except KeyError:
+                print('unrecognized command!')
+                print(rmsg.payload)
+                pdb.set_trace()
             
             if command in rmsg_handlers:	
                 rmsg_handlers[command](rmsg)
@@ -66,130 +102,159 @@ class RadarChannelHandler:
 
 
     def close(self):
+        pdb.set_trace()
         # TODO
         pass
-   	
+
+    @rmsg_return_success
     def DefaultHandler(self, rmsg):
         print("Unexpected command: {}".format(chr(rmsg.payload['type'])))
         pdb.set_trace()
-        rmsg.payload['status'] = RMSG_SUCCESS
 
     def QuitHandler(self, rmsg):
         # TODO: close down stuff cleanly
-        rmsg.payload['status'] = RMSG_FAILURE
+        rmsg.set_data('status', RMSG_FAILURE)
+        rmsg.set_data('type', rmsg.payload['type'])
         rmsg.transmit()
-        sys.exit()
+        self.conn.close()
+        sys.exit() # TODO: set return value
 
+    @rmsg_return_success
     def PingHandler(self, rmsg):
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
+        pass
 
+    @rmsg_return_success
     def RequestAssignedFreqHandler(self, rmsg):
-        transmit_dtype(self.conn, np.int32(self.tfreq))
-        transmit_dtype(self.conn, np.float32(self.noise))
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
+        # TODO: set these using clear frequency search
+        self.tfreq = 12000
+        self.noise = 1000
+        transmit_dtype(self.conn, self.tfreq, np.int32)
+        transmit_dtype(self.conn, self.noise, np.float32)
 
+    @rmsg_return_success
     def RequestClearFreqSearchHandler(self, rmsg):
         # start clear frequency search
-        self.clrfreq = clrfreqprm_struct(self.conn)
-        self.clrfreq.receive()
+        self.clrfreq_struct.receive(self.conn)
 
         # TODO: start clear frequency search
         # set self.tfreq, self.noise
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
-        pass
 
+    @rmsg_return_success
     def UnsetReadyFlagHandler(self, rmsg):
         self.ready = False 
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
 
 
+    @rmsg_return_success
     def SetReadyFlagHandler(self, rmsg):
         self.ready = True
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
 
+    @rmsg_return_success
     def RegisterSeqHandler(self, rmsg):
-        self.seqprm = seqprm_struct(self.conn)
-        self.seqprm.receive()
-        self.seq_rep = recv_dtype(self.conn, np.uint8, seqprm.payload['len'])
-        self.seq_code = recv_dtype(self.conn, np.uint8, seqprm.payload['len'])
+        # site libraries appear to not initialize the status, so a nonzero status here is normall. 
+        self.seqprm_struct.receive(self.conn)
+        self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
+        self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         
         # TODO: do something with this..
-        self.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
 
     # receive a ctrlprm struct
+    @rmsg_return_success
     def SetParametersHandler(self, rmsg):
         self.ctrlprm_struct.receive(self.conn)
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
 
     # send ctrlprm struct
+    @rmsg_return_success
     def GetParametersHandler(self, rmsg):
-        self.ctrlprm_struct.transmit(self.conn)
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
+        # TODO: return bad status if negative radar or channel
+        self.ctrlprm_struct.transmit()
 
+    @rmsg_return_success
     def GetDataHandler(self, rmsg):
-        # TODO: write this
-        self.dataprm.transmit(self.conn)
-        # TODO: find main/back samples..
-        transmit_dtype(self.conn, main_samples, '>u4')
-        transmit_dtype(self.conn, back_samples, '>u4')
-     
-        transmit_dtype(self.conn, badtrdat_len, '>u4')
-        transmit_dtype(self.conn, badtrdat_start_usec, '>u4') # length badtrdat_len
-        transmit_dtype(self.conn, badtrdat_duration_usec, '>u4') # length badtrdat_len
-    
-        transmit_dtype(self.conn, num_transmitters, '>i4')
-        transmit_dtype(self.conn, txstatus_agc, '>i4') # length num_transmitters
-        transmit_dtype(self.conn, txstatus_lowpwr, '>i4') # length num_transmitters
-        
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
-
-    def SetRadarChanHandler(self, rmsg):
+        # TODO: setup dataprm_struct
         pdb.set_trace()
-        # TODO: handle endianness
-        rnum = recv_dtype(self.conn, '>i4')
-        cnum = recv_dtype(self.conn, '>i4')
+        # rmsg.set_data('status', RMSG_FAILURE)
+        self.dataprm_struct.set_data('samples', 294)
+    
+        # TODO: gather main/back samples..
+        main_samples = np.zeros(30)
+        back_samples = np.zeros(30)
+        transmit_dtype(self.conn, main_samples, np.uint32)
+        transmit_dtype(self.conn, back_samples, np.uint32)
+    
+        # TODO: what are these *actually*?
+        badtrdat_len = 0
+        badtrdat_start_usec = np.zeros(badtrdat_len)
+        badtrdat_duration_usec = np.zeros(badtrdat_len)
+
+        transmit_dtype(self.conn, badtrdat_len, np.uint32)
+        transmit_dtype(self.conn, badtrdat_start_usec, np.uint32) # length badtrdat_len
+        transmit_dtype(self.conn, badtrdat_duration_usec, np.uint32) # length badtrdat_len
+
+        # TODO: what are these?.. really?
+        num_transmitters = 16
+        txstatus_agc = np.zeros(num_transmitters)
+        txstatus_lowpwr = np.zeros(num_transmitters)
+ 
+        transmit_dtype(self.conn, num_transmitters, np.int32)
+        transmit_dtype(self.conn, txstatus_agc, np.int32) # length num_transmitters
+        transmit_dtype(self.conn, txstatus_lowpwr, np.int32) # length num_transmitters
+        
+    @rmsg_return_success
+    def SetRadarChanHandler(self, rmsg):
+        rnum = recv_dtype(self.conn, np.int32)
+        cnum = recv_dtype(self.conn, np.int32)
+
         if(debug):
             print('radar num: {}, radar chan: {}'.format(rnum, cnum))
 
-        if True: # TODO: if channel is unavailable
-            rmsg.payload['status'] = RMSG_FAILURE
-        else:
-            rmsg.payload['status'] = RMSG_SUCCESS 
+        # TODO: set RMSG_FAILURE if radar channel is unavailable
+        # rmsg.set_data('status', RMSG_FAILURE)
+ 
+    @rmsg_return_success
+    def LinkRadarChanHandler(self, rmsg):
+        rnum = recv_dtype(self.conn, np.int32)
+        cnum = recv_dtype(self.conn, np.int32)
+        print('link radar chan is unimplemented!')
+        pdb.set_trace()
 
-        rmsg.transmit()
 
     def QueryIniSettingsHandler(self, rmsg):
-        data_length = recv_dtype(self.conn, '>i4')
+        # TODO: don't hardcode this if I find anything other than ifmode querying..
+        data_length = recv_dtype(self.conn, np.int32)
         ini_name = recv_dtype(self.conn, str, nitems = data_length)
         requested_type = recv_dtype(self.conn, np.uint8)
-
-        # TODO: look up ini name in ini files
-        transmit_dtype(self.conn, requested_type, '>i4')
-        transmit_dtype(self.conn, requested_length, '>i4') # appears to be unused by site library
-        transmit_dtype(self.conn, payload) 
-
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
-
         
-    def SetActiveHandler(rmsg):
-        self.active = True
-        rmsg.payload['status'] = RMSG_SUCCESS
+        # hardcode to reply with ifmode is false
+        assert ini_name == b'site_settings:ifmode\x00'
+       
+        payload = 0 # assume always false
+
+        transmit_dtype(self.conn, requested_type, np.uint8)
+        transmit_dtype(self.conn, data_length, np.int32) # appears to be unused by site library
+        transmit_dtype(self.conn, payload, np.int32) 
+        
+        # TODO: Why does the ini handler expect a nonzero response for success?
+        rmsg.set_data('status', 1)
+        rmsg.set_data('type', rmsg.payload['type'])
         rmsg.transmit()
 
-    def SetInactiveHandler(rmsg):
-        self.active = False
-        rmsg.payload['status'] = RMSG_SUCCESS
-        rmsg.transmit()
+    @rmsg_return_success
+    def SetActiveHandler(self, rmsg):
+        # TODO: return failure if rnum and cnum are not set
+        # TODO: why is active only set if it is already set?
+        if not self.active:
+            self.active = True
+            self.ready = False
+
+    @rmsg_return_success
+    def SetInactiveHandler(self, rmsg):
+        # TODO: return failure status if the radar or channel number is invalid
+            
+        if not self.active:
+            self.active = False
+            self.ready = False
+            # TODO: what is coordination handler doing?
+
 
 class RMsgManager:
     def __init__(self, port):

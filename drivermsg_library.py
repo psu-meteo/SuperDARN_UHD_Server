@@ -36,21 +36,22 @@ class driver_command(object):
             self.name = name
             self.nitems = nitems
             
-            # handle numpy dtypes as strings or objects
-            if isinstance(dtype, str):
-                self.dtype = dtype
-                self.data = np.dtype(dtype).type(data)
-            else:
-                self.dtype = dtype
-                self.data = dtype(data)
-
+            self.dtype = dtype
+            self.data = dtype(data)
+        
         def transmit(self, sock):
+            print('\ttransmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
-            return recv_dtype(sock, self.dtype, self.nitems)
+            self.data = recv_dtype(sock, self.dtype, self.nitems)
+            print('\treceiving: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            return self.data
 
     def __init__(self, clients, command):
+        if not hasattr(clients, '__iter__'):
+            clients = [clients]
+
         self.clients = clients
         self.dataqueue = [] # ordered list of variables to transmit/receive
         self.payload = {} # dictionary to store received values
@@ -58,6 +59,14 @@ class driver_command(object):
     
     def queue(self, data, dtype, name = '', nitems = 1):
         self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
+   
+    
+    # command to set variables by name in the dataqueue
+    def set_data(self, name, data):
+        for var in self.dataqueue:
+            if var.name == name:
+                var.data = data
+                break
 
     def transmit(self):
         for clientsock in self.clients:
@@ -82,7 +91,9 @@ class driver_command(object):
 
     def receive(self, sock):
         for item in self.dataqueue:
-            self.payload[item.name] = item.receive(sock)
+            data = item.receive(sock)
+            self.payload[item.name] = data
+             
 
 class server_ctrlprm(driver_command):
     def __init__(self, servers = None, ctrlprm_dict = None):

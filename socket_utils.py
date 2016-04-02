@@ -14,9 +14,8 @@ def complex_ui32_pack(isamp, qsamp):
     return np.uint32(packed_sample)
 
 def recv_dtype(sock, dtype, nitems = 1):
-    if isinstance(dtype, str):
-        dstr = sock.recv(np.dtype(dtype).itemsize * nitems)
-        data = np.fromstring(dstr, dtype=np.dtype(dtype), count=nitems)
+    if dtype == str:
+        data = sock.recv(nitems)
     else:
         dstr = sock.recv(dtype().nbytes * nitems)
         data = np.fromstring(dstr, dtype=dtype, count=nitems)
@@ -40,9 +39,6 @@ def pickle_recv(sock):
 
 def transmit_dtype(sock, data, dtype = None):
     # TODO: handle vectors..
-    if isinstance(dtype, str):
-        data = np.dtype(dtype).type(data)
-    elif dtype:
-        data = dtype(data)
+    data = dtype(data)
 
     dstr = sock.sendall(data.tobytes())
