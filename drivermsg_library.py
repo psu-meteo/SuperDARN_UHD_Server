@@ -40,12 +40,12 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            print('\ttransmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            #print('\ttransmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
             self.data = recv_dtype(sock, self.dtype, self.nitems)
-            print('\treceiving: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            #print('\treceiving: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return self.data
 
     def __init__(self, clients, command):

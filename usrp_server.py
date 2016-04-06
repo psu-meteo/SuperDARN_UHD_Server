@@ -32,6 +32,10 @@ class RadarChannelHandler:
         self.rprm_struct = rprm_struct(self.conn)
         self.dataprm_struct = dataprm_struct(self.conn)
 
+        # TODO: initialize ctlrprm_struct with site infomation
+        self.ctrlprm_struct.set_data('rbeamwidth', 3)
+        self.ctrlprm_struct.set_data('tbeamwidth', 3)
+
 
     def run(self):
 
@@ -108,10 +112,9 @@ class RadarChannelHandler:
 
     def RequestAssignedFreqHandler(self, rmsg):
         # TODO: set these using clear frequency search
-        self.tfreq = 12000
-        self.noise = 1000
         transmit_dtype(self.conn, self.tfreq, np.int32)
         transmit_dtype(self.conn, self.noise, np.float32)
+
         return RMSG_SUCCESS
 
     def RequestClearFreqSearchHandler(self, rmsg):
@@ -119,7 +122,10 @@ class RadarChannelHandler:
         self.clrfreq_struct.receive(self.conn)
 
         # TODO: start clear frequency search
-        # set self.tfreq, self.noise
+        self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
+        self.noise = 1000
+        
+
         return RMSG_SUCCESS
 
     def UnsetReadyFlagHandler(self, rmsg):
@@ -129,6 +135,7 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         self.ready = True
+        # TODO: setup samples and what not
         return RMSG_SUCCESS
 
     def RegisterSeqHandler(self, rmsg):
@@ -142,7 +149,12 @@ class RadarChannelHandler:
 
     # receive a ctrlprm struct
     def SetParametersHandler(self, rmsg):
+        
         self.ctrlprm_struct.receive(self.conn)
+        
+        if (self.rnum < 0 or self.cnum < 0):
+            return RMSG_FAILURE
+
         return RMSG_SUCCESS
 
     # send ctrlprm struct
@@ -159,7 +171,7 @@ class RadarChannelHandler:
         if not self.active or self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
             return RMSG_FAILURE
-
+        
         # TODO: get data handler waits for control_program to set active flag in controlprg struct
         # need some sort of synchronizaion..
         pdb.set_trace()
