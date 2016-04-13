@@ -68,6 +68,12 @@ class driver_command(object):
                 var.data = data
                 break
 
+    def get_data(self, name):
+        for var in self.dataqueue:
+            if var.name == name:
+                return var.data
+        return None
+
     def transmit(self):
         for clientsock in self.clients:
             if self.command != NO_COMMAND:

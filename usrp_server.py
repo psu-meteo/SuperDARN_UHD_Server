@@ -20,6 +20,278 @@ RMSG_SUCCESS = 0
 
 debug = True
 
+# TODO: move in code from usrp_server_uhd
+# handle arbitration with multiple channels accessing the usrp hardware
+# track state of a grouping of usrps
+# merge information from multiple control programs, handle disparate settings
+# e.g, ready flags and whatnot
+class RadarHardwareManager:
+	def __init__(self):
+		'''
+		# open arby server socket
+		try:
+			arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			arbysock.connect((arby_server, ARBYSERVER_PORT))
+		except ConnectionRefusedError:
+			warnings.warn("Arby server connection failed")
+			sys.exit(1)
+
+		time.sleep(.05)
+		# connect to usrp_driver servers
+		try:
+			for d in usrp_drivers:
+				usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				usrpsock.connect((d, USRPDRIVER_PORT))
+				usrp_driver_socks.append(usrpsock)
+		except ConnectionRefusedError:
+			warnings.warn("USRP server connection failed")
+			sys.exit(1)
+
+
+		time.sleep(.05)
+		# connect cuda_driver servers
+		try:
+			for c in cuda_drivers:
+				cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+				cudasock.connect((c, CUDADRIVER_PORT))
+				cuda_driver_socks.append(cudasock)
+		except ConnectionRefusedError:
+			warnings.warn("cuda server connection failed")
+			sys.exit(1)
+
+		'''
+
+    # so, open server and listen on port
+    # capture rmsg commands, return bogus data
+    # try running two control programs.. 
+		pass
+		
+	def clrfreq(clrfreqprm):
+        # TODO: check if radar is free
+       	MIN_CLRFREQ_DELAY = .2
+        MAX_CLRFREQ_AVERAGE = 10
+        MAX_CLRFREQ_BANDWIDTH = 512
+        MAX_CLRFREQ_USABLE_BANDWIDTH = 300
+        CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
+
+        fstart = clrfreqprm.payload['start']
+        fstop = clrfreqprm.payload['end']
+        filter_bandwidth = clrfreqprm.payload['filter_bandwidth'] # kHz (c/(2 * rsep))
+        power_threshold = clrfreqprm.payload['pwr_threshold'] # (typically .9, threshold before changing freq)
+        nave = clrfreqprm.payload['nave']
+
+        usable_bandwidth = fstop - fstart
+        usable_bandwidth = np.floor(usable_bandwidth/2.0) * 2 # mimic behavior of gc316 driver, why does the old code do this?
+        cfreq = (fstart + (fstop-fstart/2.0)) # calculate center frequency of clrfreq search in KHz
+        assert usable_bandwidth > 0, "usable bandwidth for clear frequency search must be greater than 0"
+
+        # mimic behavior of gc316 drivers, if requested search bandwidth is broader than 1024 KHz, force it to 512 KHz?
+        # calculate the number of points in the FFT
+        num_clrfreq_samples = np.int32(pow(2,np.ceil(np.log10(1.25 * usable_bandwidth)/np.log10(2))))
+        if num_clrfreq_samples > MAX_CLRFREQ_BANDWIDTH:
+            num_clrfreq_samples = MAX_CLRFREQ_BANDWIDTH
+            usable_bandwidth = MAX_CLRFREQ_USABLE_BANDWIDTH
+
+        # mimic behavior of gc316 drivers, cap nave at 10
+        if nave > MAX_CLRFREQ_AVERAGE:
+            nave = MAX_CLRFREQ_AVERAGE
+
+        fstart = np.ceil(cfreq - usable_bandwidth / 2.0)
+        fstop = np.ceil(cfreq + usable_bandwidth / 2.0)
+
+        unusable_sideband = np.int32((num_clrfreq_samples - usable_bandwidth)/2.0)
+        clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
+
+        # calculate center frequency of beamforming, form 
+        # apply narrowband beamforming around center frequency
+        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, self.ctrlprm['tbeam'], RADAR_BEAMWIDTH)
+        pshift = calc_phase_increment(bmazm, cfreq)
+
+        pwr2 = np.zeros(num_clrfreq_samples)
+
+        for ai in range(nave):
+            # gather current UHD time
+            gettime_cmd = usrp_get_time_command(self.usrpsocks)
+            gettime_cmd.transmit()
+            usrptimes = []
+            for usrpsock in self.usrpsocks:
+                usrptimes.append(gettime_cmd.recv_time(usrpsock))
+
+            # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds 
+            clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
+
+            # request clrfreq sample dump
+            # TODO: what is the clear frequency rate? (c / (2 * rsep?))
+            clrfreq_rate = 1000
+            clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
+            clrfreq_cmd.transmit()
+
+            # grab raw samples, apply beamforming
+            for usrpsock in self.usrpsocks:
+                # receive 
+                nantennas = recv_dtype(usrpsock, np.uint16)
+                antennas = recv_dtype(usrpsock, np.uint16, nantennas)
+                if isinstance(antennas, (np.ndarray, np.generic)):
+                    antennas = np.array([antennas])
+
+                for ant in antennas:
+                    phase_rotation = rad_to_rect(ant * pshift)
+                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.complex64, num_samples)
+
+
+            # return fft of width usable_bandwidth, kHz resolution
+            c_fft = np.fft(combined_samples)
+            # compute power.. 
+            pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
+            pwr2 += pc_fft
+            pdb.set_trace()
+            # todo: convert fft to power spectrum
+
+        pwr2 /= nave
+
+        pdb.set_trace() # check sideband trimming
+        pwr = pwr2[sideband-1:-sideband]
+
+        transmit_dtype(self.arbysock, np.int32(fstart)) # kHz
+        transmit_dtype(self.arbysock, np.int32(fstop)) # kHz
+        transmit_dtype(self.arbysock, np.float32(filter_bandwidth)) # kHz (c/(2 * rsep))
+        transmit_dtype(self.arbysock, np.float32(power_threshold)) # (typically .9, threshold before changing freq)
+        transmit_dtype(self.arbysock, np.int32(nave)) # (typically .9, threshold before changing freq)
+        transmit_dtype(self.arbysock, np.float64(usable_bandwidth)) # kHz?
+        transmit_dtype(self.arbysock, np.float64(pwr)) # length usable_bandwidth array?
+
+	def getData(self, channels):
+        nbb_samples = self.ctrlprm['number_of_baseband_samples']
+
+        #  check if any sequences are registered
+        if not len(self.sequence_manager.sequences):
+            self.status = CMD_ERROR
+
+        print('USRP_SERVER GET_DATA: sent status: ' + str(self.status))
+        if not self.status:
+            cmd = usrp_ready_data_command(self.usrpsocks, self.ctrlprm['channel'])
+            # TODO: iseq += 1
+            # TODO: form main samples
+            main_samples = np.complex64(np.zeros((MAXANTENNAS_MAIN, nbb_samples)))
+            main_beamformed = np.uint32(np.zeros(nbb_samples))
+            back_samples = np.complex64(np.zeros((MAXANTENNAS_BACK, nbb_samples)))
+            main_beamformed = np.uint32(np.zeros(nbb_samples))
+
+            print('USRP_SERVER GET_DATA: checking for USRP_DRIVERS, status: ' + str(self.status))
+            # check status of usrp drivers
+            for usrpsock in self.usrpsocks:
+                rx_status = recv_dtype(usrpsock, np.int32)
+                if rx_status != 1:
+                    warnings.warn('USRP driver status {} in GET_DATA'.format(rx_status))
+                    self.status = USRP_DRIVER_ERROR
+
+            print('USRP_SERVER GET_DATA: waiting for samples from USRP_DRIVERS, status: ' + str(self.status))
+            # grab samples
+            for usrpsock in self.usrpsocks:
+                # receive antennas controlled by usrp driver
+                nantennas = recv_dtype(usrpsock, np.uint16)
+                antennas = recv_dtype(usrpsock, np.uint16, nantennas)
+
+                if isinstance(antennas, (np.ndarray, np.generic)):
+                    antennas = np.array([antennas])
+
+                for ant in antennas:
+                    main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
+                    #back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
+
+            print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(self.status))
+
+            bmazm = calc_beam_azm_rad(RADAR_NBEAMS, self.ctrlprm['tbeam'], RADAR_BEAMWIDTH)
+
+            # calculate antenna-to-antenna phase shift for steering at a frequency
+            pshift = calc_phase_increment(bmazm, self.ctrlprm['tfreq'] * 1000.)
+
+            # calculate a complex number representing the phase shift for each antenna
+            beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
+
+
+            #beamform_back = np.ones(len(MAIN_ANTENNAS))
+
+            def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
+                beamform_samples = np.ones(len(antennas))
+
+                for i in range(n_samples):
+                    itemp = np.int16(0)
+                    qtemp = np.int16(0)
+
+                    for ant in range(antennas):
+                        itemp += np.real(beamform_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
+                                 np.imag(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant])
+                        qtemp += np.real(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
+                                 np.imag(beamform_samples[ant][i]) * np.real(phasing_matrix[ant])
+                    beamformed[i] = complex_ui32_pack(itemp, qtemp)
+
+            main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas)
+            back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
+
+
+
+            # transmit status to arby_server    
+            transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
+            transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
+            transmit_dtype(self.arbysock, np.int32(0)) # buffer number
+            transmit_dtype(self.arbysock, np.int32(self.ctrlprm['number_of_baseband_samples'])) # number of baseband samples
+
+            # send samples over socket for self.channel on main and back array
+            transmit_dtype(self.arbysock, main_beamformed) # TODO: send main data for channel
+            #transmit_dtype(self.arbysock, back_beamformed) # TODO: send back data for channel
+
+	
+	def exit(self):
+		# clean up and exit
+        self.arbysock.close()
+        for sock in self.usrpsocks:
+            sock.close()
+        for sock in self.cudasocks:
+            sock.close()
+
+        if(VERBOSE):
+            print('received exit command, cleaning up..')
+
+        sys.exit(0)
+
+    def trigger(self):
+        if len(self.sequence_manager.sequences):
+            cmd = usrp_trigger_pulse_command(self.usrpsocks)
+            cmd.transmit()
+
+            state = chr(recv_dtype(usrpsock, np.uint8))
+
+            if state == TRIGGER_BUSY:
+                print('could not trigger, usrp driver is busy')
+                # TODO HANDLE THIS WELL...
+
+
+    def pretrigger(self):
+        self._recv_ctrlprm()
+        beam = self.ctrlprm['tbeam']
+
+        # extract sampling info from cuda driver
+        rfrate = np.int32(self.cuda_config['FSampTX'])
+        print('rf rate parsed from ini: ' + str(rfrate))
+
+        sequence = self.sequence_manager.getSequence(self.ctrlprm['channel'])
+        if (self.sequence_manager.sequenceUpdateCheck(beam)):
+            cmd = usrp_setup_command(self.usrpsocks, self.ctrlprm, sequence, rfrate)
+            # TODO: pretrigger test crashes with broken pipe on cmd.transmit()
+            cmd.transmit()
+            self.sequence_manager.sequencesLoaded(beam)
+
+        sequence.iseq += 1
+
+        bad_transmit_times_len = np.int32(sequence.npulses)
+        bad_transmit_times_start = np.uint32(sequence.pulse_offsets_vector * 1e6 - 100) # units 
+        bad_transmit_times_duration = np.uint32(np.array([600] * sequence.npulses)) # TODO.. don
+
+        transmit_dtype(self.arbysock, bad_transmit_times_len)
+        transmit_dtype(self.arbysock, bad_transmit_times_start)
+        transmit_dtype(self.arbysock, bad_transmit_times_duration)
+
 class RadarChannelHandler:
     def __init__(self, conn):
         self.active = False
@@ -120,7 +392,7 @@ class RadarChannelHandler:
     def RequestClearFreqSearchHandler(self, rmsg):
         # start clear frequency search
         self.clrfreq_struct.receive(self.conn)
-
+       	 
         # TODO: start clear frequency search
         self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
         self.noise = 1000
@@ -136,14 +408,99 @@ class RadarChannelHandler:
     def SetReadyFlagHandler(self, rmsg):
         self.ready = True
         # TODO: setup samples and what not
+        # see register seq handler
+
         return RMSG_SUCCESS
 
     def RegisterSeqHandler(self, rmsg):
+		# function to get the indexes of rising edges going from zero to a nonzero value in array ar
+		def _rising_edge_idx(ar):
+			ar = np.insert(ar, 0, -2)
+			edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
+			return edges[edges > 0]
+
+		# returns the run length of a pulse in array ar starting at index idx
+		def _pulse_len(ar, idx):
+			runlen = 0
+			for element in ar[idx:]:
+				if not element:
+					break
+				runlen += 1
+			return runlen
+
         # site libraries appear to not initialize the status, so a nonzero status here is normall. 
         self.seqprm_struct.receive(self.conn)
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
-        
+       
+        seq_idx = self.seqprm_struct.get_data('index') # TODO: how is this not the tx_tsg_idx?
+        tx_tsg_idx = self.seqprm_struct.get_data('index') # !!!
+        tx_tsg_len = self.seqprm_struct.get_data('len')
+        tx_tsg_step =  self.seqprm_struct.get_data('step')
+
+
+        # psuedo-run length encoded tsg
+        tx_tsg_rep = self.seq_rep
+        tx_tsg_code = self.seq_code
+
+        # TODO: sort out step/tx_tsg_step/STATE_TIME conversions..
+        step = np.ceil(tx_tsg_step / STATE_TIME)
+        seq_buf = []
+        for i in range(tx_tsg_len):
+            for j in range(0, np.int32(step * tx_tsg_rep[i])):
+                seq_buf.append(tx_tsg_code[i])
+        seq_buf = np.uint8(np.array(seq_buf))
+
+        # extract out pulse information...
+        S_BIT = np.uint8(0x01) # sample impulses 
+        R_BIT = np.uint8(0x02) # tr gate, use for tx pulse times
+        X_BIT = np.uint8(0x04) # transmit path, use for bb 
+        A_BIT = np.uint8(0x08) # enable attenuator 
+        P_BIT = np.uint8(0x10) # phase code
+
+        # create masks
+        samples = seq_buf & S_BIT
+        tr_window = seq_buf & R_BIT
+        rf_pulse = seq_buf & X_BIT
+        atten = seq_buf & A_BIT
+        phase_mask = seq_buf & P_BIT
+
+        # extract smsep and number of samples
+        sample_idx = np.nonzero(samples)[0]
+        if len(sample_idx) < 3:
+            warnings.warn("Warning, cannot register empty sequence")
+            return
+
+        smsep = (sample_idx[2] - sample_idx[1] + 1) * STATE_TIME
+        nbb_samples = len(sample_idx)
+
+        # extract pulse start timing
+        tr_window_idx = np.nonzero(tr_window)[0]
+        tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
+        pulse_offsets_vector = tx_tsg_step * tr_rising_edge_idx
+
+        # extract tr window to rf pulse delay
+        rf_pulse_idx = np.nonzero(rf_pulse)[0]
+        rf_pulse_edge_idx = _rising_edge_idx(rf_pulse_idx)
+        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * STATE_TIME
+        npulses = len(rf_pulse_edge_idx)
+
+        # extract per-pulse phase coding and transmit pulse masks
+        phase_masks = []
+        pulse_masks = []
+        pulse_lens = []
+        for i in range(npulses):
+            pstart = rf_pulse_edge_idx[i]
+            pend = pstart + _pulse_len(rf_pulse, pstart)
+            phase_masks.append(phase_mask[pstart:pend])
+            pulse_masks.append(rf_pulse[pstart:pend])
+            pulse_lens.append((pend - pstart) * STATE_TIME)
+        # add sequence to sequence list..
+        seq = sequence(self.usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
+        self.sequence_manager.addSequence(seq)
+
+ 
+        # TODO: for each beam, create 
         # TODO: do something with this..
         return RMSG_SUCCESS
 
@@ -154,7 +511,17 @@ class RadarChannelHandler:
         
         if (self.rnum < 0 or self.cnum < 0):
             return RMSG_FAILURE
+	'''
+    	amp0 = rf_settings[1] # amp1 in RXFESettings struct
+    	amp1 = rf_settings[2] # amp2 in RXFESettings struct
+    	att_p5dB = np.uint8((rf_settings[4] > 0))
+    	att_1dB = np.uint8((rf_settings[5] > 0))
+    	att_2dB = np.uint8((rf_settings[6] > 0))
+    	att_4dB = np.uint8((rf_settings[7] > 0))
+    	att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
+    	cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
 
+	'''
         return RMSG_SUCCESS
 
     # send ctrlprm struct
@@ -281,7 +648,7 @@ class RMsgManager:
         
         client_sock.close() 
 
-
+	
 def main():
     # maybe switch to multiprocessing with manager process
     print('main!')
@@ -291,10 +658,6 @@ def main():
     rmsg_port = 45000 
     man = RMsgManager(rmsg_port)
     man.run()
-
-    # so, open server and listen on port
-    # capture rmsg commands, return bogus data
-    # try running two control programs.. 
 
 if __name__ == '__main__':
     main()
