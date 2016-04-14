@@ -1,4 +1,3 @@
-# so, hook usrp_tcp_driver into site library
 # todo, write mock arbyserver that can handle these commands
 # TODO: write mock arby server that can feed multiple normalscans with false data..
 
@@ -8,8 +7,8 @@ import threading
 import logging
 import pdb
 import socket
+import time
 from termcolor import cprint
-
 
 from socket_utils import *
 from rosmsg import *
@@ -18,8 +17,20 @@ from drivermsg_library import *
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1 
 RMSG_SUCCESS = 0
+RADAR_STATE_TIME = .001
+CHANNEL_STATE_TIMEOUT = 120
 
 debug = True
+
+
+STATE_INIT = 'INIT'
+STATE_RESET = 'RESET'
+STATE_WAIT = 'WAIT'
+STATE_WAIT_FOR_DATA = 'WAIT_FOR_DATA'
+STATE_PRETRIGGER = 'PRETRIGGER'
+STATE_TRIGGER = 'TRIGGER'
+STATE_CLR_FREQ = 'CLR_FREQ_WAIT'
+STATE_GET_DATA = 'GET_DATA'
 
 # TODO: move in code from usrp_server_uhd
 # handle arbitration with multiple channels accessing the usrp hardware
@@ -27,7 +38,107 @@ debug = True
 # merge information from multiple control programs, handle disparate settings
 # e.g, ready flags and whatnot
 class RadarHardwareManager:
-    def __init__(self):
+    def __init__(self, port):
+        self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.client_sock.bind(('localhost', port))
+    
+
+    def run(self):
+        def spawn_channel(conn):
+            # start new radar channel handler
+            channel = RadarChannelHandler(conn)
+            self.channels.append(channel)
+            channel.run()
+            conn.close()
+
+        # TODO: set state machine args
+        # TODO: add lock support
+        def radar_state_machine(conn):
+            self.state = STATE_INIT
+            self.next_state = STATE_INIT
+
+            while True:
+                self.state = self.next_state
+                self.next_state = STATE_RESET
+                
+                if self.state == STATE_INIT:
+                    # TODO: write init code?
+                    self.next_state = STATE_WAIT
+
+                if self.state == STATE_WAIT:
+                    self.next_state = STATE_WAIT
+                   
+                    # TODO: set radar state priority
+                    # e.g, CLR_FREQ > PRETRIGGER > TRIGGER > GET_DATA?
+                    for ch in self.channels:
+                        if ch.clrfreq_request:
+                            self.next_state = STATE_CLR_FREQ
+                            break
+                        if ch.pretrigger:
+                            self.next_state = STATE_PRETRIGGER
+                            break
+                        if ch.trigger:
+                            self.next_state = STATE_TRIGGER
+                            break
+                        if ch.get_data:
+                            self.next_state = GET_DATA
+                            break
+
+
+                if self.state == STATE_CLR_FREQ:
+                    # do a clear frequency search for channel requesting one
+                    for ch in self.channels:
+                        if ch.clrfreq_request:
+                            self.clrfreq(ch)
+                    self.next_state = STATE_WAIT
+
+                if self.state == STATE_PRETRIGGER:
+                    self.next_state = STATE_WAIT
+                    # loop through channels, see if anyone is not ready for pretrigger
+                    # (tuning the USRP, preparing combined rf samples on GPU)
+                    for ch in self.channels:
+                        if not ch.pretrigger:
+                            self.next_state = STATE_PRETIRGGER
+
+                    # if everyone is ready, prepare for data collection
+                    if self.next_state == STATE_WAIT:
+                        self.pretrigger()
+
+
+                if self.state == STATE_TRIGGER:
+                    self.next_state = STATE_WAIT
+                    self.trigger()
+
+                if self.state == GET_DATA:
+                    self.next_state = STATE_WAIT
+                    self.get_data()
+
+                if self.state == STATE_RESET:
+                    pdb.set_trace()
+                    self.next_state = STATE_INIT
+
+            time.sleep(RADAR_STATE_TIME)
+
+        self.client_sock.listen(MAX_CHANNELS)
+        client_threads = []
+        self.channels = []
+
+        # TODO: write state machine..
+        #ct = threading.Thread(target = radar_state_machine, args = (client_conn,))
+
+        while True:
+            client_conn, addr = self.client_sock.accept()
+            
+            ct = threading.Thread(target = spawn_channel, args = (client_conn,))
+            client_threads.append(ct)
+            ct.start()
+        
+        client_sock.close() 
+    
+
+
+    def __init___(self):
         pass
         '''
         # open arby server socket
@@ -132,7 +243,7 @@ class RadarHardwareManager:
 
             # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds 
             clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
-
+            
             # request clrfreq sample dump
             # TODO: what is the clear frequency rate? (c / (2 * rsep?))
             clrfreq_rate = 1000
@@ -173,7 +284,7 @@ class RadarHardwareManager:
         transmit_dtype(self.arbysock, np.float64(usable_bandwidth)) # kHz?
         transmit_dtype(self.arbysock, np.float64(pwr)) # length usable_bandwidth array?
 
-    def getData(self, channels):
+    def get_data(self):
         # stall until all channels are ready
         # 
         nbb_samples = self.ctrlprm['number_of_baseband_samples']
@@ -309,9 +420,11 @@ class RadarHardwareManager:
 
 class RadarChannelHandler:
     def __init__(self, conn):
-        self.active = False
-        self.ready = False
+        self.active = False# TODO: eliminate
+        self.ready = False # TODO: eliminate
         self.conn = conn
+
+        self.state = STATE_WAIT
 
         self.ctrlprm_struct = ctrlprm_struct(self.conn)
         self.seqprm_struct = seqprm_struct(self.conn)
@@ -380,6 +493,18 @@ class RadarChannelHandler:
     def close(self):
         pdb.set_trace()
         # TODO write this..
+    
+    def _waitForState(self, state):
+        wait_start = time.time()
+
+        while self.state != state:
+            time.sleep(RADAR_STATE_TIME)
+            if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
+                print('CHANNEL STATE TIMEOUT')
+                pdb.set_trace()
+                break
+
+
 
     def DefaultHandler(self, rmsg):
         print("Unexpected command: {}".format(chr(rmsg.payload['type'])))
@@ -398,7 +523,8 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def RequestAssignedFreqHandler(self, rmsg):
-        # TODO: set these using clear frequency search
+        self._waitForState(STATE_WAIT)
+
         transmit_dtype(self.conn, self.tfreq, np.int32)
         transmit_dtype(self.conn, self.noise, np.float32)
 
@@ -407,11 +533,10 @@ class RadarChannelHandler:
     def RequestClearFreqSearchHandler(self, rmsg):
         # start clear frequency search
         self.clrfreq_struct.receive(self.conn)
-       	 
         # TODO: start clear frequency search
         self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
-        self.noise = 1000
-        
+        self.noise = 0
+        self.state = STATE_CLR_FREQ 
 
         return RMSG_SUCCESS
 
@@ -422,8 +547,9 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         # TODO: check if samples are ready?
+        self.state = STATE_PRETRIGGER
+        self._waitForState(STATE_WAIT)
         self.ready = True
-
         return RMSG_SUCCESS
 
     def RegisterSeqHandler(self, rmsg):
@@ -545,7 +671,10 @@ class RadarChannelHandler:
         if not self.active or self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
             return RMSG_FAILURE
-        
+
+        self.state = STATE_GET_DATA
+        self._waitForState(STATE_WAIT)
+
         # TODO: get data handler waits for control_program to set active flag in controlprg struct
         # need some sort of synchronizaion..
         pdb.set_trace()
@@ -579,6 +708,7 @@ class RadarChannelHandler:
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
 
+        # TODO: how to handle channel contention?
         if(debug):
             print('radar num: {}, radar chan: {}'.format(self.rnum, self.cnum))
 
@@ -629,32 +759,6 @@ class RadarChannelHandler:
 
         return RMSG_SUCCESS
 
-class RMsgManager:
-    def __init__(self, port):
-        self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.client_sock.bind(('localhost', port))
-    
-
-    def run(self):
-        self.client_sock.listen(MAX_CHANNELS)
-        client_threads = []
-
-        def spawn_channel(conn):
-            # start new radar channel handler
-            channel = RadarChannelHandler(conn)
-            channel.run()
-            conn.close()
-
-        while True:
-            client_conn, addr = self.client_sock.accept()
-            
-            ct = threading.Thread(target = spawn_channel, args = (client_conn,))
-            client_threads.append(ct)
-            ct.start()
-        
-        client_sock.close() 
-
 	
 def main():
     # maybe switch to multiprocessing with manager process
@@ -663,8 +767,12 @@ def main():
 
     logging.debug('main()')
     rmsg_port = 45000 
-    man = RMsgManager(rmsg_port)
-    man.run()
+    #man = RMsgManager(rmsg_port)
+    #man.run()
+    
+    radar = RadarHardwareManager(rmsg_port)
+    radar.run()
+
 
 if __name__ == '__main__':
     main()
