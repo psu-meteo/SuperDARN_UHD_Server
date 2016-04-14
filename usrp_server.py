@@ -13,6 +13,7 @@ from termcolor import cprint
 
 from socket_utils import *
 from rosmsg import *
+from drivermsg_library import *
 
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1 
@@ -26,49 +27,61 @@ debug = True
 # merge information from multiple control programs, handle disparate settings
 # e.g, ready flags and whatnot
 class RadarHardwareManager:
-	def __init__(self):
-		'''
-		# open arby server socket
-		try:
-			arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			arbysock.connect((arby_server, ARBYSERVER_PORT))
-		except ConnectionRefusedError:
-			warnings.warn("Arby server connection failed")
-			sys.exit(1)
+    def __init__(self):
+        pass
+        '''
+        # open arby server socket
+        try:
+                arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                arbysock.connect((arby_server, ARBYSERVER_PORT))
+        except ConnectionRefusedError:
+                warnings.warn("Arby server connection failed")
+                sys.exit(1)
 
-		time.sleep(.05)
-		# connect to usrp_driver servers
-		try:
-			for d in usrp_drivers:
-				usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-				usrpsock.connect((d, USRPDRIVER_PORT))
-				usrp_driver_socks.append(usrpsock)
-		except ConnectionRefusedError:
-			warnings.warn("USRP server connection failed")
-			sys.exit(1)
+        time.sleep(.05)
+        # connect to usrp_driver servers
+        try:
+                for d in usrp_drivers:
+                        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        usrpsock.connect((d, USRPDRIVER_PORT))
+                        usrp_driver_socks.append(usrpsock)
+        except ConnectionRefusedError:
+                warnings.warn("USRP server connection failed")
+                sys.exit(1)
 
 
-		time.sleep(.05)
-		# connect cuda_driver servers
-		try:
-			for c in cuda_drivers:
-				cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-				cudasock.connect((c, CUDADRIVER_PORT))
-				cuda_driver_socks.append(cudasock)
-		except ConnectionRefusedError:
-			warnings.warn("cuda server connection failed")
-			sys.exit(1)
+        time.sleep(.05)
+        # connect cuda_driver servers
+        try:
+                for c in cuda_drivers:
+                        cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        cudasock.connect((c, CUDADRIVER_PORT))
+                        cuda_driver_socks.append(cudasock)
+        except ConnectionRefusedError:
+                warnings.warn("cuda server connection failed")
+                sys.exit(1)
 
-		'''
+        '''
 
-    # so, open server and listen on port
-    # capture rmsg commands, return bogus data
-    # try running two control programs.. 
-		pass
-		
-	def clrfreq(clrfreqprm):
+        '''
+        amp0 = rf_settings[1] # amp1 in RXFESettings struct
+        amp1 = rf_settings[2] # amp2 in RXFESettings struct
+        att_p5dB = np.uint8((rf_settings[4] > 0))
+        att_1dB = np.uint8((rf_settings[5] > 0))
+        att_2dB = np.uint8((rf_settings[6] > 0))
+        att_4dB = np.uint8((rf_settings[7] > 0))
+        att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
+        cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
+
+        '''
+
+        # so, open server and listen on port
+        # capture rmsg commands, return bogus data
+        # try running two control programs.. 
+                
+    def clrfreq(clrfreqprm):
         # TODO: check if radar is free
-       	MIN_CLRFREQ_DELAY = .2
+        MIN_CLRFREQ_DELAY = .2
         MAX_CLRFREQ_AVERAGE = 10
         MAX_CLRFREQ_BANDWIDTH = 512
         MAX_CLRFREQ_USABLE_BANDWIDTH = 300
@@ -160,7 +173,9 @@ class RadarHardwareManager:
         transmit_dtype(self.arbysock, np.float64(usable_bandwidth)) # kHz?
         transmit_dtype(self.arbysock, np.float64(pwr)) # length usable_bandwidth array?
 
-	def getData(self, channels):
+    def getData(self, channels):
+        # stall until all channels are ready
+        # 
         nbb_samples = self.ctrlprm['number_of_baseband_samples']
 
         #  check if any sequences are registered
@@ -241,9 +256,9 @@ class RadarHardwareManager:
             transmit_dtype(self.arbysock, main_beamformed) # TODO: send main data for channel
             #transmit_dtype(self.arbysock, back_beamformed) # TODO: send back data for channel
 
-	
-	def exit(self):
-		# clean up and exit
+    
+    def exit(self):
+        # clean up and exit
         self.arbysock.close()
         for sock in self.usrpsocks:
             sock.close()
@@ -406,35 +421,33 @@ class RadarChannelHandler:
 
 
     def SetReadyFlagHandler(self, rmsg):
+        # TODO: check if samples are ready?
         self.ready = True
-        # TODO: setup samples and what not
-        # see register seq handler
 
         return RMSG_SUCCESS
 
     def RegisterSeqHandler(self, rmsg):
-		# function to get the indexes of rising edges going from zero to a nonzero value in array ar
-		def _rising_edge_idx(ar):
-			ar = np.insert(ar, 0, -2)
-			edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
-			return edges[edges > 0]
+        # function to get the indexes of rising edges going from zero to a nonzero value in array ar
+        def _rising_edge_idx(ar):
+            ar = np.insert(ar, 0, -2)
+            edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
+            return edges[edges > 0]
 
-		# returns the run length of a pulse in array ar starting at index idx
-		def _pulse_len(ar, idx):
-			runlen = 0
-			for element in ar[idx:]:
-				if not element:
-					break
-				runlen += 1
-			return runlen
-
+        # returns the run length of a pulse in array ar starting at index idx
+        def _pulse_len(ar, idx):
+            runlen = 0
+            for element in ar[idx:]:
+                if not element:
+                    break
+                runlen += 1
+            return runlen
         # site libraries appear to not initialize the status, so a nonzero status here is normall. 
+
         self.seqprm_struct.receive(self.conn)
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
        
-        seq_idx = self.seqprm_struct.get_data('index') # TODO: how is this not the tx_tsg_idx?
-        tx_tsg_idx = self.seqprm_struct.get_data('index') # !!!
+        tx_tsg_idx = self.seqprm_struct.get_data('index') 
         tx_tsg_len = self.seqprm_struct.get_data('len')
         tx_tsg_step =  self.seqprm_struct.get_data('step')
 
@@ -443,11 +456,9 @@ class RadarChannelHandler:
         tx_tsg_rep = self.seq_rep
         tx_tsg_code = self.seq_code
 
-        # TODO: sort out step/tx_tsg_step/STATE_TIME conversions..
-        step = np.ceil(tx_tsg_step / STATE_TIME)
         seq_buf = []
         for i in range(tx_tsg_len):
-            for j in range(0, np.int32(step * tx_tsg_rep[i])):
+            for j in range(0, np.int32(tx_tsg_step * tx_tsg_rep[i])):
                 seq_buf.append(tx_tsg_code[i])
         seq_buf = np.uint8(np.array(seq_buf))
 
@@ -465,24 +476,23 @@ class RadarChannelHandler:
         atten = seq_buf & A_BIT
         phase_mask = seq_buf & P_BIT
 
-        # extract smsep and number of samples
+        # extract and number of samples
         sample_idx = np.nonzero(samples)[0]
         if len(sample_idx) < 3:
             warnings.warn("Warning, cannot register empty sequence")
             return
-
-        smsep = (sample_idx[2] - sample_idx[1] + 1) * STATE_TIME
+        
         nbb_samples = len(sample_idx)
 
         # extract pulse start timing
         tr_window_idx = np.nonzero(tr_window)[0]
         tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
-        pulse_offsets_vector = tx_tsg_step * tr_rising_edge_idx
+        pulse_offsets_vector = tr_rising_edge_idx
 
         # extract tr window to rf pulse delay
         rf_pulse_idx = np.nonzero(rf_pulse)[0]
         rf_pulse_edge_idx = _rising_edge_idx(rf_pulse_idx)
-        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * STATE_TIME
+        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0])
         npulses = len(rf_pulse_edge_idx)
 
         # extract per-pulse phase coding and transmit pulse masks
@@ -494,34 +504,31 @@ class RadarChannelHandler:
             pend = pstart + _pulse_len(rf_pulse, pstart)
             phase_masks.append(phase_mask[pstart:pend])
             pulse_masks.append(rf_pulse[pstart:pend])
-            pulse_lens.append((pend - pstart) * STATE_TIME)
-        # add sequence to sequence list..
-        seq = sequence(self.usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, self.ctrlprm)
-        self.sequence_manager.addSequence(seq)
+            pulse_lens.append((pend - pstart))
 
- 
-        # TODO: for each beam, create 
-        # TODO: do something with this..
+        self.npulses = npulses
+        self.pulse_offsets_vector = pulse_offsets_vector
+        self.pulse_lens = pulse_lens # length of pulses, in seconds
+        self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so
+        self.pulse_masks = pulse_masks
+        self.tr_to_pulse_delay = tr_to_pulse_delay
+        #self.ready = True # TODO: what is ready flag for?
+        self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+
+        if npulses == 0:
+            raise ValueError('number of pulses must be greater than zero!')
+        if nbb_samples == 0:
+            raise ValueError('number of samples in sequence must be nonzero!')
+
         return RMSG_SUCCESS
 
     # receive a ctrlprm struct
     def SetParametersHandler(self, rmsg):
-        
         self.ctrlprm_struct.receive(self.conn)
-        
+        # TODO for a SetParametersHandler, prepare transmit and receive sample buffers
+
         if (self.rnum < 0 or self.cnum < 0):
             return RMSG_FAILURE
-	'''
-    	amp0 = rf_settings[1] # amp1 in RXFESettings struct
-    	amp1 = rf_settings[2] # amp2 in RXFESettings struct
-    	att_p5dB = np.uint8((rf_settings[4] > 0))
-    	att_1dB = np.uint8((rf_settings[5] > 0))
-    	att_2dB = np.uint8((rf_settings[6] > 0))
-    	att_4dB = np.uint8((rf_settings[7] > 0))
-    	att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
-    	cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
-
-	'''
         return RMSG_SUCCESS
 
     # send ctrlprm struct

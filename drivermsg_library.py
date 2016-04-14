@@ -282,7 +282,7 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
@@ -349,6 +349,6 @@ def create_testsequence():
     usrp_config.read('usrp_config.ini')
 
 
-    seq = sequence(usrp_config, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
+    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
 
     return seq
