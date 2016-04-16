@@ -9,7 +9,7 @@ import pdb
 import socket
 import time
 from termcolor import cprint
-
+from phasing_utils import *
 from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
@@ -18,10 +18,12 @@ MAX_CHANNELS = 10
 RMSG_FAILURE = -1 
 RMSG_SUCCESS = 0
 RADAR_STATE_TIME = .001
-CHANNEL_STATE_TIMEOUT = 120
+CHANNEL_STATE_TIMEOUT = 120000
 
 debug = True
 
+# TODO: pull these from config file
+RADAR_NBEAMS = 16
 
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
@@ -54,14 +56,14 @@ class RadarHardwareManager:
 
         # TODO: set state machine args
         # TODO: add lock support
-        def radar_state_machine(conn):
+        def radar_state_machine():
+            cprint('starting radar hardware state machine', 'blue')
             self.state = STATE_INIT
             self.next_state = STATE_INIT
 
             while True:
                 self.state = self.next_state
                 self.next_state = STATE_RESET
-                
                 if self.state == STATE_INIT:
                     # TODO: write init code?
                     self.next_state = STATE_WAIT
@@ -72,16 +74,16 @@ class RadarHardwareManager:
                     # TODO: set radar state priority
                     # e.g, CLR_FREQ > PRETRIGGER > TRIGGER > GET_DATA?
                     for ch in self.channels:
-                        if ch.clrfreq_request:
+                        if ch.state == STATE_CLR_FREQ:
                             self.next_state = STATE_CLR_FREQ
                             break
-                        if ch.pretrigger:
+                        if ch.state == STATE_PRETRIGGER:
                             self.next_state = STATE_PRETRIGGER
                             break
-                        if ch.trigger:
+                        if ch.state == STATE_TRIGGER:
                             self.next_state = STATE_TRIGGER
                             break
-                        if ch.get_data:
+                        if ch.state == GET_DATA:
                             self.next_state = GET_DATA
                             break
 
@@ -89,7 +91,7 @@ class RadarHardwareManager:
                 if self.state == STATE_CLR_FREQ:
                     # do a clear frequency search for channel requesting one
                     for ch in self.channels:
-                        if ch.clrfreq_request:
+                        if ch.state == STATE_CLR_FREQ:
                             self.clrfreq(ch)
                     self.next_state = STATE_WAIT
 
@@ -125,8 +127,8 @@ class RadarHardwareManager:
         self.channels = []
 
         # TODO: write state machine..
-        #ct = threading.Thread(target = radar_state_machine, args = (client_conn,))
-
+        ct = threading.Thread(target = radar_state_machine)
+        ct.start()
         while True:
             client_conn, addr = self.client_sock.accept()
             
@@ -139,23 +141,11 @@ class RadarHardwareManager:
 
 
     def __init___(self):
-        pass
-        '''
-        # open arby server socket
         try:
-                arbysock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                arbysock.connect((arby_server, ARBYSERVER_PORT))
-        except ConnectionRefusedError:
-                warnings.warn("Arby server connection failed")
-                sys.exit(1)
-
-        time.sleep(.05)
-        # connect to usrp_driver servers
-        try:
-                for d in usrp_drivers:
-                        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        usrpsock.connect((d, USRPDRIVER_PORT))
-                        usrp_driver_socks.append(usrpsock)
+            for d in usrp_drivers:
+                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                usrpsock.connect((d, USRPDRIVER_PORT))
+                usrp_driver_socks.append(usrpsock)
         except ConnectionRefusedError:
                 warnings.warn("USRP server connection failed")
                 sys.exit(1)
@@ -190,7 +180,8 @@ class RadarHardwareManager:
         # capture rmsg commands, return bogus data
         # try running two control programs.. 
                 
-    def clrfreq(clrfreqprm):
+    def clrfreq(self, chan):
+        cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
         # TODO: check if radar is free
         MIN_CLRFREQ_DELAY = .2
         MAX_CLRFREQ_AVERAGE = 10
@@ -198,11 +189,11 @@ class RadarHardwareManager:
         MAX_CLRFREQ_USABLE_BANDWIDTH = 300
         CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
 
-        fstart = clrfreqprm.payload['start']
-        fstop = clrfreqprm.payload['end']
-        filter_bandwidth = clrfreqprm.payload['filter_bandwidth'] # kHz (c/(2 * rsep))
-        power_threshold = clrfreqprm.payload['pwr_threshold'] # (typically .9, threshold before changing freq)
-        nave = clrfreqprm.payload['nave']
+        fstart = chan.clrfreq_struct.payload['start']
+        fstop = chan.clrfreq_struct.payload['end']
+        filter_bandwidth = chan.clrfreq_struct.payload['filter_bandwidth'] # kHz (c/(2 * rsep))
+        power_threshold = chan.clrfreq_struct.payload['pwr_threshold'] # (typically .9, threshold before changing freq)
+        nave = chan.clrfreq_struct.payload['nave']
 
         usable_bandwidth = fstop - fstart
         usable_bandwidth = np.floor(usable_bandwidth/2.0) * 2 # mimic behavior of gc316 driver, why does the old code do this?
@@ -228,11 +219,15 @@ class RadarHardwareManager:
 
         # calculate center frequency of beamforming, form 
         # apply narrowband beamforming around center frequency
-        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, self.ctrlprm['tbeam'], RADAR_BEAMWIDTH)
+        pdb.set_trace()
+        tbeamwidth = chan.ctrlprm_struct.payload['tbeamwidth']
+        tbeam = chan.ctrlprm_struct.payload['tbeam']
+        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam, tbeamwidth)
         pshift = calc_phase_increment(bmazm, cfreq)
 
         pwr2 = np.zeros(num_clrfreq_samples)
 
+        pdb.set_trace()
         for ai in range(nave):
             # gather current UHD time
             gettime_cmd = usrp_get_time_command(self.usrpsocks)
@@ -285,6 +280,7 @@ class RadarHardwareManager:
         transmit_dtype(self.arbysock, np.float64(pwr)) # length usable_bandwidth array?
 
     def get_data(self):
+        cprint('running get_data', 'blue')
         # stall until all channels are ready
         # 
         nbb_samples = self.ctrlprm['number_of_baseband_samples']
@@ -382,6 +378,7 @@ class RadarHardwareManager:
         sys.exit(0)
 
     def trigger(self):
+        cprint('running trigger', 'blue')
         if len(self.sequence_manager.sequences):
             cmd = usrp_trigger_pulse_command(self.usrpsocks)
             cmd.transmit()
@@ -394,6 +391,7 @@ class RadarHardwareManager:
 
 
     def pretrigger(self):
+        cprint('running pretrigger', 'blue')
         self._recv_ctrlprm()
         beam = self.ctrlprm['tbeam']
 

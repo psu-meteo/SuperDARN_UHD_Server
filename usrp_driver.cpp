@@ -207,6 +207,35 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
    return status;
 }
 
+ssize_t sock_send_cshort(int32_t sock, std::complex<short int> d)
+{
+   ssize_t status = send(sock, &d, sizeof(std::complex<short int>), 0);
+   if(status != sizeof(uint32_t)) {
+        fprintf(stderr, "error sending uint32_t\n");
+   }
+   return status;
+}
+
+ssize_t sock_send_int16(int32_t sock, int16_t d)
+{
+   ssize_t status = send(sock, &d, sizeof(uint16_t), 0);
+   if(status != sizeof(uint32_t)) {
+        fprintf(stderr, "error sending int16_t\n");
+   }
+   return status;
+}
+
+
+ssize_t sock_send_uint32(int32_t sock, uint32_t d)
+{
+   ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
+   if(status != sizeof(uint32_t)) {
+        fprintf(stderr, "error sending uint32_t\n");
+   }
+   return status;
+}
+
+
 ssize_t sock_send_float64(int32_t sock, double d)
 {
    ssize_t status = send(sock, &d, sizeof(double), 0);
@@ -343,6 +372,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     struct arg_end  *ae_argend = arg_end(ARG_MAXERRORS);
     void* argtable[] = {al_help, ai_ant, as_host, al_intclk, ae_argend};
     
+    double txrate, rxrate, txfreq, rxfreq;
     std::vector<std::complex<int16_t> *> pulse_seq_ptrs(MAX_TX_PULSES);
     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
@@ -467,7 +497,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             switch(command) {
                 case USRP_SETUP: {
                     DEBUG_PRINT("entering USRP_SETUP command\n");
-                    double txrate, rxrate, txfreq, rxfreq;
                     
                     txfreq = sock_get_float64(driverconn);
                     rxfreq = sock_get_float64(driverconn);
@@ -661,10 +690,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     double clrfreq_cfreq = sock_get_float64(driverconn);
                     double clrfreq_rate = sock_get_float64(driverconn);
 
-                    uhd::time_spec_t clrfreq_start_time = uhd::time_spec_t(clrfreq_time_full, clrfreq_time_frac)
+                    uhd::time_spec_t clrfreq_start_time = uhd::time_spec_t(clrfreq_time_full, clrfreq_time_frac);
                     
-                    std::vector<std::complex<int16_t>> clrfreq_data_buffer
-                    clrfreq_data_buffer.resize(num_clrfreq_samples)
+                    std::vector<std::complex<int16_t>> clrfreq_data_buffer;
+                    clrfreq_data_buffer.resize(num_clrfreq_samples);
 
                     // TODO: does this take too long?
                     usrp->set_rx_rate(clrfreq_rate);
@@ -681,8 +710,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     const size_t num_max_request_samps = rx_stream->get_max_num_samps();
 
                     // and start grabbin'
-                    while(num_acc_samps < num_requested_samps) {
-                        size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
+                    while(num_acc_samps < num_clrfreq_samples) {
+                        size_t samp_request = std::min(num_max_request_samps, num_clrfreq_samples - num_acc_samps);
                         size_t num_rx_samps = rx_stream->recv(&((rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
 
                         timeout = 0.1;
@@ -716,8 +745,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                     // send back samples                   
-                    for(i = 0; i < 2 * num_clrfreq_samples) {
-                        sock_send_int16(driverconn, rx_data_buffer[i]);
+                    for(uint32_t i = 0; i < num_clrfreq_samples; i++) {
+                        sock_send_cshort(driverconn, rx_data_buffer[i]);
                     }
 
                     // restore usrp rates
