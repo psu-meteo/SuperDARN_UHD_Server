@@ -232,9 +232,11 @@ class RadarHardwareManager:
         pshift = calc_phase_increment(bmazm, cfreq)
         clrfreq_rate = 2.0 * chan.clrfreq_struct.payload['filter_bandwidth'] * 1000 # twice the filter bandwidth, convert from kHz to Hz
         pwr2 = np.zeros(num_clrfreq_samples)
-        
+        combined_samples = np.zeros(num_clrfreq_samples, dtype=np.complex128)
+
         for ai in range(nave):
             # gather current UHD time
+            cprint('gathering samples for average {} of {}'.format(ai, nave), 'green')
             gettime_cmd = usrp_get_time_command(self.usrpsocks)
             gettime_cmd.transmit()
             usrptimes = []
@@ -249,25 +251,34 @@ class RadarHardwareManager:
 
             clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
             clrfreq_cmd.transmit()
+            
+            # TODO: 109, why is it there?
+            print(recv_dtype(usrpsock, np.uint8)) # TODO: dumping extra byte of RX sample buffer...
+            time.sleep(.4) # TODO: understand why a delay is necessary to not time out on receiving antenna metadata
 
             # grab raw samples, apply beamforming
             for usrpsock in self.usrpsocks:
                 # receive 
-                print('waiting for antenna metadata')
-                pdb.set_trace()
+                cprint('waiting for antenna metadata', 'green')
+
                 nantennas = recv_dtype(usrpsock, np.uint16)
                 antennas = recv_dtype(usrpsock, np.uint16, nantennas)
+
                 if isinstance(antennas, (np.ndarray, np.generic)):
-                    print('pulling samples from antenna {} of {} antennas'.format(antenna, nantennas))
+                    cprint('pulling samples from antenna {} of {} antennas'.format(antennas, nantennas), 'green')
                     antennas = np.array([antennas])
-
+                
                 for ant in antennas:
-                    phase_rotation = rad_to_rect(ant * pshift)
-                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.uint32, num_samples)
+                    ant_rotation = rad_to_rect(ant * pshift)
+                    samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
+                    samples = samples[0::2] + 1j * samples[1::2]
+                    pdb.set_trace()
+                    combined_samples += ant_rotation * samples
         
-
+            pdb.set_trace()
             # return fft of width usable_bandwidth, kHz resolution
-            c_fft = np.fft(combined_samples)
+            # TODO: fft recentering, etc
+            c_fft = np.fft.fft(combined_samples)
             # compute power.. 
             pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
             pwr2 += pc_fft

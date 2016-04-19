@@ -735,8 +735,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     frac_time = clrfreq_start_time.get_frac_secs();
                     DEBUG_PRINT("CLRFREQ UHD clrfreq target time: %d %.2f \n", real_time, frac_time);
 
-
-                    
                     std::vector<std::complex<int16_t>> clrfreq_data_buffer;
                     clrfreq_data_buffer.resize(num_clrfreq_samples);
 
@@ -802,8 +800,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
 
-                    // TODO: send back antenna, nantennas
-                    sock_send_uint16(driverconn, 1);
+                    sock_send_uint16(driverconn, 1); // so, either 1 sample offset or big/little endian
                     sock_send_uint16(driverconn, 1);
 
                     // send back samples                   
