@@ -202,7 +202,7 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
    if(status != sizeof(uint32_t)) {
-        fprintf(stderr, "error sending uint32_t\n");
+        fprintf(stderr, "error sending int32_t\n");
    }
    return status;
 }
@@ -210,20 +210,30 @@ ssize_t sock_send_int32(int32_t sock, int32_t d)
 ssize_t sock_send_cshort(int32_t sock, std::complex<short int> d)
 {
    ssize_t status = send(sock, &d, sizeof(std::complex<short int>), 0);
-   if(status != sizeof(uint32_t)) {
-        fprintf(stderr, "error sending uint32_t\n");
+   if(status != sizeof(std::complex<short int>)) {
+        fprintf(stderr, "error sending compelx short\n");
    }
    return status;
 }
 
 ssize_t sock_send_int16(int32_t sock, int16_t d)
 {
-   ssize_t status = send(sock, &d, sizeof(uint16_t), 0);
-   if(status != sizeof(uint32_t)) {
+   ssize_t status = send(sock, &d, sizeof(int16_t), 0);
+   if(status != sizeof(uint16_t)) {
         fprintf(stderr, "error sending int16_t\n");
    }
    return status;
 }
+
+ssize_t sock_send_uint16(int32_t sock, uint16_t d)
+{
+   ssize_t status = send(sock, &d, sizeof(uint16_t), 0);
+   if(status != sizeof(uint16_t)) {
+        fprintf(stderr, "error sending uint16_t\n");
+   }
+   return status;
+}
+
 
 
 ssize_t sock_send_uint32(int32_t sock, uint32_t d)
@@ -419,6 +429,28 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // TODO: retry uhd connection if fails..
     // TODO: this should be sized for a maximum reasonable sample request 
     std::vector<std::complex<int16_t>> rx_data_buffer;
+
+ 
+    // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
+    if(al_intclk->count > 0) {
+        usrp->set_clock_source("internal");
+        usrp->set_time_source("external");
+        usrp->set_time_now(uhd::time_spec_t(0.0));
+    }
+
+    else {
+    // sync clock with external 10 MHz and PPS
+        usrp->set_clock_source("external");
+        usrp->set_time_source("external");
+        const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
+        while (last_pps_time == usrp->get_time_last_pps()) {
+            usleep(5e4);
+        }
+        usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
+        boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
+    }
+
+
 
     // init rxfe
     kodiak_init_rxfe(usrp);
@@ -675,7 +707,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_uint32(driverconn, real_time);
                     sock_send_float64(driverconn, frac_time);
 
-                    DEBUG_PRINT("UHD_GETTIME current UHD time: %.2f %.2f command\n", real_time, frac_time);
+                    DEBUG_PRINT("UHD_GETTIME current UHD time: %d %.2f command\n", real_time, frac_time);
                     sock_send_uint8(driverconn, UHD_GETTIME);
                     break;
                     }
@@ -683,14 +715,27 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
                     uhd::rx_metadata_t md;
-                    float timeout = .1;
+                    double timeout = 5.0; // TODO: set this dynamically using max delay for clrfreq search
                     uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
                     uint32_t clrfreq_time_full = sock_get_uint32(driverconn);
                     double clrfreq_time_frac = sock_get_float64(driverconn);
                     double clrfreq_cfreq = sock_get_float64(driverconn);
                     double clrfreq_rate = sock_get_float64(driverconn);
 
+                    uint32_t real_time; 
+                    double frac_time;
+
+                    size_t num_acc_samps = 0;
+                    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
+
+                    DEBUG_PRINT("CLRFREQ time: %d . %.2f \n", clrfreq_time_full, clrfreq_time_frac);
+                    DEBUG_PRINT("CLRFREQ rate: %.2f, CLRFREQ_nsamples %d, freq: %.2f\n", clrfreq_rate, num_clrfreq_samples, clrfreq_cfreq);
                     uhd::time_spec_t clrfreq_start_time = uhd::time_spec_t(clrfreq_time_full, clrfreq_time_frac);
+                    real_time = clrfreq_start_time.get_real_secs();
+                    frac_time = clrfreq_start_time.get_frac_secs();
+                    DEBUG_PRINT("CLRFREQ UHD clrfreq target time: %d %.2f \n", real_time, frac_time);
+
+
                     
                     std::vector<std::complex<int16_t>> clrfreq_data_buffer;
                     clrfreq_data_buffer.resize(num_clrfreq_samples);
@@ -705,16 +750,23 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     stream_cmd.num_samps = num_clrfreq_samples;
                     stream_cmd.stream_now = false;
                     stream_cmd.time_spec = clrfreq_start_time;
-                    
-                    size_t num_acc_samps = 0;
-                    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
+ 
+                    start_time = usrp->get_time_now();
+                    real_time = start_time.get_real_secs();
+                    frac_time = start_time.get_frac_secs();
+                    DEBUG_PRINT("CLRFREQ UHD before waiting for samples : %d %.2f \n", real_time, frac_time);
 
+                    usrp->issue_stream_cmd(stream_cmd);                   
+                    DEBUG_PRINT("CLRFREQ starting to grab samples\n");
                     // and start grabbin'
+                    //
+                    // so, we're segfaulting on rx_stream->recv, check data buffers
                     while(num_acc_samps < num_clrfreq_samples) {
                         size_t samp_request = std::min(num_max_request_samps, num_clrfreq_samples - num_acc_samps);
-                        size_t num_rx_samps = rx_stream->recv(&((rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
+                        DEBUG_PRINT("CLRFREQ requesting %d samples with timeout %.2f\n", samp_request, timeout);
+                        size_t num_rx_samps = rx_stream->recv(&((clrfreq_data_buffer)[num_acc_samps]), samp_request, md, timeout);
 
-                        timeout = 0.1;
+                        timeout = .1; 
 
                         //handle the error codes
                         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
@@ -724,9 +776,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             ) % md.strerror()));
                         }
 
-                        //if (DEBUG) {
-                        //    std::cout << boost::format("Received packet: %u samples, %u full secs, %f frac secs") % num_rx_samps % md.time_spec.get_full_se
-                        //}
+                        if (DEBUG) {
+         
+                            start_time = usrp->get_time_now();
+                            real_time = start_time.get_real_secs();
+                            frac_time = start_time.get_frac_secs();
+                            std::cout << boost::format("Received packet: %u samples") % num_rx_samps << std::endl;
+                            DEBUG_PRINT("CLRFREQ UHD time: %d %.2f \n", real_time, frac_time);
+                        }
                         num_acc_samps += num_rx_samps;
                     }
 
@@ -743,10 +800,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         std::cerr << "Unexpected error code " << md.error_code <<
                     " encountered at " << rx_error_time.get_real_secs() << std::endl;
                     }
+                    DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
+
+                    // TODO: send back antenna, nantennas
+                    sock_send_uint16(driverconn, 1);
+                    sock_send_uint16(driverconn, 1);
 
                     // send back samples                   
                     for(uint32_t i = 0; i < num_clrfreq_samples; i++) {
-                        sock_send_cshort(driverconn, rx_data_buffer[i]);
+                        sock_send_cshort(driverconn, clrfreq_data_buffer[i]);
                     }
 
                     // restore usrp rates

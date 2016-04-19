@@ -24,7 +24,7 @@ debug = True
 
 # TODO: pull these from config file
 RADAR_NBEAMS = 16
-
+ANTENNA = 1
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
 STATE_WAIT = 'WAIT'
@@ -44,7 +44,7 @@ class RadarHardwareManager:
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
-    
+        self.usrp_init() 
 
     def run(self):
         def spawn_channel(conn):
@@ -125,7 +125,7 @@ class RadarHardwareManager:
         self.client_sock.listen(MAX_CHANNELS)
         client_threads = []
         self.channels = []
-
+        
         # TODO: write state machine..
         ct = threading.Thread(target = radar_state_machine)
         ct.start()
@@ -140,17 +140,24 @@ class RadarHardwareManager:
     
 
 
-    def __init___(self):
+    def usrp_init(self):
+        usrp_drivers = ['localhost']
+        usrp_driver_socks = []
         try:
             for d in usrp_drivers:
                 usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                usrpsock.connect((d, USRPDRIVER_PORT))
+                usrpsock.connect((d, USRPDRIVER_PORT + ANTENNA))
                 usrp_driver_socks.append(usrpsock)
         except ConnectionRefusedError:
-                warnings.warn("USRP server connection failed")
-                sys.exit(1)
+            cprint('USRP server connection failed', 'blue')
+            sys.exit(1)
 
-
+        self.usrpsocks = usrp_driver_socks
+        '''
+    def rxfe_init(self):
+        pass
+    def cuda_init(self):
+        pass
         time.sleep(.05)
         # connect cuda_driver servers
         try:
@@ -162,9 +169,7 @@ class RadarHardwareManager:
                 warnings.warn("cuda server connection failed")
                 sys.exit(1)
 
-        '''
 
-        '''
         amp0 = rf_settings[1] # amp1 in RXFESettings struct
         amp1 = rf_settings[2] # amp2 in RXFESettings struct
         att_p5dB = np.uint8((rf_settings[4] > 0))
@@ -179,11 +184,13 @@ class RadarHardwareManager:
         # so, open server and listen on port
         # capture rmsg commands, return bogus data
         # try running two control programs.. 
-                
+    def setup(self, chan):
+        pass
+
     def clrfreq(self, chan):
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
         # TODO: check if radar is free
-        MIN_CLRFREQ_DELAY = .2
+        MIN_CLRFREQ_DELAY = 1 # TODO: lower this?
         MAX_CLRFREQ_AVERAGE = 10
         MAX_CLRFREQ_BANDWIDTH = 512
         MAX_CLRFREQ_USABLE_BANDWIDTH = 300
@@ -219,15 +226,13 @@ class RadarHardwareManager:
 
         # calculate center frequency of beamforming, form 
         # apply narrowband beamforming around center frequency
-        pdb.set_trace()
         tbeamwidth = chan.ctrlprm_struct.payload['tbeamwidth']
         tbeam = chan.ctrlprm_struct.payload['tbeam']
         bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam, tbeamwidth)
         pshift = calc_phase_increment(bmazm, cfreq)
-
+        clrfreq_rate = 2.0 * chan.clrfreq_struct.payload['filter_bandwidth'] * 1000 # twice the filter bandwidth, convert from kHz to Hz
         pwr2 = np.zeros(num_clrfreq_samples)
-
-        pdb.set_trace()
+        
         for ai in range(nave):
             # gather current UHD time
             gettime_cmd = usrp_get_time_command(self.usrpsocks)
@@ -241,22 +246,25 @@ class RadarHardwareManager:
             
             # request clrfreq sample dump
             # TODO: what is the clear frequency rate? (c / (2 * rsep?))
-            clrfreq_rate = 1000
+
             clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
             clrfreq_cmd.transmit()
 
             # grab raw samples, apply beamforming
             for usrpsock in self.usrpsocks:
                 # receive 
+                print('waiting for antenna metadata')
+                pdb.set_trace()
                 nantennas = recv_dtype(usrpsock, np.uint16)
                 antennas = recv_dtype(usrpsock, np.uint16, nantennas)
                 if isinstance(antennas, (np.ndarray, np.generic)):
+                    print('pulling samples from antenna {} of {} antennas'.format(antenna, nantennas))
                     antennas = np.array([antennas])
 
                 for ant in antennas:
                     phase_rotation = rad_to_rect(ant * pshift)
-                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.complex64, num_samples)
-
+                    combined_samples += phase_rotation * recv_dtype(usrpsock, np.uint32, num_samples)
+        
 
             # return fft of width usable_bandwidth, kHz resolution
             c_fft = np.fft(combined_samples)
@@ -271,6 +279,7 @@ class RadarHardwareManager:
         pdb.set_trace() # check sideband trimming
         pwr = pwr2[sideband-1:-sideband]
 
+        cprint('clrfreq complete for channel {}'.format(chan.cnum), 'blue')
         transmit_dtype(self.arbysock, np.int32(fstart)) # kHz
         transmit_dtype(self.arbysock, np.int32(fstop)) # kHz
         transmit_dtype(self.arbysock, np.float32(filter_bandwidth)) # kHz (c/(2 * rsep))
@@ -431,8 +440,8 @@ class RadarChannelHandler:
         self.dataprm_struct = dataprm_struct(self.conn)
 
         # TODO: initialize ctlrprm_struct with site infomation
-        self.ctrlprm_struct.set_data('rbeamwidth', 3)
-        self.ctrlprm_struct.set_data('tbeamwidth', 3)
+        #self.ctrlprm_struct.set_data('rbeamwidth', 3)
+        #self.ctrlprm_struct.set_data('tbeamwidth', 3)
 
 
     def run(self):

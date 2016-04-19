@@ -39,6 +39,7 @@ def pickle_recv(sock):
 
 def transmit_dtype(sock, data, dtype = None):
     # TODO: handle vectors..
-    data = dtype(data)
+    if dtype != None:
+        data = dtype(data)
 
     dstr = sock.sendall(data.tobytes())
