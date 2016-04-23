@@ -383,6 +383,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     void* argtable[] = {al_help, ai_ant, as_host, al_intclk, ae_argend};
     
     double txrate, rxrate, txfreq, rxfreq;
+    double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
+
     std::vector<std::complex<int16_t> *> pulse_seq_ptrs(MAX_TX_PULSES);
     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
@@ -530,11 +532,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 case USRP_SETUP: {
                     DEBUG_PRINT("entering USRP_SETUP command\n");
                     
-                    txfreq = sock_get_float64(driverconn);
-                    rxfreq = sock_get_float64(driverconn);
-                    txrate = sock_get_float64(driverconn);
-                    rxrate = sock_get_float64(driverconn);
+                    txfreq_new = sock_get_float64(driverconn);
+                    rxfreq_new = sock_get_float64(driverconn);
+                    txrate_new = sock_get_float64(driverconn);
+                    rxrate_new = sock_get_float64(driverconn);
+
                     npulses = sock_get_uint32(driverconn);
+
                     num_requested_rx_samples = sock_get_uint64(driverconn);
                     num_tx_rf_samples = sock_get_uint64(driverconn);
                     
@@ -547,7 +551,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         pulse_offsets[i] = sock_get_float64(driverconn); 
                         DEBUG_PRINT("USRP_SETUP received %f pulse offset\n", pulse_offsets[i]);
                     }
-                             
+ 
                     rx_data_buffer.resize(num_requested_rx_samples);
                    
                     DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_swingatx);
@@ -567,12 +571,28 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * num_tx_rf_samples;
                         memcpy(pulse_seq_ptrs[i], shm_pulseaddr, pulse_bytes);
                     }
-
-                    usrp->set_rx_rate(rxrate);
-                    usrp->set_tx_rate(txrate);
                     
-                    usrp->set_rx_freq(rxfreq);
-                    usrp->set_tx_freq(txfreq);
+                    // TODO: only retune if necessary
+                    if(rxrate != rxrate_new) {
+                        usrp->set_rx_rate(rxrate_new);
+                        rxrate = usrp->get_rx_rate();
+                    }
+
+                    if(txrate != txrate_new) {
+                        usrp->set_tx_rate(txrate);
+                        txfreq = usrp->get_tx_rate();
+   
+                    }
+                    
+                    if(rxfreq != rxfreq_new) {
+                        usrp->set_rx_freq(rxfreq);
+                        rxfreq = usrp->get_rx_freq();
+                    }
+
+                    if(txfreq != txfreq_new) {
+                        usrp->set_tx_freq(txfreq);
+                        txrate = usrp->get_tx_freq();
+                    }
 
                     if(verbose) {
                         std::cout << boost::format("Actual RX Freq: %f MHz...") % (usrp->get_rx_freq()/1e6) << std::endl << std::endl;
@@ -580,31 +600,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         std::cout << boost::format("Actual TX Freq: %f MHz...") % (usrp->get_tx_freq()/1e6) << std::endl << std::endl;
                         std::cout << boost::format("Actual TX Rate: %f Msps...") % (usrp->get_tx_rate()/1e6) << std::endl << std::endl;
                     }
-                    
-                    // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
-                    if(al_intclk->count > 0) {
-                        usrp->set_clock_source("internal");
-                        usrp->set_time_source("external");
-                        usrp->set_time_now(uhd::time_spec_t(0.0));
-                    }
-
-                    else {
-                    // sync clock with external 10 MHz and PPS
-                        usrp->set_clock_source("external");
-                        usrp->set_time_source("external");
-                        const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
-                        while (last_pps_time == usrp->get_time_last_pps()) {
-                            usleep(5e4);
-                        }
-                        usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
-                        boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
-                    }
 
                     // TODO: set the number of samples in a pulse. this is calculated from the pulse duration and the sampling rate 
                     // when do we know this? after USRP_SETUP
-               
-                    state = ST_READY; 
+                
 
+                    state = ST_READY; 
+                    DEBUG_PRINT("changing state to ST_READY\n");
                     sock_send_uint8(driverconn, USRP_SETUP);
                     break;
                     }
@@ -629,7 +631,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     std::vector<uhd::time_spec_t> pulse_times (pulse_offsets.size());
                     if (state != ST_READY) {
                         sock_send_uint8(driverconn, TRIGGER_BUSY);
-                        DEBUG_PRINT("TRIGGER_PULSE busy, returning\n");
+                        DEBUG_PRINT("TRIGGER_PULSE busy in state %d, returning\n", state);
                     }
                     else {
                         DEBUG_PRINT("TRIGGER_PULSE ready\n");
@@ -659,7 +661,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         //tx_worker(tx_stream, pulse_seq_ptrs, num_tx_rf_samples, usrp->get_tx_rate(), pulse_times);
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
-                        swing = toggle_swing(swing); 
+                        //swing = toggle_swing(swing); 
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
                     }
@@ -691,6 +693,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
                     state = ST_READY; 
+                    DEBUG_PRINT("changing state to ST_READY\n");
 
                     DEBUG_PRINT("READY_DATA returning command success \n");
                     sock_send_uint8(driverconn, READY_DATA);
