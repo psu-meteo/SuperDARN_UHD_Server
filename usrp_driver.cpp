@@ -68,9 +68,6 @@
 #define ARG_MAXERRORS 10
 #define MAX_TX_PULSES 10
 
-// blast samples over socket for debugging, requries cooperation with drivermsg_library.py..
-#define SOCK_SAMPLES 0
-
 #define USRP_SETUP 's'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
@@ -675,20 +672,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     uint32_t i;
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
-
+                    
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, sending metadata\n");
 
+                    DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %d\n", state, ant, num_requested_rx_samples);
                     sock_send_int32(driverconn, state);  // send status
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, num_requested_rx_samples);     // nsamples;  send send number of samples
-                    
-                    if(SOCK_SAMPLES) {
-                        DEBUG_PRINT("READY_DATA returning data buffer\n");
-                        for(i = 0; i < num_requested_rx_samples; i++) {
-                            sock_send_complex_int16(driverconn, rx_data_buffer[i]);
-                        }
-                    }
-
+                   
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
@@ -838,6 +829,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 default: {
                     printf("USRP_DRIVER unrecognized command: %d, %c, exiting..\n", command, command);
+                    sleep(10);
                     exit(1);
                     break;
                 }

@@ -17,7 +17,7 @@ from drivermsg_library import *
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1 
 RMSG_SUCCESS = 0
-RADAR_STATE_TIME = .0005#.0005
+RADAR_STATE_TIME = .0001#.0005
 CHANNEL_STATE_TIMEOUT = 120000
 
 debug = True
@@ -206,7 +206,7 @@ class RadarHardwareManager:
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
         # TODO: check if radar is free
         MIN_CLRFREQ_DELAY = .1 # TODO: lower this?
-        MAX_CLRFREQ_AVERAGE = 1
+        MAX_CLRFREQ_AVERAGE = 10
         MAX_CLRFREQ_BANDWIDTH = 512
         MAX_CLRFREQ_USABLE_BANDWIDTH = 300
         CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
@@ -283,7 +283,8 @@ class RadarHardwareManager:
                     samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
                     samples = samples[0::2] + 1j * samples[1::2]
                     combined_samples += ant_rotation * samples
-        
+            fft_time_start = time.time() 
+
             # return fft of width usable_bandwidth, kHz resolution
             # TODO: fft recentering, etc
             c_fft = np.fft.fft(combined_samples)
@@ -291,6 +292,8 @@ class RadarHardwareManager:
             pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
             pwr2 += pc_fft
 
+            fft_time_end = time.time() 
+            cprint('fft time: {}'.format(fft_time_end - fft_time_start, 'yellow'))
             clrfreq_cmd.client_return()
             # todo: convert fft to power spectrum
 
@@ -318,8 +321,9 @@ class RadarHardwareManager:
         nbb_samples = ctrlprm['number_of_samples']
         
         cprint('sending GET_DATA command ', 'blue')
-        cmd = usrp_ready_data_command(self.usrpsocks, ctrlprm['channel'])
+        cmd = usrp_ready_data_command(self.usrpsocks)
         cmd.transmit()
+
 
         cprint('sending GET_DATA command sent, waiting on GET_DATA status', 'blue')
         # TODO: iseq += 1
@@ -331,38 +335,31 @@ class RadarHardwareManager:
 
         # check status of usrp drivers
         for usrpsock in self.usrpsocks:
-            rx_status = recv_dtype(usrpsock, np.int32)
+            ready_return = cmd.recv_metadata(usrpsock)
+            rx_status = ready_return['status']
+             
             cprint('GET_DATA rx status {}'.format(rx_status), 'blue')
             if rx_status != 1:
-                cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'yellow')
-                status = USRP_DRIVER_ERROR
+                cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'blue')
+                #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
 
-        print('USRP_SERVER GET_DATA: waiting for samples from USRP_DRIVERS, status: ' + str(status))
-        # grab samples
-        for usrpsock in self.usrpsocks:
-            # receive antennas controlled by usrp driver
-            nantennas = recv_dtype(usrpsock, np.uint16)
-            antennas = recv_dtype(usrpsock, np.uint16, nantennas)
-
-            if isinstance(antennas, (np.ndarray, np.generic)):
-                antennas = np.array([antennas])
-
-            for ant in antennas:
-                main_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples) # TODO: check data type!?
-                #back_samples[ant][:] = recv_dtype(usrpsock, np.float64, nbb_samples)
-
+        # TODO: move samples from shared memory
         print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(status))
-
-        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
+        #bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
 
         # calculate antenna-to-antenna phase shift for steering at a frequency
-        pshift = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)
-
+        #pshift = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)
+        
         # calculate a complex number representing the phase shift for each antenna
-        beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
-
+        #beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
         #beamform_back = np.ones(len(MAIN_ANTENNAS))
 
+        cmd.client_return()
+
+        channel.state = STATE_WAIT
+
+        cprint('get_data complete!', 'blue')
+        
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
             beamform_samples = np.ones(len(antennas))
 
@@ -377,21 +374,9 @@ class RadarHardwareManager:
                              np.imag(beamform_samples[ant][i]) * np.real(phasing_matrix[ant])
                 beamformed[i] = complex_ui32_pack(itemp, qtemp)
 
-        main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas)
-        back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
+        #main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas)
+        #back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
 
-        # receive status from get_data command 
-        cmd.client_return()
-
-        # transmit status to arby_server    
-        transmit_dtype(self.arbysock, np.int32(2)) # shared memory config flag - send data over socket
-        transmit_dtype(self.arbysock, np.int32(0)) # frame header offset (no header)
-        transmit_dtype(self.arbysock, np.int32(0)) # buffer number
-        transmit_dtype(self.arbysock, np.int32(ctrlprm['number_of_baseband_samples'])) # number of baseband samples
-
-        # send samples over socket for self.channel on main and back array
-        transmit_dtype(self.arbysock, main_beamformed) # TODO: send main data for channel
-        #transmit_dtype(self.arbysock, back_beamformed) # TODO: send back data for channel
 
     
     def exit(self):
@@ -480,6 +465,9 @@ class RadarChannelHandler:
         self.clrfreq_struct = clrfreqprm_struct(self.conn)
         self.rprm_struct = rprm_struct(self.conn)
         self.dataprm_struct = dataprm_struct(self.conn)
+
+        self.clrfreq_start = 0
+        self.clrfreq_stop = 0
 
         # TODO: initialize ctlrprm_struct with site infomation
         #self.ctrlprm_struct.set_data('rbeamwidth', 3)
@@ -576,6 +564,8 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, self.tfreq, np.int32)
         transmit_dtype(self.conn, self.noise, np.float32)
 
+        self.clrfreq_stop = time.time()
+        cprint('clr frequency search time: {}'.format(self.clrfreq_stop - self.clrfreq_start), 'yellow')
         return RMSG_SUCCESS
 
     def RequestClearFreqSearchHandler(self, rmsg):
@@ -586,7 +576,7 @@ class RadarChannelHandler:
         self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
         self.noise = 0
         self.state = STATE_CLR_FREQ 
-
+        self.clrfreq_start = time.time()
         return RMSG_SUCCESS
 
     def UnsetReadyFlagHandler(self, rmsg):

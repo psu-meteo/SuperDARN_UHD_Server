@@ -177,7 +177,7 @@ class cuda_get_data_command(driver_command):
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_exit_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_EXIT)
 
 
@@ -230,14 +230,17 @@ class usrp_trigger_pulse_command(driver_command):
 
 # command usrp drivers to ready rx sample data into shared memory
 class usrp_ready_data_command(driver_command):
-    def __init__(self, usrps, status = 0, antenna = 0, nsamples = 0, samples = None):
+    def __init__(self, usrps):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
+        
+    def recv_metadata(self, sock):
+        payload = {}
+        payload['status'] = recv_dtype(sock, np.int32)
+        payload['antenna'] = recv_dtype(sock, np.int32)
+        payload['nsamples'] = recv_dtype(sock, np.int32)
+        return payload
 
-        self.queue(status, np.int32, 'status')
-        self.queue(antenna, np.int32, 'antenna')
-        self.queue(nsamples, np.int32, 'nsamples')
-
-    def receive(self, sock, sock_samples = False):
+    def recv_samples(self, sock, sock_samples = False):
         super().receive(sock)
         
         if sock_samples:
