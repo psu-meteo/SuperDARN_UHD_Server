@@ -176,6 +176,10 @@ class cuda_get_data_command(driver_command):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
 
+    def populate_samplebuffer(cnum, main_samples, back_samples):
+        pass
+
+    
 class cuda_exit_command(driver_command):
     def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_EXIT)

@@ -46,6 +46,9 @@ class RadarHardwareManager:
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
         self.usrp_init() 
+        #self.rxfe_init()
+        #self.cuda_init()
+        # TODO: write DIO drivers..
 
     def run(self):
         def spawn_channel(conn):
@@ -127,6 +130,11 @@ class RadarHardwareManager:
 
                 if self.state == STATE_GET_DATA:
                     self.next_state = STATE_WAIT
+
+                    cmd = cuda_process_command(self.cudasocks)
+                    cmd.transmit()
+                    cmd.client_return()
+
                     for ch in self.channels:
                         self.get_data(ch)
 
@@ -168,23 +176,8 @@ class RadarHardwareManager:
             sys.exit(1)
 
         self.usrpsocks = usrp_driver_socks
-        '''
+    
     def rxfe_init(self):
-        pass
-    def cuda_init(self):
-        pass
-        time.sleep(.05)
-        # connect cuda_driver servers
-        try:
-                for c in cuda_drivers:
-                        cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        cudasock.connect((c, CUDADRIVER_PORT))
-                        cuda_driver_socks.append(cudasock)
-        except ConnectionRefusedError:
-                warnings.warn("cuda server connection failed")
-                sys.exit(1)
-
-
         amp0 = rf_settings[1] # amp1 in RXFESettings struct
         amp1 = rf_settings[2] # amp2 in RXFESettings struct
         att_p5dB = np.uint8((rf_settings[4] > 0))
@@ -193,12 +186,28 @@ class RadarHardwareManager:
         att_4dB = np.uint8((rf_settings[7] > 0))
         att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
         cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
+        cmd.transmit()
+        cmd.client_return()
 
-        '''
 
-        # so, open server and listen on port
-        # capture rmsg commands, return bogus data
-        # try running two control programs.. 
+    def cuda_init(self):
+        time.sleep(.05)
+        # connect cuda_driver servers
+        usrp_drivers = ['localhost']
+        cuda_driver_socks = []
+
+        try:
+            for c in cuda_drivers:
+                cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                cudasock.connect((c, CUDADRIVER_PORT))
+                cuda_driver_socks.append(cudasock)
+        except ConnectionRefusedError:
+            warnings.warn("cuda server connection failed")
+            sys.exit(1)
+
+        self.cudasocks = cuda_driver_socks
+
+
     def setup(self, chan):
         pass
 
@@ -311,6 +320,8 @@ class RadarHardwareManager:
         MAXANTENNAS_MAIN = 40
         RADAR_BEAMWIDTH = 3.24
         RADAR_NBEAMS = 20
+        
+
 
         status = True # TODO: what should this be..
 
@@ -343,8 +354,24 @@ class RadarHardwareManager:
                 cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'blue')
                 #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
 
+        cmd.client_return()
+        channel.state = STATE_WAIT
+
+        cprint('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS: ' + str(status), 'blue')
+
+        cmd = cuda_get_data_command(self.cudasocks)
+        cmd.transmit()
+    
+        # TODO: setp through all sockets
+        # recv metadata from cuda drivers about antenna numbers and whatnot
+        # fill up provided main and back baseband sample buffers
+        cmd.populate_samplebuffer(ch.cnum, main_samples, back_samples)
+        
+        cmd.client_return()
+
+
+
         # TODO: move samples from shared memory
-        print('USRP_SERVER GET_DATA: received samples from USRP_DRIVERS, applying beamforming: ' + str(status))
         #bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
 
         # calculate antenna-to-antenna phase shift for steering at a frequency
@@ -353,10 +380,6 @@ class RadarHardwareManager:
         # calculate a complex number representing the phase shift for each antenna
         #beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
         #beamform_back = np.ones(len(MAIN_ANTENNAS))
-
-        cmd.client_return()
-
-        channel.state = STATE_WAIT
 
         cprint('get_data complete!', 'blue')
         
@@ -382,6 +405,12 @@ class RadarHardwareManager:
     def exit(self):
         # clean up and exit
         self.arbysock.close()
+        cmd = usrp_exit_command(self.usrpsocks)
+        cmd.transmit()
+
+        cmd = cuda_exit_command(self.cudasocks)
+        cmd.transmit()
+
         for sock in self.usrpsocks:
             sock.close()
         for sock in self.cudasocks:
@@ -429,7 +458,7 @@ class RadarHardwareManager:
         # rfrate = np.int32(self.cuda_config['FSampTX'])
         # extract sampling info from cuda driver
         # print('rf rate parsed from ini: ' + str(rfrate))
-	   
+        
         pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
@@ -450,6 +479,13 @@ class RadarHardwareManager:
 
         for ch in self.channels:
             ch.state = STATE_WAIT
+
+            # load sequence to cuda driver
+            cmd = cuda_setup_command(self.cudasock, ch.generate_sequence())
+            # TODO: separate loading sequences from generating baseband samples..
+
+            cmd.transmit()
+            cmd.client_return()
 
 
 class RadarChannelHandler:
