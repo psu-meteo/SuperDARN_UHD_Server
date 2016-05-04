@@ -46,9 +46,8 @@ class RadarHardwareManager:
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
         self.usrp_init() 
-        #self.rxfe_init()
-        #self.cuda_init()
-        # TODO: write DIO drivers..
+        self.rxfe_init()
+        self.cuda_init()
 
     def run(self):
         def spawn_channel(conn):

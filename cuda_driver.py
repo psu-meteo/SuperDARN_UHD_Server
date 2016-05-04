@@ -51,6 +51,7 @@ sem_list = []
 
 swing = SWING0
 
+# TODO: write decorator for acquring/releasing semaphores
 
 # python3 or greater is needed for direct transfers between shm and gpu memory
 if sys.hexversion < 0x030300F0:
@@ -70,19 +71,23 @@ class cudamsg_handler(object):
     def process(self):
         raise NotImplementedError('The process method for this driver message is unimplemented')
 
-# register a new channel, then regenerate rf tx samples and store them in shared memory
+# allocate memory for cuda sample buffers
 class cuda_setup_handler(cudamsg_handler):
     def process(self):
-        # acquire rx/tx semaphores
-        # (don't drag the samples rug out from under an ongoing transmission)
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
-        # get picked sequence information dict from usrp_server
-        cmd = cuda_setup_command([self.sock])
-        cmd.receive(self.sock)
-        self.sequence = cmd.sequence
 
+        # release semaphores
+        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING1].release()
+    
+# take copy and process data from shared memory, send to usrp_server via socks 
+class cuda_generate_pulse_handler(cudamsg_handler):
+    def process(self):
+        semaphore_list[SIDEA][SWING0].acquire()
+        semaphore_list[SIDEA][SWING1].acquire()
+ 
         # extract some information from the picked dict, generate baseband samples
         self.beam = self.sequence.ctrlprm['tbeam']
         self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
@@ -91,11 +96,9 @@ class cuda_setup_handler(cudamsg_handler):
 
         # copy upconverted rf samples to shared memory from GPU memory to shared memory 
         self.gpu.txsamples_host_to_shm()
-                
-        # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
-    
+
     # generate baseband sample vectors from sequence information
     def generate_bbtx(self, shapefilter = None):
         # tpulse is the pulse time in seconds
@@ -159,6 +162,37 @@ class cuda_setup_handler(cudamsg_handler):
         self.bb_vec = bbtx 
 
 
+         
+# add a new channel 
+class cuda_add_channel_handler(cudamsg_handler):
+    def process(self):
+        semaphore_list[SIDEA][SWING0].acquire()
+        semaphore_list[SIDEA][SWING1].acquire()
+        
+        # get picked sequence information dict from usrp_server
+        cmd = cuda_setup_command([self.sock])
+        cmd.receive(self.sock)
+        self.sequence = cmd.sequence
+
+        # extract some information from the picked dict, generate baseband samples
+        self.beam = self.sequence.ctrlprm['tbeam']
+        self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
+        self.generate_bbtx(shapefilter = dsp_filters.gaussian_pulse)
+        self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
+
+        # copy upconverted rf samples to shared memory from GPU memory to shared memory 
+        self.gpu.txsamples_host_to_shm()
+                
+        # release semaphores
+        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING1].release()
+
+# remove a channel from the GPU
+class cuda_remove_channel_handler(cudamsg_handler):
+    def process(self):
+        pass
+
+
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
     def process(self):
@@ -190,6 +224,9 @@ cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
         CUDA_GET_DATA: cuda_get_data_handler, \
         CUDA_PROCESS: cuda_process_handler, \
+        CUDA_ADD_CHANNEL: cuda_add_channel_handler, \
+        CUDA_REMOVE_CHANNEL: cuda_remove_channel_handler, \
+        CUDA_GENERATE_PULSE: cuda_generate_pulse_handler, \
         CUDA_EXIT: cuda_exit_handler}
 
 
@@ -234,7 +271,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, maxfreqs = 8, maxants = 16, maxstreams = 2, maxchannels = 1, maxpulses = 16, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
+    def __init__(self, maxfreqs = 4, maxants = 16, maxstreams = 2, maxchannels = 1, maxpulses = 16, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
         self.max_streams = int(maxstreams)
         self.max_freqs = int(maxfreqs)
         self.nchans = int(maxchannels)
@@ -244,8 +281,10 @@ class ProcessingGPU(object):
         self.rfifrate = int(rfifrate)
         self.fsamptx = int(fsamptx)
         self.fsamprx = int(fsamprx)
+
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
+        self.banseband_samples = [None for i in range(self.max_freqs)] # table to store baseband samples of pulse for each frequency
 
         # host side copy of channel transmit frequency array
         self.mixer_freqs = np.float64(np.zeros(self.max_freqs))
@@ -266,8 +305,8 @@ class ProcessingGPU(object):
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
                 
-        self.streams = [cuda.Stream() for i in range(self.max_streams)]
-    
+        self.streams = [cuda.Stream() for i in range(self.max_streams)
+
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
     def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
@@ -275,7 +314,7 @@ class ProcessingGPU(object):
         self.phase_offsets[array_idx] = phase_offset
     
     # generate rf samples from sequence
-    def sequences_setup(self, sequence, fc, bbtx, antennas):
+    def add_channel(self, sequence, fc, bbtx, antennas):
         channel = sequence.ctrlprm['channel']
         bbrate = sequence.ctrlprm['baseband_samplerate']
         self.antennas = np.int16(antennas)
@@ -333,6 +372,7 @@ class ProcessingGPU(object):
 
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
+        # TODO: benchmark this, see if I should move this to init function..
         self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_tx), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         
@@ -373,6 +413,7 @@ class ProcessingGPU(object):
         cuda.Context.synchronize()
         
         # save plot of transmit pulse for debugging...
+        '''
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
@@ -389,6 +430,7 @@ class ProcessingGPU(object):
         plt.savefig('pulse.pdf')
         print('finished pulse generation, breakpoint..')
         pdb.set_trace()
+        '''
 
     # calculates the threads in a block from a block size tuple
     def _blocksize(self, block):

@@ -22,6 +22,10 @@ CUDA_PROCESS = ord('p')
 CUDA_GET_DATA = ord('g')
 CUDA_EXIT = ord('e')
 
+CUDA_ADD_CHANNEL = ord('q')
+CUDA_REMOVE_CHANNEL = ord('r')
+CUDA_GENERATE_PULSE = ord('p')
+
 NO_COMMAND = ord('n')
 
 ARBYSERVER_PORT = int(55421)
@@ -176,9 +180,6 @@ class cuda_get_data_command(driver_command):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
 
-    def populate_samplebuffer(cnum, main_samples, back_samples):
-        pass
-
     
 class cuda_exit_command(driver_command):
     def __init__(self, cudas):
@@ -204,7 +205,44 @@ class cuda_setup_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-       
+
+class cuda_add_sequence_command(driver_command):
+    def __init__(self, cudas, sequence):
+        driver_command.__init__(self, cudas, CUDA_ADD_SEQUENCE)
+        self.queue(swing, np.uint32, 'swing')
+ 
+    def receive(self, sock):
+        super().receive(sock)
+        self.sequence = pickle_recv(sock)
+
+    def transmit(self):
+        super().transmit()
+        for sock in self.clients:
+            pickle_send(sock, self.sequence)
+
+
+class cuda_remove_sequence_command(driver_command):
+    def __init__(self, cudas):
+        driver_command.__init__(self, cudas, CUDA_REMOVE_SEQUENCE)
+        self.queue(swing, np.uint32, 'swing')
+
+    def receive(self, sock):
+        super().receive(sock)
+        self.sequence = pickle_recv(sock)
+
+    def transmit(self):
+        super().transmit()
+        for sock in self.clients:
+            pickle_send(sock, self.sequence)
+
+
+
+class cuda_generate_pulse_command(driver_command):
+    def __init__(self, cudas):
+        driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
+        self.queue(swing, np.uint32, 'swing')
+
+
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
     def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector):
