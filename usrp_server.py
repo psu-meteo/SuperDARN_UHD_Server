@@ -475,16 +475,26 @@ class RadarHardwareManager:
         cmd = usrp_setup_command(self.usrpsocks, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
+    
+        cmd = cuda_pulse_init_command(self.cudasock)
+        cmd.transmit()
+        cmd.client_return()
 
         for ch in self.channels:
             ch.state = STATE_WAIT
 
             # load sequence to cuda driver
-            cmd = cuda_setup_command(self.cudasock, ch.generate_sequence())
+            cmd = cuda_add_channel_command(self.cudasock, ch.getSequence())
             # TODO: separate loading sequences from generating baseband samples..
 
             cmd.transmit()
             cmd.client_return()
+ 
+        cmd = cuda_generate_pulse_command(self.cudasock)
+        cmd.transmit()
+        cmd.client_return()
+
+
 
 
 class RadarChannelHandler:
@@ -566,6 +576,9 @@ class RadarChannelHandler:
         pdb.set_trace()
         # TODO write this..
    
+
+    # busy wait until state enters desired state
+    # useful for waiting for 
     def _waitForState(self, state):
         wait_start = time.time()
 
@@ -576,6 +589,10 @@ class RadarChannelHandler:
                 print('CHANNEL STATE TIMEOUT')
                 pdb.set_trace()
                 break
+    
+    # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
+    def getSequence(self):
+        return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.ctrlprm_struct.payload)
 
     def DefaultHandler(self, rmsg):
         print("Unexpected command: {}".format(chr(rmsg.payload['type'])))

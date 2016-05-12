@@ -25,6 +25,7 @@ CUDA_EXIT = ord('e')
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('p')
+CUDA_PULSE_INIT = ord('i')
 
 NO_COMMAND = ord('n')
 
@@ -185,6 +186,10 @@ class cuda_exit_command(driver_command):
     def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_EXIT)
 
+class cuda_pulse_init_command(driver_command):
+    def __init__(self, cudas, swing = 0):
+        driver_command.__init__(self, cudas, CUDA_PULSE_INIT)
+        self.queue(swing, np.uint32, 'swing')
 
 class cuda_process_command(driver_command):
     def __init__(self, cudas, swing = 0):
@@ -205,8 +210,8 @@ class cuda_setup_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-
-class cuda_add_sequence_command(driver_command):
+# add a pulse sequence/channel 
+class cuda_add_channel_command(driver_command):
     def __init__(self, cudas, sequence):
         driver_command.__init__(self, cudas, CUDA_ADD_SEQUENCE)
         self.queue(swing, np.uint32, 'swing')
@@ -220,11 +225,12 @@ class cuda_add_sequence_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-
-class cuda_remove_sequence_command(driver_command):
+# clear all channels from gpu..
+class cuda_remove_channel_command(driver_command):
     def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_REMOVE_SEQUENCE)
         self.queue(swing, np.uint32, 'swing')
+        pdb.set_trace()
 
     def receive(self, sock):
         super().receive(sock)
@@ -235,8 +241,7 @@ class cuda_remove_sequence_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-
-
+# generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
     def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)

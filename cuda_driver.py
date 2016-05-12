@@ -87,11 +87,10 @@ class cuda_generate_pulse_handler(cudamsg_handler):
     def process(self):
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
- 
+
         # extract some information from the picked dict, generate baseband samples
-        self.beam = self.sequence.ctrlprm['tbeam']
-        self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
-        self.generate_bbtx(shapefilter = dsp_filters.gaussian_pulse)
+        for channel in self.gpu.channels:
+            self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
         self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
 
         # copy upconverted rf samples to shared memory from GPU memory to shared memory 
@@ -100,14 +99,17 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING1].release()
 
     # generate baseband sample vectors from sequence information
-    def generate_bbtx(self, shapefilter = None):
+    def generate_bbtx(self, channel, shapefilter = None):
         # tpulse is the pulse time in seconds
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
+        chnum = channel.ctlrprm['cnum']
+        ctrlprm = self.sequences[chnum].ctrlprm
 
-        bbrate = self.sequence.ctrlprm['baseband_samplerate'] 
-        trise = self.sequence.ctrlprm['trise']
+        bbrate = ctrlprm['baseband_samplerate'] 
+        trise = ctrlprm['trise']
+
         tpulse = self.sequence.pulse_lens[0]
         tfreq = self.sequence.ctrlprm['tfreq'] * 1000
         tbuffer = float(self.hardware_limits['min_tr_to_pulse']) / 1e6 # convert microseconds tbuffer in config file to seconds
@@ -144,6 +146,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, len(pulsesamps))))
+
         for ant in self.antennas:
             for pulse in range(npulses):
                 # compute pulse compression 
@@ -159,9 +162,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # update baseband pulse sample array for antenna
                 bbtx[ant][pulse] = psamp
 
-        self.bb_vec = bbtx 
-
-
+        return bbtx 
          
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
@@ -170,27 +171,36 @@ class cuda_add_channel_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING1].acquire()
         
         # get picked sequence information dict from usrp_server
-        cmd = cuda_setup_command([self.sock])
+        cmd = cuda_add_channel_command([self.sock])
         cmd.receive(self.sock)
-        self.sequence = cmd.sequence
+        
+        sequence = cmd.sequence
+        ctlrprm = cmd.sequence.ctrlprm
 
-        # extract some information from the picked dict, generate baseband samples
-        self.beam = self.sequence.ctrlprm['tbeam']
-        self.fc = self.sequence.ctrlprm['tfreq'] * 1e3
-        self.generate_bbtx(shapefilter = dsp_filters.gaussian_pulse)
-        self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
-
-        # copy upconverted rf samples to shared memory from GPU memory to shared memory 
-        self.gpu.txsamples_host_to_shm()
+        self.gpu.sequences[ctrlprm['channel']] = sequence
                 
         # release semaphores
+        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING1].release()
+
+# prepare for a refresh of sequences 
+class cuda_pulse_init_handler(cudamsg_handler):
+    def process(self):
+        semaphore_list[SIDEA][SWING0].acquire()
+        semaphore_list[SIDEA][SWING1].acquire()
+
+        self.gpu.sequences = [None for chan in self.gpu.nchans]
+
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
 
 # remove a channel from the GPU
 class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
+        # This is not implemented..
+        pdb.set_trace()
         pass
+
 
 
 # take copy and process data from shared memory, send to usrp_server via socks 
@@ -227,6 +237,7 @@ cudamsg_handlers = {\
         CUDA_ADD_CHANNEL: cuda_add_channel_handler, \
         CUDA_REMOVE_CHANNEL: cuda_remove_channel_handler, \
         CUDA_GENERATE_PULSE: cuda_generate_pulse_handler, \
+        CUDA_INIT_PULSE: cuda_init_pulse_handler, \
         CUDA_EXIT: cuda_exit_handler}
 
 
@@ -271,25 +282,33 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, maxfreqs = 4, maxants = 16, maxstreams = 2, maxchannels = 1, maxpulses = 16, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
-        self.max_streams = int(maxstreams)
-        self.max_freqs = int(maxfreqs)
+    def __init__(self, maxants = 16, maxchannels = 1, maxpulses = 16, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
+        # maximum supported channels, f
         self.nchans = int(maxchannels)
+        self.nants = int(maxants)
+    
+        # number of taps for baseband and if filters
         self.ntaps_rfif = int(ntapsrx_rfif)
         self.ntaps_ifbb = int(ntapsrx_ifbb)
-        self.nants = int(maxants)
+
+        # rf to if downsampling ratio 
         self.rfifrate = int(rfifrate)
+
+        # USRP rx/tx sampling rates
         self.fsamptx = int(fsamptx)
         self.fsamprx = int(fsamprx)
-
+    
+        # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
-        self.banseband_samples = [None for i in range(self.max_freqs)] # table to store baseband samples of pulse for each frequency
+
+        self.baseband_samples = [None for i in range(self.max_freqs)] # table to store baseband samples of pulse for each frequency
+        self.sequences = [None for i in range(self.max_freqs)] # table to store sequence infomation
 
         # host side copy of channel transmit frequency array
-        self.mixer_freqs = np.float64(np.zeros(self.max_freqs))
+        self.mixer_freqs = np.float64(np.zeros(self.nchans))
         # host side copy of per-channel, per-antenna array with calibrated cable phase offset
-        self.phase_delays = np.float32(np.zeros((self.max_freqs, self.nants)))
+        self.phase_delays = np.float32(np.zeros((self.nchans, self.nants)))
         # dictionaries to map usrp array indexes and sequence channels to indexes 
         self.channel_to_idx = {}
 
@@ -314,16 +333,9 @@ class ProcessingGPU(object):
         self.phase_offsets[array_idx] = phase_offset
     
     # generate rf samples from sequence
-    def add_channel(self, sequence, fc, bbtx, antennas):
-        channel = sequence.ctrlprm['channel']
+    def synth_channels(self, fc, bbtx, antennas):
         bbrate = sequence.ctrlprm['baseband_samplerate']
         self.antennas = np.int16(antennas)
-
-        if not channel in self.channel_to_idx:
-            self.channel_to_idx[channel] = len(self.channel_to_idx)
-            # TODO: how are channels remove from mapping?
-    
-        cidx = self.channel_to_idx[channel] 
 
         # calculate rx sample decimation rates
         nbbsamps_rx = int(sequence.ctrlprm['number_of_baseband_samples']) # number of recv samples
@@ -369,7 +381,6 @@ class ProcessingGPU(object):
                     bb_vec_interleaved[0::2] = np.real(bbtx[ant][pulse][:])
                     bb_vec_interleaved[1::2] = np.imag(bbtx[ant][pulse][:])
                     self.tx_bb_indata[ant][chan][pulse][:] = bb_vec_interleaved[:]
-
 
         # allocate page-locked memory on host for rf samples to decrease transfer time
         # TODO: benchmark this, see if I should move this to init function..
