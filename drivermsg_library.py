@@ -212,22 +212,26 @@ class cuda_setup_command(driver_command):
 
 # add a pulse sequence/channel 
 class cuda_add_channel_command(driver_command):
-    def __init__(self, cudas, sequence):
-        driver_command.__init__(self, cudas, CUDA_ADD_SEQUENCE)
+    def __init__(self, cudas, sequence = None, swing = 0):
+        driver_command.__init__(self, cudas, CUDA_ADD_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
+        self.sequence = sequence
  
     def receive(self, sock):
         super().receive(sock)
         self.sequence = pickle_recv(sock)
 
     def transmit(self):
+        if self.sequence == None:
+            print('cannot send undefined sequence to channel')
+            pdb.set_trace()
         super().transmit()
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
 # clear all channels from gpu..
 class cuda_remove_channel_command(driver_command):
-    def __init__(self, cudas):
+    def __init__(self, cudas, swing = 0):
         driver_command.__init__(self, cudas, CUDA_REMOVE_SEQUENCE)
         self.queue(swing, np.uint32, 'swing')
         pdb.set_trace()
@@ -337,7 +341,7 @@ class sequence(object):
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
             raise ValueError('rfreq != tfreq, this behavior is not yet supported')
         
-        if self.ctrlprm['number_of_baseband_samples'] <= 0:
+        if self.ctrlprm['number_of_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')
 
         if self.npulses == 0:

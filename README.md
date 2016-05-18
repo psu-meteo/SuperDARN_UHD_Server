@@ -48,3 +48,13 @@ Run
 # STATUS
 - written driver accept requests from site library, 
 - working on hooking in into usrp driver
+
+
+
+## Starting:
+- run `./init_network.sh`
+- run `python run_usrp.py`
+- run `python cuda_driver.py`
+- run `python usrp_server.py`
+- run `uafscan --stid tst --debug`
+

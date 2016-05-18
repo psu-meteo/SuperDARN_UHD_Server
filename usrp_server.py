@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # todo, write mock arbyserver that can handle these commands
 # TODO: write mock arby server that can feed multiple normalscans with false data..
 
@@ -46,7 +47,7 @@ class RadarHardwareManager:
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
         self.usrp_init() 
-        self.rxfe_init()
+        #self.rxfe_init()
         self.cuda_init()
 
     def run(self):
@@ -192,7 +193,7 @@ class RadarHardwareManager:
     def cuda_init(self):
         time.sleep(.05)
         # connect cuda_driver servers
-        usrp_drivers = ['localhost']
+        cuda_drivers = ['localhost']
         cuda_driver_socks = []
 
         try:
@@ -447,6 +448,8 @@ class RadarHardwareManager:
         cprint('trigger complete', 'yellow')
     
     # TODO: Merge channel infomation here!
+    # TODO: pretrigger cuda client return fails
+    # key error: 0?
     def pretrigger(self):
         cprint('running pretrigger', 'blue')
         
@@ -475,26 +478,27 @@ class RadarHardwareManager:
         cmd = usrp_setup_command(self.usrpsocks, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
-    
-        cmd = cuda_pulse_init_command(self.cudasock)
+        cprint('running cuda_pulse_init command', 'blue') 
+
+        cmd = cuda_pulse_init_command(self.cudasocks)
         cmd.transmit()
+        cprint('waiting for cuda driver return', 'blue') 
         cmd.client_return()
+        cprint('cuda return received', 'blue') 
 
         for ch in self.channels:
             ch.state = STATE_WAIT
 
             # load sequence to cuda driver
-            cmd = cuda_add_channel_command(self.cudasock, ch.getSequence())
+            cmd = cuda_add_channel_command(self.cudasocks, sequence = ch.getSequence())
             # TODO: separate loading sequences from generating baseband samples..
 
             cmd.transmit()
             cmd.client_return()
  
-        cmd = cuda_generate_pulse_command(self.cudasock)
+        cmd = cuda_generate_pulse_command(self.cudasocks)
         cmd.transmit()
         cmd.client_return()
-
-
 
 
 class RadarChannelHandler:
@@ -876,5 +880,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
 

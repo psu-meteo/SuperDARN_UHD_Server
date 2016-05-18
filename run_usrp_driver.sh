@@ -1,2 +1,4 @@
 #!/bin/bash
-./usrp_driver --antenna=1 --host=usrp1 --intclk
+./run_usrp.py
+echo "press enter to continue: "
+read

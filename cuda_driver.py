@@ -60,13 +60,17 @@ if sys.hexversion < 0x030300F0:
 
 
 class cudamsg_handler(object):
-    def __init__(self, serversock, gpu, antennas, array_info, hardware_limits):
+    def __init__(self, serversock, command, gpu, antennas, array_info, hardware_limits):
         self.sock = serversock
         self.antennas = np.uint16(antennas)
+        self.command = command
         self.status = 0
         self.gpu = gpu
         self.array_info = array_info
         self.hardware_limits = hardware_limits
+
+    def respond(self):
+        transmit_dtype(self.sock, self.command, np.uint8)
 
     def process(self):
         raise NotImplementedError('The process method for this driver message is unimplemented')
@@ -74,6 +78,11 @@ class cudamsg_handler(object):
 # allocate memory for cuda sample buffers
 class cuda_setup_handler(cudamsg_handler):
     def process(self):
+        cmd = cuda_setup_command([self.sock])
+        cmd.receive(self.sock)
+
+
+        print('entering cuda_setup_handler (currently blank!)')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
@@ -85,6 +94,11 @@ class cuda_setup_handler(cudamsg_handler):
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_generate_pulse_handler(cudamsg_handler):
     def process(self):
+        cmd = cuda_generate_pulse_command([self.sock])
+        cmd.receive(self.sock)
+
+
+        print('entering generate_pulse_handler')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
@@ -100,6 +114,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
     # generate baseband sample vectors from sequence information
     def generate_bbtx(self, channel, shapefilter = None):
+        print('entering generate_bbtx')
         # tpulse is the pulse time in seconds
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
@@ -167,6 +182,11 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
     def process(self):
+        print('entering cuda_add_channel_handler')
+        cmd = cuda_add_channel_command([self.sock])
+        cmd.receive(self.sock)
+
+
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
@@ -186,10 +206,13 @@ class cuda_add_channel_handler(cudamsg_handler):
 # prepare for a refresh of sequences 
 class cuda_pulse_init_handler(cudamsg_handler):
     def process(self):
+        cmd = cuda_pulse_init_command([self.sock])
+        cmd.receive(self.sock)
+
+        print('entering cuda_pulse_init_handler')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
-
-        self.gpu.sequences = [None for chan in self.gpu.nchans]
+        self.gpu.sequences = [None for chan in range(self.gpu.nchans)]
 
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
@@ -197,6 +220,8 @@ class cuda_pulse_init_handler(cudamsg_handler):
 # remove a channel from the GPU
 class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
+        cmd = cuda_remove_channel_command([self.sock])
+        cmd.receive(self.sock)
         # This is not implemented..
         pdb.set_trace()
         pass
@@ -217,7 +242,10 @@ class cuda_get_data_handler(cudamsg_handler):
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
     def process(self):
-       clean_exit() 
+        cmd = cuda_exit_command([self.sock])
+        cmd.receive(self.sock)
+
+        clean_exit() 
 
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
@@ -237,7 +265,7 @@ cudamsg_handlers = {\
         CUDA_ADD_CHANNEL: cuda_add_channel_handler, \
         CUDA_REMOVE_CHANNEL: cuda_remove_channel_handler, \
         CUDA_GENERATE_PULSE: cuda_generate_pulse_handler, \
-        CUDA_INIT_PULSE: cuda_init_pulse_handler, \
+        CUDA_PULSE_INIT : cuda_pulse_init_handler, \
         CUDA_EXIT: cuda_exit_handler}
 
 
@@ -297,13 +325,13 @@ class ProcessingGPU(object):
         # USRP rx/tx sampling rates
         self.fsamptx = int(fsamptx)
         self.fsamprx = int(fsamprx)
-    
+         
         # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
 
-        self.baseband_samples = [None for i in range(self.max_freqs)] # table to store baseband samples of pulse for each frequency
-        self.sequences = [None for i in range(self.max_freqs)] # table to store sequence infomation
+        self.baseband_samples = [None for i in range(self.nchans)] # table to store baseband samples of pulse for each frequency
+        self.sequences = [None for i in range(self.nchans)] # table to store sequence infomation
 
         # host side copy of channel transmit frequency array
         self.mixer_freqs = np.float64(np.zeros(self.nchans))
@@ -324,7 +352,7 @@ class ProcessingGPU(object):
             self.cu_txfreq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
                 
-        self.streams = [cuda.Stream() for i in range(self.max_streams)
+        self.streams = [cuda.Stream() for i in range(self.nchans)]
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
@@ -338,7 +366,7 @@ class ProcessingGPU(object):
         self.antennas = np.int16(antennas)
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(sequence.ctrlprm['number_of_baseband_samples']) # number of recv samples
+        nbbsamps_rx = int(sequence.ctrlprm['number_of__samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
         # compute decimation rate for RF to IF, this is fixed..
@@ -549,7 +577,7 @@ def main():
     hardware_limits = arrayconfig['hardware_limits']
 
     # initalize cuda stuff
-    gpu = ProcessingGPU(**dict(cuda_settings))
+    gpu = ProcessingGPU(**cuda_settings)
     for usrp in usrpconfig.sections():
         gpu.addUSRP(**dict(usrpconfig[usrp]))
     
@@ -586,8 +614,9 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
-        handler = cudamsg_handlers[cmd](server_conn, gpu, antennas, array_info, hardware_limits)
+        handler = cudamsg_handlers[cmd](server_conn, cmd, gpu, antennas, array_info, hardware_limits)
         handler.process()
+        handler.respond()
     
 
 if __name__ == '__main__':
