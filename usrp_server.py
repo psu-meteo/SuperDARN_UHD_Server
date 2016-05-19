@@ -493,12 +493,19 @@ class RadarHardwareManager:
             cmd = cuda_add_channel_command(self.cudasocks, sequence = ch.getSequence())
             # TODO: separate loading sequences from generating baseband samples..
 
+            cprint('transmitting cuda channel handler', 'blue') 
             cmd.transmit()
+
+            cprint('waintg for cuda channel handler return', 'blue') 
             cmd.client_return()
  
+        cprint('transmitting generate pulse command', 'blue') 
         cmd = cuda_generate_pulse_command(self.cudasocks)
         cmd.transmit()
+
         cmd.client_return()
+
+        cprint('pulse generated, end of pretrigger', 'blue') 
 
 
 class RadarChannelHandler:
@@ -689,7 +696,7 @@ class RadarChannelHandler:
         R_BIT = np.uint8(0x02) # tr gate, use for tx pulse times
         X_BIT = np.uint8(0x04) # transmit path, use for bb 
         A_BIT = np.uint8(0x08) # enable attenuator 
-        P_BIT = np.uint8(0x10) # phase code
+        P_BIT = np.uint8(0x10) # phase code (BPSK)
 
         # create masks
         samples = seq_buf & S_BIT
@@ -718,6 +725,7 @@ class RadarChannelHandler:
         npulses = len(rf_pulse_edge_idx)
 
         # extract per-pulse phase coding and transmit pulse masks
+        # indexes are in microseconds from start of pulse
         phase_masks = []
         pulse_masks = []
         pulse_lens = []
@@ -734,7 +742,7 @@ class RadarChannelHandler:
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
-        #self.ready = True # TODO: what is ready flag for?
+        # self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
 
         if npulses == 0:

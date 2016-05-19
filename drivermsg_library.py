@@ -247,7 +247,7 @@ class cuda_remove_channel_command(driver_command):
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
-    def __init__(self, cudas):
+    def __init__(self, cudas, swing = 0):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
         self.queue(swing, np.uint32, 'swing')
 

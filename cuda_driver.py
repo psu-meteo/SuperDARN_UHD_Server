@@ -103,10 +103,15 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING1].acquire()
 
         # extract some information from the picked dict, generate baseband samples
-        for channel in self.gpu.channels:
-            self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
-        self.gpu.sequences_setup(self.sequence, self.fc, self.bb_vec, self.antennas)
+        bbtx = []
+        for channel in self.gpu.sequences:
+            channel.append(None)
+            if channel != None:
+                bbtx[channel] self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
+        
+        pdb.set_trace()
 
+        self.gpu.synth_channels(self, fc, bbtx, antennas)
         # copy upconverted rf samples to shared memory from GPU memory to shared memory 
         self.gpu.txsamples_host_to_shm()
         semaphore_list[SIDEA][SWING0].release()
@@ -119,36 +124,42 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
-        chnum = channel.ctlrprm['cnum']
-        ctrlprm = self.sequences[chnum].ctrlprm
+        chnum = channel.ctrlprm['channel']
 
-        bbrate = ctrlprm['baseband_samplerate'] 
-        trise = ctrlprm['trise']
+        ctrlprm = channel.ctrlprm
 
-        tpulse = self.sequence.pulse_lens[0]
-        tfreq = self.sequence.ctrlprm['tfreq'] * 1000
+
+        tpulse = channel.pulse_lens[0] / 1e6 # read in array of pulse lengths in seconds 
+        tfreq = ctrlprm['tfreq'] * 1000 # read in tfreq, convert from kHz to Hz
+    
         tbuffer = float(self.hardware_limits['min_tr_to_pulse']) / 1e6 # convert microseconds tbuffer in config file to seconds
+        bbrate = 50 / tbuffer # so, uh.. 1 microsecond baseband rate? (1 msps..)
+        # TODO: resolve conflict between pre-pulse buffer time and baseband sampling rate
+        # I'll need to resample transmit pulse by (1/tbuffer) / bbrate?
+        # ctrlprm['baseband_samplerate'] is expected baseband sampling rate in samples/second 
 
+        trise = ctrlprm['trise'] / 1e9 # read in rise time in seconds (TODO: fix units..)
         assert tbuffer >= int(self.hardware_limits['min_tr_to_pulse']) / 1e6, 'time between TR gate and RF pulse too short for hardware'
         assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length is too short for hardware'
         assert tpulse < int(self.hardware_limits['max_tpulse']) / 1e6, 'pulse length is too long for hardware'
         assert tfreq >= int(self.hardware_limits['minimum_tfreq']), 'transmit frequency too low for hardware'
         assert tfreq <= int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
-        assert sum(self.sequence.pulse_lens) / (self.sequence.pulse_offsets_vector[-1] + tpulse) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
+
+        assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
-        npulses = len(self.sequence.pulse_lens)
+        npulses = len(channel.pulse_lens)
         nantennas = len(self.antennas)
         
         # tbuffer is the time between tr gate and transmit pulse 
         nsamples = np.round((tpulse + 2 * tbuffer) * bbrate)
-        padding = np.zeros(tbuffer * bbrate)
-        pulse = np.ones(tpulse * bbrate)
+        padding = np.zeros(np.round(tbuffer * bbrate))
+        pulse = np.ones(np.round(tpulse * bbrate))
         pulsesamps = np.complex64(np.concatenate([padding, pulse, padding]))
 
         beam_sep = float(self.array_info['beam_sep']) # degrees
         nbeams = int(self.array_info['nbeams'])
         x_spacing = float(self.array_info['x_spacing']) # meters
-        beamnum = self.sequence.ctrlprm['tbeam']
+        beamnum = ctrlprm['tbeam']
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
@@ -165,8 +176,11 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         for ant in self.antennas:
             for pulse in range(npulses):
                 # compute pulse compression 
-                psamp = pulsesamps * self.sequence.phase_masks[ant][pulse]
-                 
+                # apply phase shifting to pulse using phase_mask
+
+                psamp = pulsesamps
+                psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[ant])
+                # TODO: support non-1us resolution phase masks
                 # apply filtering function
                 if shapefilter != None:
                     psamp = shapefilter(psamp, trise, bbrate)
@@ -177,31 +191,30 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # update baseband pulse sample array for antenna
                 bbtx[ant][pulse] = psamp
 
+        pdb.set_trace()
         return bbtx 
          
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
     def process(self):
-        print('entering cuda_add_channel_handler')
-        cmd = cuda_add_channel_command([self.sock])
-        cmd.receive(self.sock)
-
-
+        print('entering cuda_add_channel_handler, waiting for swing semaphores')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
         # get picked sequence information dict from usrp_server
         cmd = cuda_add_channel_command([self.sock])
         cmd.receive(self.sock)
-        
-        sequence = cmd.sequence
-        ctlrprm = cmd.sequence.ctrlprm
 
+        print('received command')
+        sequence = cmd.sequence
+        ctrlprm = sequence.ctrlprm
         self.gpu.sequences[ctrlprm['channel']] = sequence
                 
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
+
+        print('semaphores released in cudda add channel handler')
 
 # prepare for a refresh of sequences 
 class cuda_pulse_init_handler(cudamsg_handler):
@@ -330,7 +343,7 @@ class ProcessingGPU(object):
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
 
-        self.baseband_samples = [None for i in range(self.nchans)] # table to store baseband samples of pulse for each frequency
+        self.baseband_samples = [[None for i in range(self.nchans)] for p in maxpulses] # table to store baseband samples of pulse for each frequency
         self.sequences = [None for i in range(self.nchans)] # table to store sequence infomation
 
         # host side copy of channel transmit frequency array
