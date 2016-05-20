@@ -102,18 +102,27 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
-        # extract some information from the picked dict, generate baseband samples
-        bbtx = []
-        for channel in self.gpu.sequences:
-            channel.append(None)
-            if channel != None:
-                bbtx[channel] self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
+        # create empty baseband transmit waveform vector
+        npulses = self.gpu.npulses
+        nantennas = self.gpu.nants
+        nchannels = self.gpu.nchans
         
-        pdb.set_trace()
+        bbtx = [None for c in range(nchannels)] 
+        bbrates_tx = [None for c in range(nchannels)] 
+        # populate waveform table with channels 
+        for channel in self.gpu.sequences:
+            if channel != None:
+                cnum = channel.ctrlprm['channel']
+                bbtx[cnum], bbrates_tx[cnum] = self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
 
-        self.gpu.synth_channels(self, fc, bbtx, antennas)
-        # copy upconverted rf samples to shared memory from GPU memory to shared memory 
+        assert len(np.unique(bbrates_tx)) == 1 + (None in bbrates_tx), "all baseband sampling rates must be the same?.." # TODO: investigate this case :(
+
+        # synthesize rf waveform
+        self.gpu.synth_channels(bbtx, bbrates_tx, self.antennas)
+
+        # copy rf waveform to shared memory from GPU memory 
         self.gpu.txsamples_host_to_shm()
+
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
 
@@ -191,8 +200,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # update baseband pulse sample array for antenna
                 bbtx[ant][pulse] = psamp
 
-        pdb.set_trace()
-        return bbtx 
+        return bbtx, bbrate
          
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
@@ -327,7 +335,8 @@ class ProcessingGPU(object):
         # maximum supported channels, f
         self.nchans = int(maxchannels)
         self.nants = int(maxants)
-    
+        self.npulses = int(maxpulses)
+
         # number of taps for baseband and if filters
         self.ntaps_rfif = int(ntapsrx_rfif)
         self.ntaps_ifbb = int(ntapsrx_ifbb)
@@ -373,15 +382,18 @@ class ProcessingGPU(object):
         self.tdelays[array_idx] = tdelay
         self.phase_offsets[array_idx] = phase_offset
     
-    # generate rf samples from sequence
-    def synth_channels(self, fc, bbtx, antennas):
-        bbrate = sequence.ctrlprm['baseband_samplerate']
+    # generate tx rf samples from sequence
+    # prepare rx filtering for sequences
+    def synth_channels(self, bbtx, bbrates_tx, antennas):
+        pdb.set_trace()
         self.antennas = np.int16(antennas)
+        bbrate_rx = sequence.ctrlprm['baseband_samplerate']
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(sequence.ctrlprm['number_of__samples']) # number of recv samples
-        rx_time = nbbsamps_rx / bbrate
+        nbbsamps_rx = int(sequence.ctrlprm['number_of_samples']) # number of recv samples
+        rx_time = nbbsamps_rx / bbrate_rx
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
+
         # compute decimation rate for RF to IF, this is fixed..
         # so, current worst case is 16 antennas with 2 channels, 10 MSPS sampling rate
         # block size of 1024
@@ -396,12 +408,12 @@ class ProcessingGPU(object):
         nbbsamps_tx_pulse = int(bbtx.shape[2]) # number of baseband samples for all pulses 
 
         nbbsamps_tx = bbtx.size
-        nrfsamps_tx = 2 * int(np.ceil(self.fsamptx * nbbsamps_tx / bbrate)) # number of rf samples for all pulses (2x for I/Q)
+        nrfsamps_tx = 2 * int(np.ceil(self.fsamptx * nbbsamps_tx / bbrates_tx[0])) # number of rf samples for all pulses (2x for I/Q)
         
         tx_upsample_rate = int(nrfsamps_tx / nbbsamps_tx) / 2.
 
         self.npulses = len(sequence.pulse_lens)
-
+        pdb.set_trace()
         print('nrf_samps: ' + str(nrfsamps_tx))
         print('nants: ' + str(self.nants))
         # allocate memory on cpu, compile functions
