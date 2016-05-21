@@ -217,7 +217,13 @@ class cuda_add_channel_handler(cudamsg_handler):
         sequence = cmd.sequence
         ctrlprm = sequence.ctrlprm
         self.gpu.sequences[ctrlprm['channel']] = sequence
-                
+
+        fc = ctrlprm['tfreq'] * 1000
+        cnum = ctrlprm['channel']
+
+        self.gpu._set_mixerfreq(cnum)
+        self.gpu._set_phasedelay(cnum)
+       
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
@@ -331,7 +337,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, maxants = 16, maxchannels = 1, maxpulses = 16, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
+    def __init__(self, maxants = 4, maxchannels = 1, maxpulses = 8, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
         # maximum supported channels, f
         self.nchans = int(maxchannels)
         self.nants = int(maxants)
@@ -356,9 +362,10 @@ class ProcessingGPU(object):
         self.sequences = [None for i in range(self.nchans)] # table to store sequence infomation
 
         # host side copy of channel transmit frequency array
-        self.mixer_freqs = np.float64(np.zeros(self.nchans))
+        self.mixer_freqs = np.zeros(self.nchans, dtype=np.float64)
+
         # host side copy of per-channel, per-antenna array with calibrated cable phase offset
-        self.phase_delays = np.float32(np.zeros((self.nchans, self.nants)))
+        self.phase_delays = np.zeros((self.nchans, self.nants), dtype=np.float32)
         # dictionaries to map usrp array indexes and sequence channels to indexes 
         self.channel_to_idx = {}
 
@@ -383,14 +390,71 @@ class ProcessingGPU(object):
         self.phase_offsets[array_idx] = phase_offset
     
     # generate tx rf samples from sequence
-    # prepare rx filtering for sequences
-    def synth_channels(self, bbtx, bbrates_tx, antennas):
-        pdb.set_trace()
+    def synth_tx_rf_pulses(self, bbtx, antennas, nbb_samples_per_pulse):
+
         self.antennas = np.int16(antennas)
-        bbrate_rx = sequence.ctrlprm['baseband_samplerate']
+
+        for ant in range(self.nants): # TODO: assume sequential antennas
+            for chan in range(self.nchans):
+                for pulse in range(self.npulses):
+                    # create interleaved real/complex bb vector
+                    bb_vec_interleaved = np.zeros(nbb_samples_per_pulse * 2)
+                    pdb.set_trace() # TODO: merge in bbtx into interleaved matrix..
+                    bb_vec_interleaved[0::2] = np.real(bbtx[ant][pulse][:])
+                    bb_vec_interleaved[1::2] = np.imag(bbtx[ant][pulse][:])
+                    self.tx_bb_indata[ant][chan][pulse][:] = bb_vec_interleaved[:]
+        
+        # upsample baseband samples on GPU, write samples to shared memory
+        self.interpolate_and_multiply(sequence.ctrlprm['channel'])
+        cuda.Context.synchronize()
+    
+    def tx_init(self, nbb_samples_per_pulse):
+        bbrate = 1e6 # TODO: don't hardcode this this
+        
+        # calculate the number of rf samples per pulse 
+        nrf_samples_per_pulse = int(np.ceil(self.fsamptx * nbb_samples_per_pulse / bbrate)) # number of rf samples for all pulses
+        # TODO: add back in 2x factor for I/Q interleaving
+
+        # calculate tx upsample rates
+        tx_upsample_rate = int(nrf_samples_per_pulse / nbb_samples_per_pulse)
+        npulses = self.npulses
+        nrf_samples_total = nrf_samples_per_pulse * npulses
+
+        print('nrf_samps: ' + str(nrf_samples_total))
+        print('nants: ' + str(self.nants))
+ 
+        # allocate page-locked memory on host for rf samples to decrease transfer time
+        # TODO: benchmark this, see if I should move this to init function..
+        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, self.nchans, 2 * nrf_samples_total), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.tx_bb_indata = np.float32(np.zeros([self.nants, self.nchans, self.npulses, nbb_samples_per_pulse * 2])) # * 2 pulse samples for interleaved i/q
+
+        # TODO: look into memorypool and freeing page locked memory?
+        # https://stackoverflow.com/questions/7651450/how-to-create-page-locked-memory-from-a-existing-numpy-array-in-pycuda
+
+        # point GPU to page-locked memory for rf rx and tx samples
+        self.cu_tx_rf_outdata = np.intp(self.tx_rf_outdata.base.get_device_pointer())
+        self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
+       
+        # compute grid/block sizes for cuda kernels
+        self.tx_block = self._intify((tx_upsample_rate, self.nchans, 1))
+        self.tx_grid = self._intify((nbb_samples_per_pulse, self.nants, self.npulses))
+
+        print('tx block: ' + str(self.tx_block))
+        print('tx grid: ' + str(self.tx_grid))
+ 
+        max_blocksize = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
+        assert self._blocksize(self.tx_block) <= max_blocksize, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
+
+    def rx_init(self): 
+        # build arrays based on first sequence..
+        # TODO: support multiple sequences?
+        
+        ctrlprm = self.sequences[0].ctrlprm
+
+        bbrate_rx = ctrlprm['baseband_samplerate']
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(sequence.ctrlprm['number_of_samples']) # number of recv samples
+        nbbsamps_rx = int(ctrlprm['number_of_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate_rx
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
 
@@ -401,21 +465,6 @@ class ProcessingGPU(object):
         # unrolled pre-reduction of 2 in rx kernels
         # so, decimation rate of 64
         nifsamps_rx = int(np.round(self.nrfsamps_rx / self.rfifrate))
-
-        # calculate tx upsample rates
-        # bb rates based on tx sample stepping in sequence object (5e-6 seconds)
-        # fixed rf to if baseband rate from block size limits
-        nbbsamps_tx_pulse = int(bbtx.shape[2]) # number of baseband samples for all pulses 
-
-        nbbsamps_tx = bbtx.size
-        nrfsamps_tx = 2 * int(np.ceil(self.fsamptx * nbbsamps_tx / bbrates_tx[0])) # number of rf samples for all pulses (2x for I/Q)
-        
-        tx_upsample_rate = int(nrfsamps_tx / nbbsamps_tx) / 2.
-
-        self.npulses = len(sequence.pulse_lens)
-        pdb.set_trace()
-        print('nrf_samps: ' + str(nrfsamps_tx))
-        print('nants: ' + str(self.nants))
         # allocate memory on cpu, compile functions
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nchans, self.ntaps_rfif, 2]))
@@ -423,44 +472,18 @@ class ProcessingGPU(object):
     
         self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, nifsamps_rx]))
         self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, nbbsamps_rx]))
-    
-        self.tx_bb_indata = np.float32(np.zeros([self.nants, self.nchans, self.npulses, nbbsamps_tx_pulse * 2])) # * 2 pulse samples for interleaved i/q
-        # TODO: copy in baseband samples
-        for ant in range(self.nants): # TODO: assume sequential antennas
-            for chan in range(self.nchans):
-                for pulse in range(self.npulses):
-                    # create interleaved real/complex bb vector
-                    bb_vec_interleaved = np.zeros(nbbsamps_tx_pulse * 2)
-                    bb_vec_interleaved[0::2] = np.real(bbtx[ant][pulse][:])
-                    bb_vec_interleaved[1::2] = np.imag(bbtx[ant][pulse][:])
-                    self.tx_bb_indata[ant][chan][pulse][:] = bb_vec_interleaved[:]
 
-        # allocate page-locked memory on host for rf samples to decrease transfer time
-        # TODO: benchmark this, see if I should move this to init function..
-        self.tx_rf_outdata = cuda.pagelocked_empty((self.nants, self.nchans, nrfsamps_tx), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        
-        # TODO: look into memorypool and freeing page locked memory?
-        # https://stackoverflow.com/questions/7651450/how-to-create-page-locked-memory-from-a-existing-numpy-array-in-pycuda
 
-        # point GPU to page-locked memory for rf rx and tx samples
         self.cu_rx_samples_rf = np.intp(self.rx_samples_rf.base.get_device_pointer())
-        self.cu_tx_rf_outdata = np.intp(self.tx_rf_outdata.base.get_device_pointer())
-        
+
         # allocate memory on GPU
         self.cu_rx_filtertaps_rfif = cuda.mem_alloc_like(self.rx_filtertap_rfif)
         self.cu_rx_filtertaps_ifbb = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
 
         self.cu_rx_samples_if = cuda.mem_alloc_like(self.rx_samples_if)
         self.cu_rx_samples_bb = cuda.mem_alloc_like(self.rx_samples_bb)
-    
-        self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
-       
-        # compute grid/block sizes for cuda kernels
-        self.tx_block = self._intify((tx_upsample_rate, self.nchans, 1))
-        self.tx_grid = self._intify((nbbsamps_tx_pulse, self.nants, self.npulses))
-        print('tx block: ' + str(self.tx_block))
-        print('tx grid: ' + str(self.tx_grid))
+        
         self.rx_grid_if = self._intify((nifsamps_rx, self.nants, 1))
         self.rx_grid_bb = self._intify((nbbsamps_rx, self.nants, 1))
         self.rx_block_if = self._intify((self.ntaps_rfif / 2, self.nchans, 1))
@@ -468,14 +491,23 @@ class ProcessingGPU(object):
         
         # check if up/downsampling cuda kernels block sizes exceed hardware limits 
         max_blocksize = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
-        assert self._blocksize(self.tx_block) <= max_blocksize, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
+
         assert self._blocksize(self.rx_block_if) <= max_blocksize, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
         assert self._blocksize(self.rx_block_bb) <= max_blocksize, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-    
-        # upsample baseband samples on GPU, write samples to shared memory
-        self.interpolate_and_multiply(fc, sequence.ctrlprm['channel'])
-        cuda.Context.synchronize()
+
+
+    def synth_channels(self, bbtx, bbrates_tx, antennas):
+        # prepare sample 
+        self.rx_init()
         
+        txbb_samples_per_pulse = int(bbtx[0].shape[2]) # number of baseband samples per pulse
+
+        self.tx_init(txbb_samples_per_pulse) #bbtx, bbrates_tx, antennas)
+
+        self.synth_tx_rf_pulses(bbtx, antennas, txbb_samples_per_pulse)
+
+        pdb.set_trace()
+
         # save plot of transmit pulse for debugging...
         '''
         import matplotlib
@@ -525,9 +557,8 @@ class ProcessingGPU(object):
         return self.rx_samples_bb
     
     # upsample baseband data on gpu
-    def interpolate_and_multiply(self, fc, channel = 0):
-        self._set_mixerfreq(fc, channel)
-        self._set_phasedelay(fc, channel)
+    def interpolate_and_multiply(self, channel = 0):
+        fc = 10e6
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
     
@@ -540,13 +571,17 @@ class ProcessingGPU(object):
             tx_shm_list[ant].flush()
     
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
-    def _set_mixerfreq(self, fc, channel):
+    def _set_mixerfreq(self, channel):
+        # TODO: determine fc from channel
+        fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         self.mixer_freqs[channel] = np.float64(2 * np.pi * (self.fsamptx - fc) / self.fsamptx)
         cuda.memcpy_htod(self.cu_txfreq_rads, self.mixer_freqs)
     
 
     # update host-side phase delay table with current channel sequence, then refresh array on GPU
-    def _set_phasedelay(self, fc, channel):
+    def _set_phasedelay(self, channel):
+        fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
+        
         for ant in range(self.nants):
             self.phase_delays[channel][ant] = np.float32(np.mod(2 * np.pi * 1e-9 * self.tdelays[ant] * fc, 2 * np.pi)) 
 
