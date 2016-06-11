@@ -362,15 +362,22 @@ class RadarHardwareManager:
         cmd = cuda_get_data_command(self.cudasocks)
         cmd.transmit()
     
-        # TODO: setp through all sockets
+        # TODO: setup through all sockets
         # recv metadata from cuda drivers about antenna numbers and whatnot
         # fill up provided main and back baseband sample buffers
-        cmd.populate_samplebuffer(ch.cnum, main_samples, back_samples)
         
+        # TODO: fill in sample buffer with baseband sample array
+        # TODO: refactor this into drivermsg library
+        for cudasock in self.cudasocks:
+            num_samples = recv_dtype(cudasock, np.uint32)
+            samples = recv_dtype(cudasock, np.float32, num_samples)
+
+            #samples is np.float32(np.zeros([self.nants, self.nchans, nbbsamps_rx]))
+
+
+        #cmd.populate_samplebuffer(main_samples, back_samples)
+
         cmd.client_return()
-
-
-
         # TODO: move samples from shared memory
         #bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
 
@@ -469,7 +476,7 @@ class RadarHardwareManager:
         rxfreq = 10e6 # TODO...
         txrate = 2e6
         rxrate = 2e6 
-        
+         
         # TODO: calculate the number of RF transmit samples per-pulse
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
@@ -485,27 +492,31 @@ class RadarHardwareManager:
         cprint('waiting for cuda driver return', 'blue') 
         cmd.client_return()
         cprint('cuda return received', 'blue') 
+        
+        synth_pulse = False
 
         for ch in self.channels:
             ch.state = STATE_WAIT
+            if ch.ctrlprm_struct.payload['tfreq'] != 0:
+                # load sequence to cuda driver if it has a nonzero transmit frequency..
+                cmd = cuda_add_channel_command(self.cudasocks, sequence = ch.getSequence())
+                # TODO: separate loading sequences from generating baseband samples..
 
-            # load sequence to cuda driver
-            cmd = cuda_add_channel_command(self.cudasocks, sequence = ch.getSequence())
-            # TODO: separate loading sequences from generating baseband samples..
+                cprint('transmitting cuda channel handler', 'blue') 
+                cmd.transmit()
 
-            cprint('transmitting cuda channel handler', 'blue') 
+                cprint('waiting for cuda channel handler return', 'blue') 
+                cmd.client_return()
+                synth_pulse = True
+            
+        if synth_pulse:
+            cprint('transmitting generate pulse command', 'blue') 
+            cmd = cuda_generate_pulse_command(self.cudasocks)
             cmd.transmit()
 
-            cprint('waintg for cuda channel handler return', 'blue') 
             cmd.client_return()
- 
-        cprint('transmitting generate pulse command', 'blue') 
-        cmd = cuda_generate_pulse_command(self.cudasocks)
-        cmd.transmit()
 
-        cmd.client_return()
-
-        cprint('pulse generated, end of pretrigger', 'blue') 
+            cprint('pulse generated, end of pretrigger', 'blue') 
 
 
 class RadarChannelHandler:
@@ -637,7 +648,7 @@ class RadarChannelHandler:
         # start clear frequency search
         self.clrfreq_struct.receive(self.conn)
         self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
-        self.noise = 0
+        self.noise = 10
         self.state = STATE_CLR_FREQ 
         self.clrfreq_start = time.time()
         return RMSG_SUCCESS

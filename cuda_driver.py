@@ -22,6 +22,7 @@ import pycuda.driver as cuda
 import pycuda.compiler
 import pycuda.autoinit
 
+from termcolor import cprint
 from socket_utils import *
 from drivermsg_library import *
 import dsp_filters
@@ -114,8 +115,10 @@ class cuda_generate_pulse_handler(cudamsg_handler):
             if channel != None:
                 cnum = channel.ctrlprm['channel']
                 bbtx[cnum], bbrates_tx[cnum] = self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
-
-        assert len(np.unique(bbrates_tx)) == 1 + (None in bbrates_tx), "all baseband sampling rates must be the same?.." # TODO: investigate this case :(
+        #pdb.set_trace() 
+        if not (len(np.unique(bbrates_tx)) == 1 + (None in bbrates_tx)):
+            print("all baseband sampling rates must be the same?..")# TODO: investigate this case :(
+            #pdb.set_trace()
 
         # synthesize rf waveform
         self.gpu.synth_channels(bbtx, bbrates_tx, self.antennas)
@@ -151,8 +154,16 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         assert tbuffer >= int(self.hardware_limits['min_tr_to_pulse']) / 1e6, 'time between TR gate and RF pulse too short for hardware'
         assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length is too short for hardware'
         assert tpulse < int(self.hardware_limits['max_tpulse']) / 1e6, 'pulse length is too long for hardware'
-        assert tfreq >= int(self.hardware_limits['minimum_tfreq']), 'transmit frequency too low for hardware'
-        assert tfreq <= int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
+
+        if not (tfreq >= int(self.hardware_limits['minimum_tfreq'])):
+            print('transmit frequency too low for hardware')
+            #pdb.set_trace()
+
+        if tfreq > int(self.hardware_limits['maximum_tfreq']):
+            print('transmit frequency too high for hardware')
+            #pdb.set_trace()
+
+        #assert tfreq < int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
 
         assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
@@ -227,18 +238,21 @@ class cuda_add_channel_handler(cudamsg_handler):
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
-
-        print('semaphores released in cudda add channel handler')
+        #pdb.set_trace()
+        print('semaphores released in cuda add channel handler')
 
 # prepare for a refresh of sequences 
 class cuda_pulse_init_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_pulse_init_command([self.sock])
         cmd.receive(self.sock)
-
+          
         print('entering cuda_pulse_init_handler')
+
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
+
+        pdb.set_trace()
         self.gpu.sequences = [None for chan in range(self.gpu.nchans)]
 
         semaphore_list[SIDEA][SWING0].release()
@@ -260,9 +274,12 @@ class cuda_get_data_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
-
+        
+        
         samples = self.gpu.pull_rxdata()
+        transmit_dtype(self.sock, samples.size, np.uint32)
         self.sock.sendall(samples.tobytes())
+
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].release()
 
@@ -294,6 +311,16 @@ cudamsg_handlers = {\
         CUDA_GENERATE_PULSE: cuda_generate_pulse_handler, \
         CUDA_PULSE_INIT : cuda_pulse_init_handler, \
         CUDA_EXIT: cuda_exit_handler}
+
+cudamsg_handler_names = {\
+        CUDA_SETUP: 'CUDA_SETUP', \
+        CUDA_GET_DATA: 'CUDA_GET_DATA', \
+        CUDA_PROCESS: 'CUDA_PROCESS', \
+        CUDA_ADD_CHANNEL: 'CUDA_ADD_CHANNEL', \
+        CUDA_REMOVE_CHANNEL: 'CUDA_REMOVE_CHANNEL', \
+        CUDA_GENERATE_PULSE: 'CUDA_GENERATE_PULSE', \
+        CUDA_PULSE_INIT : 'CUDA_PULSE_INIT', \
+        CUDA_EXIT: 'CUDA_EXIT'}
 
 
 def sem_namer(ant, swing):
@@ -391,21 +418,24 @@ class ProcessingGPU(object):
     
     # generate tx rf samples from sequence
     def synth_tx_rf_pulses(self, bbtx, antennas, nbb_samples_per_pulse):
-
         self.antennas = np.int16(antennas)
 
         for ant in range(self.nants): # TODO: assume sequential antennas
             for chan in range(self.nchans):
-                for pulse in range(self.npulses):
+                for pulse in range(bbtx[chan].shape[1]):
+                    # bbtx[channel][nantennas, npulses, len(pulsesamps)]
                     # create interleaved real/complex bb vector
                     bb_vec_interleaved = np.zeros(nbb_samples_per_pulse * 2)
-                    pdb.set_trace() # TODO: merge in bbtx into interleaved matrix..
-                    bb_vec_interleaved[0::2] = np.real(bbtx[ant][pulse][:])
-                    bb_vec_interleaved[1::2] = np.imag(bbtx[ant][pulse][:])
+                    try:
+                        bb_vec_interleaved[0::2] = np.real(bbtx[chan][ant][pulse][:])
+                        bb_vec_interleaved[1::2] = np.imag(bbtx[chan][ant][pulse][:])
+                    except:
+                        print('error while merging baseband tx vectors..')
+                        pdb.set_trace()
                     self.tx_bb_indata[ant][chan][pulse][:] = bb_vec_interleaved[:]
         
         # upsample baseband samples on GPU, write samples to shared memory
-        self.interpolate_and_multiply(sequence.ctrlprm['channel'])
+        self.interpolate_and_multiply()
         cuda.Context.synchronize()
     
     def tx_init(self, nbb_samples_per_pulse):
@@ -448,7 +478,7 @@ class ProcessingGPU(object):
     def rx_init(self): 
         # build arrays based on first sequence..
         # TODO: support multiple sequences?
-        
+       
         ctrlprm = self.sequences[0].ctrlprm
 
         bbrate_rx = ctrlprm['baseband_samplerate']
@@ -470,8 +500,8 @@ class ProcessingGPU(object):
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nchans, self.ntaps_rfif, 2]))
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nchans, self.ntaps_ifbb, 2]))
     
-        self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, nifsamps_rx]))
-        self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, nbbsamps_rx]))
+        self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, 2 * nifsamps_rx]))
+        self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, 2 * nbbsamps_rx]))
 
         self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
 
@@ -505,8 +535,6 @@ class ProcessingGPU(object):
         self.tx_init(txbb_samples_per_pulse) #bbtx, bbrates_tx, antennas)
 
         self.synth_tx_rf_pulses(bbtx, antennas, txbb_samples_per_pulse)
-
-        pdb.set_trace()
 
         # save plot of transmit pulse for debugging...
         '''
@@ -557,8 +585,7 @@ class ProcessingGPU(object):
         return self.rx_samples_bb
     
     # upsample baseband data on gpu
-    def interpolate_and_multiply(self, channel = 0):
-        fc = 10e6
+    def interpolate_and_multiply(self):
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
     
@@ -674,9 +701,16 @@ def main():
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
+        cmdname = cudamsg_handler_names[cmd]
+        cprint('received {} command'.format(cmdname), 'green')
+
         handler = cudamsg_handlers[cmd](server_conn, cmd, gpu, antennas, array_info, hardware_limits)
         handler.process()
+
+        cprint('finished processing {} command, responding'.format(cmdname), 'green')
         handler.respond()
+
+        cprint('responded to {},  waiting for next command'.format(cmdname), 'green')
     
 
 if __name__ == '__main__':

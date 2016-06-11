@@ -178,9 +178,8 @@ class server_ctrlprm(driver_command):
 
 class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = 0):
-        driver_command.__init__(self, cudas, CUDA_PROCESS)
+        driver_command.__init__(self, cudas, CUDA_GET_DATA)
         self.queue(swing, np.uint32, 'swing')
-
     
 class cuda_exit_command(driver_command):
     def __init__(self, cudas):
