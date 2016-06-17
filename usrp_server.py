@@ -16,7 +16,7 @@ from rosmsg import *
 from drivermsg_library import *
 
 MAX_CHANNELS = 10
-RMSG_FAILURE = -1 
+RMSG_FAILURE = -1
 RMSG_SUCCESS = 0
 RADAR_STATE_TIME = .0001#.0005
 CHANNEL_STATE_TIMEOUT = 120000
@@ -46,7 +46,7 @@ class RadarHardwareManager:
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
-        self.usrp_init() 
+        self.usrp_init()
         #self.rxfe_init()
         self.cuda_init()
 
@@ -74,7 +74,7 @@ class RadarHardwareManager:
 
                 if self.state == STATE_WAIT:
                     self.next_state = STATE_WAIT
-                   
+
                     # TODO: set radar state priority
                     # e.g, CLR_FREQ > PRETRIGGER > TRIGGER > GET_DATA?
                     for ch in self.channels:
@@ -108,8 +108,8 @@ class RadarHardwareManager:
                     for ch in self.channels:
                         if ch.state != STATE_PRETRIGGER:
                             print('channel {} state is {}, remaining in PRETRIGGER'.format(ch.cnum, ch.state))
-                            self.next_state = STATE_PRETRIGGER 
-                    
+                            self.next_state = STATE_PRETRIGGER
+
                     # if everyone is ready, prepare for data collection
                     if self.next_state == STATE_WAIT:
                         cprint('running pretrigger!', 'green')
@@ -122,8 +122,8 @@ class RadarHardwareManager:
                     for ch in self.channels:
                         if ch.state != STATE_TRIGGER:
                             print('channel state is {}, remaining in TRIGGER'.format(ch.state))
-                            self.next_state = STATE_TRIGGER 
-                    
+                            self.next_state = STATE_TRIGGER
+
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
                     if self.next_state == STATE_WAIT:
                         self.trigger()
@@ -148,19 +148,19 @@ class RadarHardwareManager:
         self.client_sock.listen(MAX_CHANNELS)
         client_threads = []
         self.channels = []
-        
+
         # TODO: write state machine..
-        ct = threading.Thread(target = radar_state_machine)
+        ct = threading.Thread(target=radar_state_machine)
         ct.start()
         while True:
             client_conn, addr = self.client_sock.accept()
-            
-            ct = threading.Thread(target = spawn_channel, args = (client_conn,))
+
+            ct = threading.Thread(target=spawn_channel, args=(client_conn,))
             client_threads.append(ct)
             ct.start()
-        
-        client_sock.close() 
-    
+
+        self.client_sock.close()
+
 
 
     def usrp_init(self):
@@ -176,8 +176,12 @@ class RadarHardwareManager:
             sys.exit(1)
 
         self.usrpsocks = usrp_driver_socks
-    
+
     def rxfe_init(self):
+        # TODO: fix this function
+        pdb.set_trace()
+        '''
+        # TODO: read in rf_setting struct?
         amp0 = rf_settings[1] # amp1 in RXFESettings struct
         amp1 = rf_settings[2] # amp2 in RXFESettings struct
         att_p5dB = np.uint8((rf_settings[4] > 0))
@@ -185,7 +189,8 @@ class RadarHardwareManager:
         att_2dB = np.uint8((rf_settings[6] > 0))
         att_4dB = np.uint8((rf_settings[7] > 0))
         att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
-        cmd = usrp_rxfe_setup_command(usrpsocks, amp0, amp1, att)
+        '''
+        cmd = usrp_rxfe_setup_command(self.usrpsocks, 0, 0, 0) #amp0, amp1, att)
         cmd.transmit()
         cmd.client_return()
 
@@ -202,7 +207,7 @@ class RadarHardwareManager:
                 cudasock.connect((c, CUDADRIVER_PORT))
                 cuda_driver_socks.append(cudasock)
         except ConnectionRefusedError:
-            warnings.warn("cuda server connection failed")
+            logging.warnings.warn("cuda server connection failed")
             sys.exit(1)
 
         self.cudasocks = cuda_driver_socks
@@ -233,7 +238,7 @@ class RadarHardwareManager:
 
         # mimic behavior of gc316 drivers, if requested search bandwidth is broader than 1024 KHz, force it to 512 KHz?
         # calculate the number of points in the FFT
-        num_clrfreq_samples = np.int32(pow(2,np.ceil(np.log10(1.25 * usable_bandwidth)/np.log10(2))))
+        num_clrfreq_samples = np.int32(pow(2, np.ceil(np.log10(1.25*usable_bandwidth)/np.log10(2))))
         if num_clrfreq_samples > MAX_CLRFREQ_BANDWIDTH:
             num_clrfreq_samples = MAX_CLRFREQ_BANDWIDTH
             usable_bandwidth = MAX_CLRFREQ_USABLE_BANDWIDTH
@@ -248,7 +253,7 @@ class RadarHardwareManager:
         unusable_sideband = np.int32((num_clrfreq_samples - usable_bandwidth)/2.0)
         clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
 
-        # calculate center frequency of beamforming, form 
+        # calculate center frequency of beamforming, form
         # apply narrowband beamforming around center frequency
         tbeamwidth = chan.ctrlprm_struct.payload['tbeamwidth']
         tbeam = chan.ctrlprm_struct.payload['tbeam']
@@ -260,49 +265,51 @@ class RadarHardwareManager:
 
         cprint('gathering samples for clrfreq on beam {} at {}'.format(tbeam, fstart), 'green')
         for ai in range(nave):
+            cprint('gathering samples on avg {}'.format(ai), 'green')
+
             # gather current UHD time
             gettime_cmd = usrp_get_time_command(self.usrpsocks)
             gettime_cmd.transmit()
             usrptimes = []
             for usrpsock in self.usrpsocks:
                 usrptimes.append(gettime_cmd.recv_time(usrpsock))
-            
+
             gettime_cmd.client_return()
 
-            # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds 
+            # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
             clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
-            
+
             # request clrfreq sample dump
             # TODO: what is the clear frequency rate? (c / (2 * rsep?))
 
             clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
             clrfreq_cmd.transmit()
-            
+
             # grab raw samples, apply beamforming
             for usrpsock in self.usrpsocks:
-                # receive 
+                # receive
                 nantennas = recv_dtype(usrpsock, np.uint16)
                 antennas = recv_dtype(usrpsock, np.uint16, nantennas)
 
                 if isinstance(antennas, (np.ndarray, np.generic)):
                     antennas = np.array([antennas])
-                
+
                 for ant in antennas:
                     ant_rotation = rad_to_rect(ant * pshift)
                     samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
                     samples = samples[0::2] + 1j * samples[1::2]
                     combined_samples += ant_rotation * samples
-            fft_time_start = time.time() 
+            fft_time_start = time.time()
 
             # return fft of width usable_bandwidth, kHz resolution
             # TODO: fft recentering, etc
             c_fft = np.fft.fft(combined_samples)
-            # compute power.. 
+            # compute power..
             pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
             pwr2 += pc_fft
 
-            fft_time_end = time.time() 
-            cprint('fft time: {}'.format(fft_time_end - fft_time_start, 'yellow'))
+            fft_time_end = time.time()
+            cprint('fft time: {}'.format(fft_time_end - fft_time_start), 'yellow')
             clrfreq_cmd.client_return()
             # todo: convert fft to power spectrum
 
@@ -320,7 +327,7 @@ class RadarHardwareManager:
         MAXANTENNAS_MAIN = 40
         RADAR_BEAMWIDTH = 3.24
         RADAR_NBEAMS = 20
-        
+
 
 
         status = True # TODO: what should this be..
@@ -330,7 +337,7 @@ class RadarHardwareManager:
         cprint('running get_data', 'blue')
         # stall until all channels are ready
         nbb_samples = ctrlprm['number_of_samples']
-        
+
         cprint('sending GET_DATA command ', 'blue')
         cmd = usrp_ready_data_command(self.usrpsocks)
         cmd.transmit()
@@ -348,7 +355,7 @@ class RadarHardwareManager:
         for usrpsock in self.usrpsocks:
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
-             
+
             cprint('GET_DATA rx status {}'.format(rx_status), 'blue')
             if rx_status != 1:
                 cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'blue')
@@ -361,11 +368,11 @@ class RadarHardwareManager:
 
         cmd = cuda_get_data_command(self.cudasocks)
         cmd.transmit()
-    
+
         # TODO: setup through all sockets
         # recv metadata from cuda drivers about antenna numbers and whatnot
         # fill up provided main and back baseband sample buffers
-        
+
         # TODO: fill in sample buffer with baseband sample array
         # TODO: refactor this into drivermsg library
         for cudasock in self.cudasocks:
@@ -383,35 +390,37 @@ class RadarHardwareManager:
 
         # calculate antenna-to-antenna phase shift for steering at a frequency
         #pshift = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)
-        
+
         # calculate a complex number representing the phase shift for each antenna
         #beamform_main = np.array([rad_to_rect(a * pshift) for a in self.antennas])
         #beamform_back = np.ones(len(MAIN_ANTENNAS))
 
         cprint('get_data complete!', 'blue')
-        
+
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
-            beamform_samples = np.ones(len(antennas))
+            beamformed_samples = np.ones(len(antennas))
 
             for i in range(n_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0)
 
                 for ant in range(antennas):
-                    itemp += np.real(beamform_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
-                             np.imag(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant])
-                    qtemp += np.real(beamform_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
-                             np.imag(beamform_samples[ant][i]) * np.real(phasing_matrix[ant])
-                beamformed[i] = complex_ui32_pack(itemp, qtemp)
+                    itemp += np.real(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
+                             np.imag(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant])
+                    qtemp += np.real(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
+                             np.imag(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant])
+                beamformed_samples[i] = complex_ui32_pack(itemp, qtemp)
+
+            return beamformed_samples
 
         #main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas)
         #back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
 
 
-    
+
     def exit(self):
         # clean up and exit
-        self.arbysock.close()
+        self.client_sock.close()
         cmd = usrp_exit_command(self.usrpsocks)
         cmd.transmit()
 
@@ -423,8 +432,7 @@ class RadarHardwareManager:
         for sock in self.cudasocks:
             sock.close()
 
-        if(VERBOSE):
-            print('received exit command, cleaning up..')
+        cprint('received exit command, cleaning up..', 'red')
 
         sys.exit(0)
 
@@ -435,39 +443,39 @@ class RadarHardwareManager:
             cmd = usrp_trigger_pulse_command(self.usrpsocks)
             cprint('sending trigger pulse command', 'yellow')
             cmd.transmit()
-            # TODO: handle multiple usrps with trigger.. 
+            # TODO: handle multiple usrps with trigger..
             cprint('waiting for trigger return', 'yellow')
             returns = cmd.client_return()
 
             if TRIGGER_BUSY in returns:
                 cprint('could not trigger, usrp driver is busy', 'yellow')
                 pdb.set_trace()
-            
+
             cprint('trigger return!', 'yellow')
 
         else:
             cprint('no channels loaded, trigger failed!', 'green')
             pdb.set_trace()
 
-        for ch in self.channels: 
+        for ch in self.channels:
             ch.state = STATE_WAIT
 
         cprint('trigger complete', 'yellow')
-    
+
     # TODO: Merge channel infomation here!
     # TODO: pretrigger cuda client return fails
     # key error: 0?
     def pretrigger(self):
         cprint('running pretrigger', 'blue')
-        
+
         # TODO: handle channels with different pulse infomation..
-        rfrate = 2e6 
+        rfrate = 2e6
         # TODO: parse tx sample rate dynamocially
         # TODO: handle pretrigger with no channels
         # rfrate = np.int32(self.cuda_config['FSampTX'])
         # extract sampling info from cuda driver
         # print('rf rate parsed from ini: ' + str(rfrate))
-        
+
         pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
@@ -475,48 +483,55 @@ class RadarHardwareManager:
         txfreq = 10e6 # TODO: read from config file
         rxfreq = 10e6 # TODO...
         txrate = 2e6
-        rxrate = 2e6 
-         
+        rxrate = 2e6
+
         # TODO: calculate the number of RF transmit samples per-pulse
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
-        num_requested_tx_samples = np.uint64(np.round((rfrate)  * tx_time / 1e6)) 
+        num_requested_tx_samples = np.uint64(np.round((rfrate)  * tx_time / 1e6))
 
         cmd = usrp_setup_command(self.usrpsocks, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
-        cprint('running cuda_pulse_init command', 'blue') 
+        cprint('running cuda_pulse_init command', 'blue')
 
-        cmd = cuda_pulse_init_command(self.cudasocks)
-        cmd.transmit()
-        cprint('waiting for cuda driver return', 'blue') 
-        cmd.client_return()
-        cprint('cuda return received', 'blue') 
-        
+# TODO: untangle cuda pulse init handler
+#        pdb.set_trace()
+#        cmd = cuda_pulse_init_command(self.cudasocks)
+#        cmd.transmit()
+#        cprint('waiting for cuda driver return', 'blue')
+#        cmd.client_return()
+#        cprint('cuda return received', 'blue')
+
         synth_pulse = False
 
         for ch in self.channels:
             ch.state = STATE_WAIT
+            #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
-                cmd = cuda_add_channel_command(self.cudasocks, sequence = ch.getSequence())
+                time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
+                if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
+                    cprint('tfreq != rfreq!', 'yellow')
+                    pdb.set_trace()
+                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
                 # TODO: separate loading sequences from generating baseband samples..
 
-                cprint('transmitting cuda channel handler', 'blue') 
+                cprint('transmitting cuda channel handler', 'blue')
                 cmd.transmit()
 
-                cprint('waiting for cuda channel handler return', 'blue') 
+                cprint('waiting for cuda channel handler return', 'blue')
                 cmd.client_return()
                 synth_pulse = True
-            
+
         if synth_pulse:
-            cprint('transmitting generate pulse command', 'blue') 
+            cprint('transmitting generate pulse command', 'blue')
             cmd = cuda_generate_pulse_command(self.cudasocks)
             cmd.transmit()
 
             cmd.client_return()
 
-            cprint('pulse generated, end of pretrigger', 'blue') 
+            cprint('pulse generated, end of pretrigger', 'blue')
 
 
 class RadarChannelHandler:
@@ -542,7 +557,6 @@ class RadarChannelHandler:
 
 
     def run(self):
-
         rmsg_handlers = {\
             SET_RADAR_CHAN : self.SetRadarChanHandler,\
             SET_INACTIVE : self.SetInactiveHandler,\
@@ -582,36 +596,36 @@ class RadarChannelHandler:
                 print('unrecognized command!')
                 print(rmsg.payload)
                 pdb.set_trace()
-            
-            if command in rmsg_handlers:	
+
+            if command in rmsg_handlers:
                 status = rmsg_handlers[command](rmsg)
             else:
                 status = self.DefaultHandler(rmsg)
-            
+
             rmsg.set_data('status', status)
             rmsg.set_data('type', rmsg.payload['type'])
             rmsg.transmit()
 
 
-
     def close(self):
+        print('todo: write close..:')
         pdb.set_trace()
         # TODO write this..
-   
+
 
     # busy wait until state enters desired state
-    # useful for waiting for 
+    # useful for waiting for
     def _waitForState(self, state):
         wait_start = time.time()
 
         while self.state != state:
-            #cprint('channel {} waiting for {}, current state:'.format(self.cnum, self.state, state), 'green') 
+            #cprint('channel {} waiting for {}, current state:'.format(self.cnum, self.state, state), 'green')
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 print('CHANNEL STATE TIMEOUT')
                 pdb.set_trace()
                 break
-    
+
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
         return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.ctrlprm_struct.payload)
@@ -649,18 +663,18 @@ class RadarChannelHandler:
         self.clrfreq_struct.receive(self.conn)
         self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
         self.noise = 10
-        self.state = STATE_CLR_FREQ 
+        self.state = STATE_CLR_FREQ
         self.clrfreq_start = time.time()
         return RMSG_SUCCESS
 
     def UnsetReadyFlagHandler(self, rmsg):
-        self.ready = False 
+        self.ready = False
         return RMSG_SUCCESS
 
 
     def SetReadyFlagHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
-        # TODO: check if samples are ready? 
+        # TODO: check if samples are ready?
         self.state = STATE_TRIGGER
         # send trigger command
         self.ready = True
@@ -681,15 +695,15 @@ class RadarChannelHandler:
                     break
                 runlen += 1
             return runlen
-        # site libraries appear to not initialize the status, so a nonzero status here is normall. 
+        # site libraries appear to not initialize the status, so a nonzero status here is normall.
 
         self.seqprm_struct.receive(self.conn)
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
-       
-        tx_tsg_idx = self.seqprm_struct.get_data('index') 
+
+        tx_tsg_idx = self.seqprm_struct.get_data('index')
         tx_tsg_len = self.seqprm_struct.get_data('len')
-        tx_tsg_step =  self.seqprm_struct.get_data('step')
+        tx_tsg_step = self.seqprm_struct.get_data('step')
 
 
         # psuedo-run length encoded tsg
@@ -703,10 +717,10 @@ class RadarChannelHandler:
         seq_buf = np.uint8(np.array(seq_buf))
 
         # extract out pulse information...
-        S_BIT = np.uint8(0x01) # sample impulses 
+        S_BIT = np.uint8(0x01) # sample impulses
         R_BIT = np.uint8(0x02) # tr gate, use for tx pulse times
-        X_BIT = np.uint8(0x04) # transmit path, use for bb 
-        A_BIT = np.uint8(0x08) # enable attenuator 
+        X_BIT = np.uint8(0x04) # transmit path, use for bb
+        A_BIT = np.uint8(0x08) # enable attenuator
         P_BIT = np.uint8(0x10) # phase code (BPSK)
 
         # create masks
@@ -719,9 +733,9 @@ class RadarChannelHandler:
         # extract and number of samples
         sample_idx = np.nonzero(samples)[0]
         if len(sample_idx) < 3:
-            warnings.warn("Warning, cannot register empty sequence")
+            logging.warnings.warn("Warning, cannot register empty sequence")
             return
-        
+
         nbb_samples = len(sample_idx)
 
         # extract pulse start timing
@@ -785,12 +799,15 @@ class RadarChannelHandler:
         cprint('entering hardware manager get data handler', 'blue')
         # TODO: setup dataprm_struct
         # see self.ctrlprm_struct.payload['number_of_samples']
+        # TODO investigate possible race conditions
         self.dataprm_struct.transmit()
+        cprint('sending dprm struct', 'green')
 
+        #pdb.set_trace()
         if not self.active or self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
             return RMSG_FAILURE
-        
+
         cprint('waiting for channel to idle before GET_DATA', 'blue')
         self._waitForState(STATE_WAIT)
 
@@ -799,34 +816,35 @@ class RadarChannelHandler:
         self._waitForState(STATE_WAIT)
         cprint('GET_DATA complete, returning samples', 'blue')
 
+
         # TODO: get data handler waits for control_program to set active flag in controlprg struct
         # need some sort of synchronizaion..
         # TODO: gather main/back samples..
-        main_samples = np.zeros(30)
-        back_samples = np.zeros(30)
+
+        main_samples = np.zeros(self.dataprm_struct.get_data('samples'))
+        back_samples = np.zeros(self.dataprm_struct.get_data('samples'))
         transmit_dtype(self.conn, main_samples, np.uint32)
         transmit_dtype(self.conn, back_samples, np.uint32)
-    
+        
+
         # TODO: what are these *actually*?
         badtrdat_len = 0
         badtrdat_start_usec = np.zeros(badtrdat_len)
         badtrdat_duration_usec = np.zeros(badtrdat_len)
-
         transmit_dtype(self.conn, badtrdat_len, np.uint32)
         transmit_dtype(self.conn, badtrdat_start_usec, np.uint32) # length badtrdat_len
         transmit_dtype(self.conn, badtrdat_duration_usec, np.uint32) # length badtrdat_len
-
         # TODO: what are these?.. really?
         num_transmitters = 16
         txstatus_agc = np.zeros(num_transmitters)
         txstatus_lowpwr = np.zeros(num_transmitters)
- 
+
         transmit_dtype(self.conn, num_transmitters, np.int32)
         transmit_dtype(self.conn, txstatus_agc, np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr, np.int32) # length num_transmitters
 
         return RMSG_SUCCESS
-        
+
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
@@ -838,7 +856,7 @@ class RadarChannelHandler:
         # TODO: set RMSG_FAILURE if radar channel is unavailable
         # rmsg.set_data('status', RMSG_FAILURE)
         return RMSG_SUCCESS
- 
+
     def LinkRadarChanHandler(self, rmsg):
         rnum = recv_dtype(self.conn, np.int32)
         cnum = recv_dtype(self.conn, np.int32)
@@ -850,18 +868,18 @@ class RadarChannelHandler:
     def QueryIniSettingsHandler(self, rmsg):
         # TODO: don't hardcode this if I find anything other than ifmode querying..
         data_length = recv_dtype(self.conn, np.int32)
-        ini_name = recv_dtype(self.conn, str, nitems = data_length)
+        ini_name = recv_dtype(self.conn, str, nitems=data_length)
         requested_type = recv_dtype(self.conn, np.uint8)
-        
+
         # hardcode to reply with ifmode is false
         assert ini_name == b'site_settings:ifmode\x00'
-       
+
         payload = 0 # assume always false
 
         transmit_dtype(self.conn, requested_type, np.uint8)
         transmit_dtype(self.conn, data_length, np.int32) # appears to be unused by site library
-        transmit_dtype(self.conn, payload, np.int32) 
-       
+        transmit_dtype(self.conn, payload, np.int32)
+
         return 1 # TODO: Why does the ini handler expect a nonzero response for success?
 
     def SetActiveHandler(self, rmsg):
@@ -874,7 +892,7 @@ class RadarChannelHandler:
 
     def SetInactiveHandler(self, rmsg):
         # TODO: return failure status if the radar or channel number is invalid
-            
+
         if not self.active:
             self.active = False
             self.ready = False
@@ -882,17 +900,17 @@ class RadarChannelHandler:
 
         return RMSG_SUCCESS
 
-	
+
 def main():
     # maybe switch to multiprocessing with manager process
     print('main!')
-    logging.basicConfig(filename = 'client_server.log', level=logging.DEBUG, format='[%(levelname)s] (%(threadName)-10s) %(asctime)s %(message)s',)
+    logging.basicConfig(filename='client_server.log', level=logging.DEBUG, format='[%(levelname)s] (%(threadName)-10s) %(asctime)s %(message)s',)
 
     logging.debug('main()')
-    rmsg_port = 45000 
+    rmsg_port = 45000
     #man = RMsgManager(rmsg_port)
     #man.run()
-    
+
     radar = RadarHardwareManager(rmsg_port)
     radar.run()
 

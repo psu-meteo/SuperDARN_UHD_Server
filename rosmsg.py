@@ -117,6 +117,7 @@ class dataprm_struct(driver_command):
 
         prm_dict['event_secs'] = 0
         prm_dict['event_nsecs'] = 0
+        prm_dict['event_capture'] = 0
         prm_dict['samples'] = 0
         prm_dict['shm_memory'] = 0
         prm_dict['status'] = 0
@@ -125,6 +126,7 @@ class dataprm_struct(driver_command):
 
         self.queue(prm_dict['event_secs'], np.uint32, 'event_secs')
         self.queue(prm_dict['event_nsecs'], np.uint32, 'event_nsecs')
+        self.queue(prm_dict['event_capture'], np.uint32, 'event_capture')
         self.queue(prm_dict['samples'], np.int32, 'samples')
         self.queue(prm_dict['shm_memory'], np.int32, 'shm_memory')
         self.queue(prm_dict['status'], np.int32, 'status')

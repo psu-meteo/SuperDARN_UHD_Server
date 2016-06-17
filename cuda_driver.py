@@ -252,8 +252,8 @@ class cuda_pulse_init_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
-        pdb.set_trace()
-        self.gpu.sequences = [None for chan in range(self.gpu.nchans)]
+        #pdb.set_trace()
+        #self.gpu.sequences = [None for chan in range(self.gpu.nchans)]
 
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()

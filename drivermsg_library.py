@@ -89,6 +89,8 @@ class driver_command(object):
             for item in self.dataqueue:
                 item.transmit(clientsock)
 
+                cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
     def client_return(self, dtype = np.uint8, check_return = True):
@@ -171,10 +173,10 @@ class server_ctrlprm(driver_command):
 
         # TODO: set these properly 
         name_arr = np.uint8(np.zeros(80))
-        self.queue(name_arr, np.uint8, nitems = 80)
+        self.queue(name_arr, np.uint8, name='name_arr', nitems=80)
 
         description_arr = np.uint8(np.zeros(120))
-        self.queue(description_arr, np.uint8, nitems = 120)
+        self.queue(description_arr, np.uint8, name='desc_arr', nitems=120)
 
 class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = 0):
@@ -260,7 +262,7 @@ class usrp_setup_command(driver_command):
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
         self.queue(rxrate, np.float64, 'rxrate')
-        self.queue(npulses, np.uint32, npulses)
+        self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
         self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector')
@@ -269,9 +271,9 @@ class usrp_setup_command(driver_command):
 class usrp_rxfe_setup_command(driver_command):
     def __init__(self, usrps, amp0 = 0, amp1 = 0, att = 0):
         driver_command.__init__(self, usrps, UHD_RXFE_SET)
-        self.queue(amp0, np.uint8)
-        self.queue(amp1, np.uint8)
-        self.queue(att, np.uint8)
+        self.queue(amp0, np.uint8, 'amp0')
+        self.queue(amp1, np.uint8, 'amp1')
+        self.queue(att, np.uint8, 'amp2')
 
 # start usrp trigger
 class usrp_trigger_pulse_command(driver_command):
@@ -310,11 +312,11 @@ class usrp_get_time_command(driver_command):
 class usrp_clrfreq_command(driver_command):
     def __init__(self, usrps, num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate):
         driver_command.__init__(self, usrps, UHD_CLRFREQ)
-        self.queue(num_clrfreq_samples, np.int32)
-        self.queue(np.int32(np.int(clrfreq_uhd_time)), np.int32)
-        self.queue(np.float64(np.mod(clrfreq_uhd_time,1)), np.float64)
-        self.queue(clrfreq_freq, np.float64)
-        self.queue(clrfreq_rate, np.float64)
+        self.queue(num_clrfreq_samples, np.int32, 'num_clrfreq_samples')
+        self.queue(np.int32(np.int(clrfreq_uhd_time)), np.int32, 'clrfreq_uhd_time_int')
+        self.queue(np.float64(np.mod(clrfreq_uhd_time,1)), np.float64, 'clrfreq_uhd_time_frac')
+        self.queue(clrfreq_freq, np.float64, 'clrfreq_freq')
+        self.queue(clrfreq_rate, np.float64, 'clrfreq_rate')
 
 # prompt the usrp driver to cleanly shut down, useful for testing
 class usrp_exit_command(driver_command):
