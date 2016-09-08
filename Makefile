@@ -2,7 +2,7 @@ OS:=$(shell uname -s)
 
 CCpp=g++
 CFLAGS=-c -Wall -pthread -std=c++0x -g3
-LFLAGS  = -L"../iniparser3.0b" -L"${HOME}/uhd/host/build/lib"
+LFLAGS  = -L"../iniparser" -L"${HOME}/repos/uhd/host/build/lib"
 common_libs=-lm -liniparser -lrt -luhd -lfftw3
 linux_libs=-lboost_thread -lboost_system -pthread -l argtable2
 INCLUDES=-I"../include/" -I"include/" -I"../tsg/include" -I"../iniparser3.0b/src/" \

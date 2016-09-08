@@ -40,6 +40,8 @@ TXDIR = 'tx'
 DEBUG = True
 C = 3e8
 
+BASEBAND_RATE = 1e6 # TODO: don't hardcode this..
+
 rx_shm_list = [[],[]]
 tx_shm_list = []
 semaphore_list = [[],[]] 
@@ -98,7 +100,6 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
 
-
         print('entering generate_pulse_handler')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
@@ -118,18 +119,18 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         #pdb.set_trace() 
         if not (len(np.unique(bbrates_tx)) == 1 + (None in bbrates_tx)):
             print("all baseband sampling rates must be the same?..")# TODO: investigate this case :(
-            #pdb.set_trace()
+            pdb.set_trace()
 
         # synthesize rf waveform
-        self.gpu.synth_channels(bbtx, bbrates_tx, self.antennas)
-
+        self.gpu.synth_channels(bbtx, bbrates_tx)
+        
         # copy rf waveform to shared memory from GPU memory 
         self.gpu.txsamples_host_to_shm()
 
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
 
-    # generate baseband sample vectors from sequence information
+    # generate baseband sample vectors for a transmit pulse from sequence information
     def generate_bbtx(self, channel, shapefilter = None):
         print('entering generate_bbtx')
         # tpulse is the pulse time in seconds
@@ -137,9 +138,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
         chnum = channel.ctrlprm['channel']
-
         ctrlprm = channel.ctrlprm
-
 
         tpulse = channel.pulse_lens[0] / 1e6 # read in array of pulse lengths in seconds 
         tfreq = ctrlprm['tfreq'] * 1000 # read in tfreq, convert from kHz to Hz
@@ -193,23 +192,23 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # construct baseband tx sample array
         bbtx = np.complex128(np.zeros((nantennas, npulses, len(pulsesamps))))
 
-        for ant in self.antennas:
+        for aidx in range(len(self.antennas)):
             for pulse in range(npulses):
                 # compute pulse compression 
                 # apply phase shifting to pulse using phase_mask
 
                 psamp = pulsesamps
-                psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[ant])
+                psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[aidx])
                 # TODO: support non-1us resolution phase masks
                 # apply filtering function
                 if shapefilter != None:
                     psamp = shapefilter(psamp, trise, bbrate)
                 
                 # apply phasing
-                psamp *= beamforming_shift[ant]
+                psamp *= beamforming_shift[aidx]
 
                 # update baseband pulse sample array for antenna
-                bbtx[ant][pulse] = psamp
+                bbtx[aidx][pulse] = psamp
 
         return bbtx, bbrate
          
@@ -274,11 +273,18 @@ class cuda_get_data_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
-        
-        
+
+        channel = recv_dtype(self.sock, np.int32)
         samples = self.gpu.pull_rxdata()
-        transmit_dtype(self.sock, samples.size, np.uint32)
-        self.sock.sendall(samples.tobytes())
+        (nants, nchans, nsamps) = samples.shape()
+        
+        transmit_dtype(self.sock, len(nants), np.uint32)
+
+        for aidx in nants:
+            transmit_dtype(self.sock, self.antennas[aidx], np.uint16)
+            # TODO: calculate size of transmit samples for channel/ant
+            transmit_dtype(self.sock, nsamps, np.uint32)
+            self.sock.sendall(samples[aidx][channel].tobytes())
 
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].release()
@@ -364,10 +370,11 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, maxants = 4, maxchannels = 1, maxpulses = 8, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
-        # maximum supported channels, f
+    def __init__(self, antennas, maxchannels = 1, maxpulses = 8, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
+        self.antennas = np.int16(antennas)
+        # maximum supported channels
         self.nchans = int(maxchannels)
-        self.nants = int(maxants)
+        self.nants = len(antennas)
         self.npulses = int(maxpulses)
 
         # number of taps for baseband and if filters
@@ -395,7 +402,7 @@ class ProcessingGPU(object):
         self.phase_delays = np.zeros((self.nchans, self.nants), dtype=np.float32)
         # dictionaries to map usrp array indexes and sequence channels to indexes 
         self.channel_to_idx = {}
-
+        
         with open('rx_cuda.cu', 'r') as f:
             self.cu_rx = pycuda.compiler.SourceModule(f.read())
             self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
@@ -413,26 +420,24 @@ class ProcessingGPU(object):
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
     def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
-        self.tdelays[array_idx] = tdelay
-        self.phase_offsets[array_idx] = phase_offset
+        self.tdelays[int(array_idx)] = tdelay
+        self.phase_offsets[int(array_idx)] = phase_offset
     
     # generate tx rf samples from sequence
-    def synth_tx_rf_pulses(self, bbtx, antennas, nbb_samples_per_pulse):
-        self.antennas = np.int16(antennas)
-
-        for ant in range(self.nants): # TODO: assume sequential antennas
+    def synth_tx_rf_pulses(self, bbtx, nbb_samples_per_pulse):
+        for (aidx, ant) in enumerate(self.antennas):
             for chan in range(self.nchans):
                 for pulse in range(bbtx[chan].shape[1]):
                     # bbtx[channel][nantennas, npulses, len(pulsesamps)]
                     # create interleaved real/complex bb vector
                     bb_vec_interleaved = np.zeros(nbb_samples_per_pulse * 2)
                     try:
-                        bb_vec_interleaved[0::2] = np.real(bbtx[chan][ant][pulse][:])
-                        bb_vec_interleaved[1::2] = np.imag(bbtx[chan][ant][pulse][:])
+                        bb_vec_interleaved[0::2] = np.real(bbtx[chan][aidx][pulse][:])
+                        bb_vec_interleaved[1::2] = np.imag(bbtx[chan][aidx][pulse][:])
                     except:
                         print('error while merging baseband tx vectors..')
                         pdb.set_trace()
-                    self.tx_bb_indata[ant][chan][pulse][:] = bb_vec_interleaved[:]
+                    self.tx_bb_indata[aidx][chan][pulse][:] = bb_vec_interleaved[:]
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
@@ -474,6 +479,7 @@ class ProcessingGPU(object):
  
         max_blocksize = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._blocksize(self.tx_block) <= max_blocksize, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
+        #pdb.set_trace()
 
     def rx_init(self): 
         # build arrays based on first sequence..
@@ -526,20 +532,19 @@ class ProcessingGPU(object):
         assert self._blocksize(self.rx_block_bb) <= max_blocksize, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
 
 
-    def synth_channels(self, bbtx, bbrates_tx, antennas):
+    def synth_channels(self, bbtx, bbrates_tx):
         # prepare sample 
         self.rx_init()
-        
+        # TODO: this assumes all channels have the same number of samples 
+        # TODO: why am I passing in antennas?
         txbb_samples_per_pulse = int(bbtx[0].shape[2]) # number of baseband samples per pulse
+        self.tx_init(txbb_samples_per_pulse)
 
-        self.tx_init(txbb_samples_per_pulse) #bbtx, bbrates_tx, antennas)
-
-        self.synth_tx_rf_pulses(bbtx, antennas, txbb_samples_per_pulse)
-
-        # save plot of transmit pulse for debugging...
+        self.synth_tx_rf_pulses(bbtx, txbb_samples_per_pulse)
         '''
+        # save plot of transmit pulse for debugging...
         import matplotlib
-        matplotlib.use('Agg')
+        #matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         txpulse = self.tx_rf_outdata[0][0]
         arp = np.sqrt(np.float32(txpulse[0::2]) ** 2 + np.float32(txpulse[1::2]) ** 2)
@@ -551,11 +556,10 @@ class ProcessingGPU(object):
         plt.subplot(3,1,3)
         plt.plot(txpulse[0:5000:2])
         plt.plot(txpulse[1:5000:2])
-        plt.savefig('pulse.pdf')
+        plt.show()
         print('finished pulse generation, breakpoint..')
         pdb.set_trace()
         '''
-
     # calculates the threads in a block from a block size tuple
     def _blocksize(self, block):
         return functools.reduce(np.multiply, block)
@@ -567,9 +571,9 @@ class ProcessingGPU(object):
     # transfer rf samples from shm to memory pagelocked to gpu (TODO: make sure it is float32..)
     def rxsamples_shm_to_gpu(self, shm):
         shm.seek(0)
-        for ant in range(self.nants):
+        for aidx in range(self.nants):
             for ch in range(self.nchans):
-                self.rx_samples_rf[ant][ch] = np.frombuffer(shm, dtype=float, count = self.nrfsamps_rx)
+                self.rx_samples_rf[aidx][ch] = np.frombuffer(shm, dtype=float, count = self.nrfsamps_rx)
                
     # kick off async data processing
     def rxsamples_process(self):
@@ -592,10 +596,10 @@ class ProcessingGPU(object):
     # copy rf samples to shared memory for transmission by usrp driver
     def txsamples_host_to_shm(self):
         # TODO: assumes single polarization
-        for ant in self.antennas:
-            tx_shm_list[ant].seek(0)
-            tx_shm_list[ant].write(self.tx_rf_outdata[ant].tobytes())
-            tx_shm_list[ant].flush()
+        for aidx in range(self.nants):
+            tx_shm_list[aidx].seek(0)
+            tx_shm_list[aidx].write(self.tx_rf_outdata[aidx].tobytes())
+            tx_shm_list[aidx].flush()
     
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
     def _set_mixerfreq(self, channel):
@@ -644,12 +648,25 @@ class ProcessingGPU(object):
         for i in range(ntaps1/2-dmrate1/4, ntaps1/2+dmrate1/4):
             self.rx_filter_taps1[:,i,0] = 4./dmrate1
 
+# returns a list of antennas indexes in the usrp_config.ini file
+def parse_usrpconfig_antennas(usrpconfig, main_flag):
+    antenna_list = []
+    for usrp in usrpconfig.sections():
+        if eval(usrpconfig[usrp]['mainarray']) == main_flag: # probably a bad idea
+            antenna_list.append(int(usrpconfig[usrp]['array_idx']))
+    return antenna_list
+
+
+
 def main():
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
-    antennas = [0]#int(usrpconfig[usrp]['array_idx']) for usrp in usrpconfig.sections()]  # TODO: fix for back array..
-    
+
+    main_antennas = parse_usrpconfig_antennas(usrpconfig, main_flag = True)
+    back_antennas = parse_usrpconfig_antennas(usrpconfig, main_flag = False)
+    antennas = main_antennas + back_antennas
+
     # parse gpu config file
     cudadriverconfig = configparser.ConfigParser()
     cudadriverconfig.read('driver_config.ini')
@@ -664,7 +681,7 @@ def main():
     hardware_limits = arrayconfig['hardware_limits']
 
     # initalize cuda stuff
-    gpu = ProcessingGPU(**cuda_settings)
+    gpu = ProcessingGPU(antennas, **cuda_settings)
     for usrp in usrpconfig.sections():
         gpu.addUSRP(**dict(usrpconfig[usrp]))
     
@@ -691,6 +708,7 @@ def main():
 
     if(DEBUG):
         print('cuda_driver waiting for socket connection')
+
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()

@@ -64,7 +64,7 @@
 #define SETUP_READY 'y'
 #define TRIGGER_PROCESS 'p'
 
-#define START_OFFSET .03
+#define START_OFFSET .1
 #define ARG_MAXERRORS 10
 #define MAX_TX_PULSES 10
 
@@ -151,6 +151,7 @@ sem_t open_sample_semaphore(int32_t ant, int32_t swing) {
     return *sem;
 }
 
+// TODO: account for swing?
 void lock_semaphore(int32_t swing, sem_t sem)
 {
     sem_wait(&sem);
@@ -490,6 +491,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         sockaddr.sin_family = AF_INET;
         // TODO: maybe limit addr to interface connected to usrp_server
         sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + ant);
         sockaddr.sin_port = htons(usrp_driver_base_port + ant);
         
 

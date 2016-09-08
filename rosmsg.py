@@ -56,7 +56,7 @@ class rosmsg_command(driver_command):
         rosmsg_dict['type'] = 0
 
         self.queue(rosmsg_dict['status'], np.int32, 'status')
-        self.queue(rosmsg_dict['type'], np.int32, 'type') # TODO: why is this a uint32_t...
+        self.queue(rosmsg_dict['type'], np.uint32, 'type') # TODO: why is this a uint32_t...
 
 
 class rprm_struct(driver_command):
