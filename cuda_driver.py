@@ -707,7 +707,7 @@ def main():
     signal.signal(signal.SIGINT, sigint_handler)
 
     if(DEBUG):
-        print('cuda_driver waiting for socket connection')
+        print('cuda_driver waiting for socket connection on port ' + str(network_settings.getint('CUDADriverPort')))
 
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
