@@ -24,7 +24,7 @@ CUDA_EXIT = ord('e')
 
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
-CUDA_GENERATE_PULSE = ord('p')
+CUDA_GENERATE_PULSE = ord('l')
 CUDA_PULSE_INIT = ord('i')
 
 NO_COMMAND = ord('n')
@@ -65,6 +65,7 @@ class driver_command(object):
         self.command = np.uint8(command)
     
     def queue(self, data, dtype, name = '', nitems = 1):
+        # pdb.set_trace()
         self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
    
     
@@ -342,7 +343,7 @@ class sequence(object):
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
             raise ValueError('rfreq != tfreq, this behavior is not yet supported')
         
-        if self.ctrlprm['number_of_samples'] <= 0:
+        if self.ctrlprm['number_of_baseband_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')
 
         if self.npulses == 0:

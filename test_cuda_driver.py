@@ -15,7 +15,7 @@ from drivermsg_library import *
 from socket_utils import *
 from shm_library import *
 
-START_DRIVER = False 
+START_DRIVER = True 
 
 
 if sys.hexversion < 0x030300F0:
@@ -81,13 +81,41 @@ class CUDA_ServerTestCases(unittest.TestCase):
         print('running get data command')
         getdata = cuda_get_data_command([self.serversock])
         getdata.transmit()
+    '''
+    def test_cuda_downsample_and_filter(self):
+        
+        cprint('testing cuda get data (downsampling)', 'red')
+        seq = create_testsequence()
+        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
+        setupcmd.transmit()
+
+        setupcmd = cuda_add_channel_command([self.serversock], seq) 
+        setupcmd.transmit()
+
+
+        cmd = cuda_process_command([self.serversock])
+        cmd.transmit()
+
+       # setupcmd = cuda_get_data_command([self.serversock]) #seq 
+       # setupcmd.transmit()
+
+       # transmit_dtype(self.serversock, 0, np.int32)
+       # nAnts = recv_dtype(self.serversock, np.int32)
+    '''
+    def test_cuda_add_channel(self):
+        cprint('testing cuda add channel', 'red')
+        seq = create_testsequence()
+        setupcmd = cuda_add_channel_command([self.serversock], seq) 
+        setupcmd.transmit()
+
 
     def test_cuda_setup(self):
         cprint('testing cuda setup', 'red')
         seq = create_testsequence()
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
-    '''
+
+    
     def test_cuda_tx_shm(self):
         cprint('testing cuda transmit sample generation', 'red')
         seq = create_testsequence()
@@ -98,7 +126,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
 
 
-    '''
+    
  
     # TODO: test removing channels
     def test_channel_remove(self):

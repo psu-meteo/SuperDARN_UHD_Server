@@ -97,6 +97,7 @@ class cuda_setup_handler(cudamsg_handler):
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_generate_pulse_handler(cudamsg_handler):
     def process(self):
+        print('enter cuda_generate_pulse_handler.process')
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
 
@@ -304,11 +305,15 @@ class cuda_exit_handler(cudamsg_handler):
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
     def process(self):
+        print('enter cuda_process_handler:process')
         cmd = cuda_process_command([self.sock], SWING0)
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].acquire()
-        
+       
+        print('calling rx_init() only for debuging, Remove later!!!!!!!!!!!!!!')
+        self.gpu.rx_init()
+ 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
 
@@ -494,7 +499,7 @@ class ProcessingGPU(object):
         bbrate_rx = ctrlprm['baseband_samplerate']
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(ctrlprm['number_of_samples']) # number of recv samples
+        nbbsamps_rx = int(ctrlprm['number_of_baseband_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate_rx
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
 
@@ -511,8 +516,9 @@ class ProcessingGPU(object):
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nchans, self.ntaps_ifbb, 2]))
     
         # generate filters
+        print(self.ntaps_rfif)
         self._kaiser_filter_s0(self.ntaps_rfif)    
-        self.__rolloff_filter_s1()
+#        self._rolloff_filter_s1()
     
         self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, 2 * nifsamps_rx]))
         self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, 2 * nbbsamps_rx]))
@@ -626,23 +632,23 @@ class ProcessingGPU(object):
 
         cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
  
-    def _rect_filter_s0():
+    def _rect_filter_s0(self):
         self.rx_filtertap_rfif[:,:,:] = 0
         self.rx_filtertap_rfif[:,:,0] = 1
            
-    def _kaiser_filter_s0(ntaps0):
+    def _kaiser_filter_s0(self, ntaps0):
         gain = 3.5
         beta = 5
 
         self.rx_filtertap_rfif[:,:,:] = 0
         m = ntaps0 - 1 
-        b = i0(beta)
+        b = scipy.special.i0(beta)
         for i in range(ntaps0):
-            k = scipy.special.i0((2 * beta / m) * sqrt(i * (m - i)))
+            k = scipy.special.i0((2 * beta / m) * np.sqrt(i * (m - i)))
             self.rx_filtertap_rfif[:,i,0] = gain * (k / b)
             self.rx_filtertap_rfif[:,i,1] = 0
 
-    def _rolloff_filter_s1(dmrate1):
+    def _rolloff_filter_s1(self, dmrate1):
         self.rx_filtertap_ifbb[:,:,:] = 0
         for i in range(ntaps1):
             x = 8 * (2 * np.pi * (float(i) / ntaps1) - np.pi)
@@ -650,7 +656,7 @@ class ProcessingGPU(object):
         
         self.rx_filtertap_ifbb[:,ntaps1/2,0] = 0.1 * 1. # handle the divide-by-zero condition
         
-    def _matched_filter_s1(dmrate1):
+    def _matched_filter_s1(self, dmrate1):
         self.rx_filtertap_ifbb[:,:,:] = 0.
 
         for i in range(ntaps1/2-dmrate1/4, ntaps1/2+dmrate1/4):

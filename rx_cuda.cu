@@ -21,8 +21,8 @@ gridDim.y   = nAntennas
 __device__ size_t rf_sample_idx(uint32_t tsamp)
 {   //      iChannel    * nChannles  * nFilterSamles/2  + iAntenna    * nFilterSamples/2 + 1/8  * 4 * iSampleIF*nFilterSamples/2  + 4* iFilterSample*2
     return (threadIdx.y * blockDim.y * blockDim.x)      + (blockIdx.y * blockDim.x) + tsamp;
-    nSamplesRF = ?
-    return tsamp + threadIdx.y *nSamplesRF + blockIdx.y * blockDim.y * nSamplesRF 
+   // nSamplesRF = ?
+   // return tsamp + threadIdx.y *nSamplesRF + blockIdx.y * blockDim.y * nSamplesRF 
 
 }
 
@@ -36,8 +36,7 @@ __device__ size_t rf_filter_idx(uint32_t tfilt)
 __device__ size_t rf_output_idx(int32_t output_idx)
 {  		
     // old: return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
-    return ouput_idx + 2 * gridDim.x * ( threadIdx.y + blockIdx.y * blockdim.y) // or even replace output_idx with blockIdx.x*2
-
+    return output_idx + 2 * gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y); // or even replace output_idx with blockIdx.x*2
 }
 
 
