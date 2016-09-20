@@ -271,14 +271,18 @@ class cuda_remove_channel_handler(cudamsg_handler):
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
     def process(self):
+        print('entering cuda_get_data handler')
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
 
-        channel = recv_dtype(self.sock, np.int32)
+        pdb.set_trace()
+
+        channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
         samples = self.gpu.pull_rxdata()
-        (nants, nchans, nsamps) = samples.shape()
+
+        nants, nchans, nsamps = samples.shape
         
-        transmit_dtype(self.sock, len(nants), np.uint32)
+        transmit_dtype(self.sock, nants, np.uint32)
 
         for aidx in nants:
             transmit_dtype(self.sock, self.antennas[aidx], np.uint16)

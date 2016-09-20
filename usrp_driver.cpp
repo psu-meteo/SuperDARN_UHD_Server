@@ -196,6 +196,17 @@ uint32_t sock_get_uint32(int32_t sock)
    return d;
 }
 
+int32_t sock_get_int32(int32_t sock)
+{
+   int32_t d = 0;
+   ssize_t status = recv(sock, &d, sizeof(int32_t), 0);
+   if(status != sizeof(int32_t)) {
+        fprintf(stderr, "error receiving int32_t\n");
+   }
+   return d;
+}
+
+
 ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
    ssize_t status = send(sock, &d, sizeof(uint32_t), 0);
@@ -672,11 +683,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 case READY_DATA: {
                     DEBUG_PRINT("READY_DATA command, waiting for uhd threads to join back\n");
-                    uint32_t i;
+                    uint32_t channel_index;
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
                     
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, sending metadata\n");
+                    // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
+                    channel_index = sock_get_int32(driverconn); 
 
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %d\n", state, ant, num_requested_rx_samples);
                     sock_send_int32(driverconn, state);  // send status

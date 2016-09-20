@@ -353,23 +353,23 @@ class RadarHardwareManager:
 
         # check status of usrp drivers
         for usrpsock in self.usrpsocks:
-            transmit_dtype(usrpsock, channel.cnum, np.int32)
+            transmit_dtype(usrpsock, channel.cnum, np.int32) # WHY DO THIS?
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
 
             cprint('GET_DATA rx status {}'.format(rx_status), 'blue')
-            if rx_status != 1:
+            if rx_status != 2:
                 cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'blue')
                 #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
 
         cmd.client_return()
-
         cprint('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status), 'blue')
         
         # by this point, the cuda drivers will have already recieved a process command
         # they will not process the get_data command until processing is complete
         cmd = cuda_get_data_command(self.cudasocks)
+
         cmd.transmit()
 
         # TODO: setup through all sockets
@@ -379,7 +379,10 @@ class RadarHardwareManager:
         # TODO: fill in sample buffer with baseband sample array
         for cudasock in self.cudasocks:
             # TODO: recieve antenna number
+
+            transmit_dtype(cudasock, channel.cnum, np.int32)
             nants = recv_dtype(cudasock, np.uint32)
+
             for ant in nants:
                 ant = recv_dtype(cudasock, np.uint16)
                 num_samples = recv_dtype(cudasock, np.uint32)
@@ -412,7 +415,6 @@ class RadarHardwareManager:
         beamform_main = np.array([rad_to_rect(a * pshift) for a in antennas_list])
         #beamform_back = np.ones(len(MAIN_ANTENNAS))
 
-        pdb.set_trace()
         cprint('get_data complete!', 'blue')
 
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
