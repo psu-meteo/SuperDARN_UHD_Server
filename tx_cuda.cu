@@ -35,7 +35,7 @@ __device__ size_t outdata_idx(void) {
 // [pulse][sample]
 // index into input baseband samples
 __device__ size_t indata_idx(int32_t offset) {
-    return 2 * blockIdx.x + offset;
+    return 2 * blockIdx.x + offset; // MGU: always antenna=0, channel=0 and pulse=0 or smart cuda handled indexing???
 }
 
 // dummy function for setting breakpoints...
@@ -59,6 +59,7 @@ __global__ void interpolate_and_multiply(
     __shared__ float qrf_samples[1024];
 
     //Calculate the increment between two adjacent rf samples
+	// what is the difference between upsampling linear interpolation or upsampling and lowpass???
     float inc_i;
     float inc_q;
     inc_i = (indata[indata_idx(I_OFFSET)+2] - indata[indata_idx(I_OFFSET)]) / blockDim.x; // baseband sample - 
@@ -67,6 +68,8 @@ __global__ void interpolate_and_multiply(
     /* Calculate the sample's phase value due to NCO mixing and beamforming */
     float phase = fmod((double)(blockDim.x*blockIdx.x + threadIdx.x)*txfreq_rads[threadIdx.y], 2*M_PI) +
         blockIdx.y*txphasedelay_rads[threadIdx.y];
+	// MGU: remove blockIdx.y
+	// MGU: fmod to avoid rounding errors? check if iSampleRF % gpu.fsamptx
 
     /* Calculate the output sample vectors, one for each freq/beam channel */
     unsigned int localInx = threadIdx.y*blockDim.x+threadIdx.x;

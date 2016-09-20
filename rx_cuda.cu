@@ -2,22 +2,42 @@
 #include <stdint.h>
 #include "assert.h"
 
+/*
+INDEXING for multiply_and_add()
+
+threadIdx.x = iFilterSample*2
+threadIdx.y = iChannel
+blockDim.x  = nFilterSamples /2
+blockDim.y  = nChannles
+blockIdx.x  = iSampleIF
+blockIdx.y  = iAntenna
+gridDim.x   = nSamplesIF
+gridDim.y   = nAntennas
+
+
+*/
+
 // was samples[threadIdx.y][blockIdx.y][tsamp];
 __device__ size_t rf_sample_idx(uint32_t tsamp)
-{
-    return (threadIdx.y * blockDim.y * blockDim.x) + (blockIdx.y * blockDim.x) + tsamp;
+{   //      iChannel    * nChannles  * nFilterSamles/2  + iAntenna    * nFilterSamples/2 + 1/8  * 4 * iSampleIF*nFilterSamples/2  + 4* iFilterSample*2
+    return (threadIdx.y * blockDim.y * blockDim.x)      + (blockIdx.y * blockDim.x) + tsamp;
+    nSamplesRF = ?
+    return tsamp + threadIdx.y *nSamplesRF + blockIdx.y * blockDim.y * nSamplesRF 
+
 }
 
 // was filter[threadIdx.y][tfilt]
 __device__ size_t rf_filter_idx(uint32_t tfilt)
 {
-    return 4 * threadIdx.x * threadIdx.y; 
+    return tfilt + threadIdx.y*blockDim.x*4; // return 4 * threadIdx.x * threadIdx.y;
 }
 
 // odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
 __device__ size_t rf_output_idx(int32_t output_idx)
-{
-    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
+{  		
+    // old: return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
+    return ouput_idx + 2 * gridDim.x * ( threadIdx.y + blockIdx.y * blockdim.y) // or even replace output_idx with blockIdx.x*2
+
 }
 
 
@@ -38,7 +58,7 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
     // calculate index of sample from global memory samples array
     float stride = 1./8; // The number of filter taps is (1./stride) times the decimation rate
     tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
-
+    //      1/8   *4*iSampleIF+nFilterSamples/2  + 4* iFilterSample*2
     float i0 = samples[rf_sample_idx(tsamp)];
     float q0 = samples[rf_sample_idx(tsamp+1)];
     float i1 = samples[rf_sample_idx(tsamp+2)];
