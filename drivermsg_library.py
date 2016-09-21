@@ -24,7 +24,7 @@ CUDA_EXIT = ord('e')
 
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
-CUDA_GENERATE_PULSE = ord('p')
+CUDA_GENERATE_PULSE = ord('l')
 CUDA_PULSE_INIT = ord('i')
 
 NO_COMMAND = ord('n')

@@ -383,16 +383,17 @@ class RadarHardwareManager:
             transmit_dtype(cudasock, channel.cnum, np.int32)
             nants = recv_dtype(cudasock, np.uint32)
 
-            for ant in nants:
+            for ant in range(nants):
                 ant = recv_dtype(cudasock, np.uint16)
                 num_samples = recv_dtype(cudasock, np.uint32)
                 samples = recv_dtype(cudasock, np.float32, num_samples)
-                 
+                samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+
                 if ant < MAX_MAIN_ARRAY_TODO:
                     main_samples[ant] = samples[:]
 
                 else:
-                    back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples
+                    back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples[:]
                             
             # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
         
@@ -418,24 +419,23 @@ class RadarHardwareManager:
         cprint('get_data complete!', 'blue')
 
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
-            beamformed_samples = np.ones(len(antennas))
+            beamformed_samples = np.ones(n_samples)
 
             for i in range(n_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0)
 
-                for ant in range(antennas):
-                    itemp += np.real(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
-                             np.imag(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant])
-                    qtemp += np.real(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
-                             np.imag(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant])
+                for aidx in range(len(antennas)):
+                    itemp += np.real(samples[aidx][i]) * np.real(phasing_matrix[aidx]) - \
+                             np.imag(samples[aidx][i]) * np.imag(phasing_matrix[aidx])
+                    qtemp += np.real(samples[aidx][i]) * np.imag(phasing_matrix[aidx]) + \
+                             np.imag(samples[aidx][i]) * np.real(phasing_matrix[aidx])
                 beamformed_samples[i] = complex_ui32_pack(itemp, qtemp)
 
             return beamformed_samples
 
         main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
         #back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
-        pdb.set_trace()
 
 
 

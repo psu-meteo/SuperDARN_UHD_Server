@@ -84,12 +84,10 @@ class cuda_setup_handler(cudamsg_handler):
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
 
-
         print('entering cuda_setup_handler (currently blank!)')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
-
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
@@ -218,7 +216,6 @@ class cuda_add_channel_handler(cudamsg_handler):
         print('entering cuda_add_channel_handler, waiting for swing semaphores')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
-        
         # get picked sequence information dict from usrp_server
         cmd = cuda_add_channel_command([self.sock])
         cmd.receive(self.sock)
@@ -251,7 +248,6 @@ class cuda_pulse_init_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
-        #pdb.set_trace()
         #self.gpu.sequences = [None for chan in range(self.gpu.nchans)]
 
         semaphore_list[SIDEA][SWING0].release()
@@ -275,22 +271,20 @@ class cuda_get_data_handler(cudamsg_handler):
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
 
-        pdb.set_trace()
-
         channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
         samples = self.gpu.pull_rxdata()
 
         nants, nchans, nsamps = samples.shape
         
         transmit_dtype(self.sock, nants, np.uint32)
-
-        for aidx in nants:
+        for aidx in range(nants):
             transmit_dtype(self.sock, self.antennas[aidx], np.uint16)
             # TODO: calculate size of transmit samples for channel/ant
             transmit_dtype(self.sock, nsamps, np.uint32)
-            self.sock.sendall(samples[aidx][channel].tobytes())
+            self.sock.sendall(samples[aidx][channel-1].tobytes())
 
         # TODO: remove hardcoded swing/side
+        pdb.set_trace()
         semaphore_list[SIDEA][SWING0].release()
 
 # cleanly exit.
@@ -308,7 +302,7 @@ class cuda_process_handler(cudamsg_handler):
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].acquire()
-        
+        pdb.set_trace() 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
 
@@ -374,7 +368,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, antennas, maxchannels = 1, maxpulses = 8, ntapsrx_rfif = 50, ntapsrx_ifbb = 200, rfifrate = 32, fsamptx = 10000000, fsamprx = 10000000):
+    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx):
         self.antennas = np.int16(antennas)
         # maximum supported channels
         self.nchans = int(maxchannels)
@@ -387,6 +381,7 @@ class ProcessingGPU(object):
 
         # rf to if downsampling ratio 
         self.rfifrate = int(rfifrate)
+        self.ifbbrate = int(ifbbrate)
 
         # USRP rx/tx sampling rates
         self.fsamptx = int(fsamptx)
@@ -488,7 +483,6 @@ class ProcessingGPU(object):
     def rx_init(self): 
         # build arrays based on first sequence..
         # TODO: support multiple sequences?
-       
         ctrlprm = self.sequences[0].ctrlprm
 
         bbrate_rx = ctrlprm['baseband_samplerate']
@@ -496,16 +490,10 @@ class ProcessingGPU(object):
         # calculate rx sample decimation rates
         nbbsamps_rx = int(ctrlprm['number_of_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate_rx
+        
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
-
-        # compute decimation rate for RF to IF, this is fixed..
-        # so, current worst case is 16 antennas with 2 channels, 10 MSPS sampling rate
-        # block size of 1024
-        # so, (1024 / 16 / 2) = 32
-        # unrolled pre-reduction of 2 in rx kernels
-        # so, decimation rate of 64
         nifsamps_rx = int(np.round(self.nrfsamps_rx / self.rfifrate))
-        # allocate memory on cpu, compile functions
+
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nchans, self.ntaps_rfif, 2]))
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nchans, self.ntaps_ifbb, 2]))
@@ -534,7 +522,7 @@ class ProcessingGPU(object):
 
         assert self._blocksize(self.rx_block_if) <= max_blocksize, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
         assert self._blocksize(self.rx_block_bb) <= max_blocksize, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-
+        pdb.set_trace()
 
     def synth_channels(self, bbtx, bbrates_tx):
         # prepare sample 
@@ -653,12 +641,15 @@ class ProcessingGPU(object):
             self.rx_filter_taps1[:,i,0] = 4./dmrate1
 
 # returns a list of antennas indexes in the usrp_config.ini file
-def parse_usrpconfig_antennas(usrpconfig, main_flag):
-    antenna_list = []
+def parse_usrpconfig_antennas(usrpconfig):
+    main_antenna_list = []
+    back_antenna_list = []
     for usrp in usrpconfig.sections():
-        if eval(usrpconfig[usrp]['mainarray']) == main_flag: # probably a bad idea
-            antenna_list.append(int(usrpconfig[usrp]['array_idx']))
-    return antenna_list
+        if eval(usrpconfig[usrp]['mainarray']) == True: # probably a bad idea
+            main_antenna_list.append(int(usrpconfig[usrp]['array_idx']))
+        else:
+            back_antenna_list.append(int(usrpconfig[usrp]['array_idx']))
+    return main_antenna_list, back_antenna_list
 
 
 
@@ -667,8 +658,7 @@ def main():
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
 
-    main_antennas = parse_usrpconfig_antennas(usrpconfig, main_flag = True)
-    back_antennas = parse_usrpconfig_antennas(usrpconfig, main_flag = False)
+    main_antennas, back_antennas = parse_usrpconfig_antennas(usrpconfig)
     antennas = main_antennas + back_antennas
 
     # parse gpu config file

@@ -32,7 +32,7 @@ cuda\_driver does downconversion of RF samples from usrp\_driver.
 ## usrp\_driver.cpp
 usrp\_driver uses the UHD API to tune a USRP and grab samples. 
 In an imaging configuration with multiple USRPs, one of these would run for each USRP. 
-
+Tested on UHD release 003.009.004, underflow issues on .003.010.001
 
 # Dependencies
 python 3 with numpy, pycuda
