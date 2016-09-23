@@ -47,7 +47,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            #print('\ttransmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
@@ -361,33 +361,34 @@ def create_testsequence():
     'radar' : 0, \
     'channel' : 0, \
     'local' : 0, \
-    'priority' : 0, \
+    'priority' : 1, \
     'current_pulseseq_idx': 0, \
     'tbeam' : 0, \
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
-    'tbeamwidth': 0, \
-    'tfreq': 10010, \
-    'trise': 100, \
-    'number_of_baseband_samples' : 500, \
+    'tbeamwidth': 0.0, \
+    'tfreq': 21650, \
+    'trise': 5000, \
+    'number_of_samples' : 305, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 200000, \
-    'filter_bandwidth' : 0, \
+    'baseband_samplerate' : 3333.3333, \
+    'filter_bandwidth' : 3333, \
     'match_filter' : 0, \
-    'rfreq' : 10010, \
+    'rfreq' : 21650, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
-    'rbeamwidth' : 0, \
-    'status' : 0}
+    'rbeamwidth' : 0.0, \
+    'status' : 0, \
+    'pulseseq_idx' : 0}
         
-    npulses = 3
+    npulses = 8
 
-    tr_to_pulse_delay = 50e-6
-    pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
-
+    tr_to_pulse_delay = 60
+    #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
+    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] /1e6
     txbbrate = ctrlprm['baseband_samplerate']
-    pulse_lens = [300e-6, 300e-6, 300e-6]
+    pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
     phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
     pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
 
@@ -397,4 +398,11 @@ def create_testsequence():
 
     seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
 
+    return seq
+
+def create_testsequence_uafscan():
+    import pickle
+    fh = open('uafscan_sequence.pickle', 'rb')
+    seq = pickle.load(fh)
+    fh.close
     return seq

@@ -96,6 +96,46 @@ class CUDA_ServerTestCases(unittest.TestCase):
         cmd = cuda_process_command([self.serversock])
         cmd.transmit()
 
+
+
+
+# Copy from usrm_server.py
+        cmd = cuda_get_data_command(self.serversock)
+
+        cmd.transmit()
+
+        # TODO: setup through all sockets
+        # recv metadata from cuda drivers about antenna numbers and whatnot
+        # fill up provided main and back baseband sample buffers
+
+        # TODO: fill in sample buffer with baseband sample array
+        cudasock = self.serversock
+            # TODO: recieve antenna number
+
+        transmit_dtype(cudasock, 0 , np.int32)
+        nants = recv_dtype(cudasock, np.uint32)
+        dbPrint('received nants= {}'.format(nants))
+
+        for ant in range(nants):
+            ant = recv_dtype(cudasock, np.uint16)
+            dbPrint('received idx ant = {}'.format(ant))
+            num_samples = recv_dtype(cudasock, np.uint32)
+            samples = recv_dtype(cudasock, np.float32, num_samples)
+             
+            if ant < MAX_MAIN_ARRAY_TODO:
+                main_samples[ant] = samples[:]
+
+            else:
+                back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples
+                           
+        # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
+        
+    # TODO: currently assuming samples is main samples, no back array!
+
+
+       # pdb.set_trace()
+        cmd.client_return()
+
        # setupcmd = cuda_get_data_command([self.serversock]) #seq 
        # setupcmd.transmit()
 
@@ -147,6 +187,9 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
 
     '''
+
+def dbPrint(msg):
+    print(' {}: {}'.format(__file__, msg))  
        
 if __name__ == '__main__':
     unittest.main()

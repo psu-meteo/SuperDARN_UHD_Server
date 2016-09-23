@@ -152,7 +152,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         trise = ctrlprm['trise'] / 1e9 # read in rise time in seconds (TODO: fix units..)
         assert tbuffer >= int(self.hardware_limits['min_tr_to_pulse']) / 1e6, 'time between TR gate and RF pulse too short for hardware'
-        assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length is too short for hardware'
+        assert tpulse > int(self.hardware_limits['min_chip']) / 1e6, 'pulse length ({} micro s) is too short for hardware (min is {} micro s)'.format(tpulse*1e6, self.hardware_limits['min_chip'])
         assert tpulse < int(self.hardware_limits['max_tpulse']) / 1e6, 'pulse length is too long for hardware'
 
         if not (tfreq >= int(self.hardware_limits['minimum_tfreq'])):
@@ -264,7 +264,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
         cmd = cuda_remove_channel_command([self.sock])
         cmd.receive(self.sock)
         # This is not implemented..
-        pdb.set_trace()
+        # pdb.set_trace()
         pass
 
 
@@ -276,20 +276,26 @@ class cuda_get_data_handler(cudamsg_handler):
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
 
-        pdb.set_trace()
+        #pdb.set_trace()
 
         channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
+        dbPrint('received channel={}'.format(channel))
+        dbPrint('pulling data...') 
         samples = self.gpu.pull_rxdata()
-
+        dbPrint('finished pullind data')
         nants, nchans, nsamps = samples.shape
-        
+        dbPrint('data format: {}'.format(samples.shape))
+        dbPrint('transmitting nants {}'.format(nants)) 
         transmit_dtype(self.sock, nants, np.uint32)
 
-        for aidx in nants:
+        for aidx in range(nants):
             transmit_dtype(self.sock, self.antennas[aidx], np.uint16)
+            dbPrint('transmitted antenna index')
             # TODO: calculate size of transmit samples for channel/ant
             transmit_dtype(self.sock, nsamps, np.uint32)
+            dbPrint('transmitted number of samples ({})'.format(nsamps))
             self.sock.sendall(samples[aidx][channel].tobytes())
+            dbPrint('transmitted data')
 
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].release()
@@ -311,8 +317,6 @@ class cuda_process_handler(cudamsg_handler):
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].acquire()
        
-        print('calling rx_init() only for debuging, Remove later!!!!!!!!!!!!!!')
-        self.gpu.rx_init()
  
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
@@ -499,7 +503,7 @@ class ProcessingGPU(object):
         bbrate_rx = ctrlprm['baseband_samplerate']
 
         # calculate rx sample decimation rates
-        nbbsamps_rx = int(ctrlprm['number_of_baseband_samples']) # number of recv samples
+        nbbsamps_rx = int(ctrlprm['number_of_samples']) # number of recv samples
         rx_time = nbbsamps_rx / bbrate_rx
         self.nrfsamps_rx = int(np.round(rx_time * self.fsamprx))
 
@@ -516,9 +520,9 @@ class ProcessingGPU(object):
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nchans, self.ntaps_ifbb, 2]))
     
         # generate filters
-        print(self.ntaps_rfif)
-        self._kaiser_filter_s0(self.ntaps_rfif)    
-#        self._rolloff_filter_s1()
+        
+        self._kaiser_filter_s0()    
+        self._rolloff_filter_s1()
     
         self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, 2 * nifsamps_rx]))
         self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, 2 * nbbsamps_rx]))
@@ -592,6 +596,7 @@ class ProcessingGPU(object):
     # kick off async data processing
     def rxsamples_process(self):
         print('processing rf -> if')
+        # pdb.set_trace()
         self.cu_rx_multiply_and_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.cu_rx_filtertaps_rfif, block = self.rx_block_if, grid = self.rx_grid_if, stream = self.streams[swing])
         print('processing if -> bb')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
@@ -636,30 +641,30 @@ class ProcessingGPU(object):
         self.rx_filtertap_rfif[:,:,:] = 0
         self.rx_filtertap_rfif[:,:,0] = 1
            
-    def _kaiser_filter_s0(self, ntaps0):
+    def _kaiser_filter_s0(self):
         gain = 3.5
         beta = 5
 
         self.rx_filtertap_rfif[:,:,:] = 0
-        m = ntaps0 - 1 
+        m = self.ntaps_rfif - 1 
         b = scipy.special.i0(beta)
-        for i in range(ntaps0):
+        for i in range(self.ntaps_rfif):
             k = scipy.special.i0((2 * beta / m) * np.sqrt(i * (m - i)))
             self.rx_filtertap_rfif[:,i,0] = gain * (k / b)
             self.rx_filtertap_rfif[:,i,1] = 0
 
-    def _rolloff_filter_s1(self, dmrate1):
+    def _rolloff_filter_s1(self):
         self.rx_filtertap_ifbb[:,:,:] = 0
-        for i in range(ntaps1):
-            x = 8 * (2 * np.pi * (float(i) / ntaps1) - np.pi)
-            self.rx_filtertap_ifbb[:,i,0] = 0.1 * (0.54 - 0.46 * np.cos((2 * np.pi * (float(i) + 0.5)) / ntaps1)) * np.sin(x) / x
+        for i in range(self.ntaps_ifbb):
+            x = 8 * (2 * np.pi * (float(i) / self.ntaps_ifbb) - np.pi)
+            self.rx_filtertap_ifbb[:,i,0] = 0.1 * (0.54 - 0.46 * np.cos((2 * np.pi * (float(i) + 0.5)) / self.ntaps_ifbb)) * np.sin(x) / x
         
-        self.rx_filtertap_ifbb[:,ntaps1/2,0] = 0.1 * 1. # handle the divide-by-zero condition
+        self.rx_filtertap_ifbb[:,self.ntaps_ifbb/2,0] = 0.1 * 1. # handle the divide-by-zero condition
         
     def _matched_filter_s1(self, dmrate1):
         self.rx_filtertap_ifbb[:,:,:] = 0.
 
-        for i in range(ntaps1/2-dmrate1/4, ntaps1/2+dmrate1/4):
+        for i in range(ntaps1/2-dmrate1/4, self.ntaps_ifbb/2+dmrate1/4):
             self.rx_filtertap_ifbb[:,i,0] = 4./dmrate1
 
 # returns a list of antennas indexes in the usrp_config.ini file
@@ -670,6 +675,8 @@ def parse_usrpconfig_antennas(usrpconfig, main_flag):
             antenna_list.append(int(usrpconfig[usrp]['array_idx']))
     return antenna_list
 
+def dbPrint(msg):
+    print(' {}: {} '.format(__file__, msg) )
 
 
 def main():

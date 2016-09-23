@@ -3,6 +3,8 @@ import pdb
 import pickle
 import socket
 
+verbose = True
+
 # pack i/q samples into uint32 for sending samples over the network
 # between usrp_server and arbyserver
 def complex_ui32_pack(isamp, qsamp):
@@ -18,6 +20,8 @@ def recv_dtype(sock, dtype, nitems = 1):
         data = sock.recv(nitems)
     else:
         dstr = sock.recv(dtype().nbytes * nitems)
+        if verbose:
+            print(' => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes * nitems , dstr  ))
         data = np.fromstring(dstr, dtype=dtype, count=nitems)
     if nitems == 1:
         return data[0]
@@ -43,3 +47,5 @@ def transmit_dtype(sock, data, dtype = None):
         data = dtype(data)
 
     dstr = sock.sendall(data.tobytes())
+    if verbose:
+        print(' => {}  transmitted {} as {} ({} bytes): {}'.format(__file__, data, dtype, len(data.tobytes()), data.tobytes()))
