@@ -284,7 +284,6 @@ class cuda_get_data_handler(cudamsg_handler):
             self.sock.sendall(samples[aidx][channel-1].tobytes())
 
         # TODO: remove hardcoded swing/side
-        pdb.set_trace()
         semaphore_list[SIDEA][SWING0].release()
 
 # cleanly exit.
@@ -302,7 +301,6 @@ class cuda_process_handler(cudamsg_handler):
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
         semaphore_list[SIDEA][SWING0].acquire()
-        pdb.set_trace() 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
 
@@ -522,7 +520,6 @@ class ProcessingGPU(object):
 
         assert self._blocksize(self.rx_block_if) <= max_blocksize, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
         assert self._blocksize(self.rx_block_bb) <= max_blocksize, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-        pdb.set_trace()
 
     def synth_channels(self, bbtx, bbrates_tx):
         # prepare sample 
@@ -690,9 +687,11 @@ def main():
     
     # create shared memory buffers and semaphores for rx and tx
     for ant in antennas:
+        #pdb.set_trace()
         rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
+        tx_shm_list.append(create_shm(ant, SWING1, SIDEA, txshm_size, direction = TXDIR))
 
         semaphore_list[SIDEA].append(create_sem(ant, SWING0))
         semaphore_list[SIDEA].append(create_sem(ant, SWING1))
