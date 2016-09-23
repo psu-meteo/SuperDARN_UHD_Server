@@ -137,12 +137,12 @@ class RadarHardwareManager:
                 if self.state == STATE_GET_DATA:
                     self.next_state = STATE_WAIT
 
+                    for ch in self.channels:
+                        self.get_data(ch)
+
                     cmd = cuda_process_command(self.cudasocks)
                     cmd.transmit()
                     cmd.client_return()
-
-                    for ch in self.channels:
-                        self.get_data(ch)
 
                 if self.state == STATE_RESET:
                     cprint('stuck in STATE_RESET?!', 'yellow')
@@ -175,7 +175,7 @@ class RadarHardwareManager:
         usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
         usrp_driver_socks = []
         # TODO: parse usrp_config.ini, read in array_idx + 1, generate list of antenna indexes
-        USRP_ANTENNA_IDX = [1]
+        USRP_ANTENNA_IDX = [0]
         # open each 
         try:
             for (ant,aidx) in enumerate(usrp_drivers):
@@ -365,7 +365,7 @@ class RadarHardwareManager:
 
         cmd.client_return()
         cprint('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status), 'blue')
-        
+
         # by this point, the cuda drivers will have already recieved a process command
         # they will not process the get_data command until processing is complete
         cmd = cuda_get_data_command(self.cudasocks)
@@ -383,16 +383,17 @@ class RadarHardwareManager:
             transmit_dtype(cudasock, channel.cnum, np.int32)
             nants = recv_dtype(cudasock, np.uint32)
 
-            for ant in nants:
+            for ant in range(nants):
                 ant = recv_dtype(cudasock, np.uint16)
                 num_samples = recv_dtype(cudasock, np.uint32)
                 samples = recv_dtype(cudasock, np.float32, num_samples)
-                 
+                samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+
                 if ant < MAX_MAIN_ARRAY_TODO:
                     main_samples[ant] = samples[:]
 
                 else:
-                    back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples
+                    back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples[:]
                             
             # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
         
@@ -418,24 +419,23 @@ class RadarHardwareManager:
         cprint('get_data complete!', 'blue')
 
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
-            beamformed_samples = np.ones(len(antennas))
+            beamformed_samples = np.ones(n_samples)
 
             for i in range(n_samples):
                 itemp = np.int16(0)
                 qtemp = np.int16(0)
 
-                for ant in range(antennas):
-                    itemp += np.real(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant]) - \
-                             np.imag(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant])
-                    qtemp += np.real(beamformed_samples[ant][i]) * np.imag(phasing_matrix[ant]) + \
-                             np.imag(beamformed_samples[ant][i]) * np.real(phasing_matrix[ant])
+                for aidx in range(len(antennas)):
+                    itemp += np.real(samples[aidx][i]) * np.real(phasing_matrix[aidx]) - \
+                             np.imag(samples[aidx][i]) * np.imag(phasing_matrix[aidx])
+                    qtemp += np.real(samples[aidx][i]) * np.imag(phasing_matrix[aidx]) + \
+                             np.imag(samples[aidx][i]) * np.real(phasing_matrix[aidx])
                 beamformed_samples[i] = complex_ui32_pack(itemp, qtemp)
 
             return beamformed_samples
 
         main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
         #back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
-        pdb.set_trace()
 
 
 
@@ -490,21 +490,20 @@ class RadarHardwareManager:
         cprint('running pretrigger', 'blue')
 
         # TODO: handle channels with different pulse infomation..
-        rfrate = 2e6
         # TODO: parse tx sample rate dynamocially
         # TODO: handle pretrigger with no channels
         # rfrate = np.int32(self.cuda_config['FSampTX'])
         # extract sampling info from cuda driver
         # print('rf rate parsed from ini: ' + str(rfrate))
-
         pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
 
+        rfrate = 8000000 
         txfreq = 10e6 # TODO: read from config file
         rxfreq = 10e6 # TODO...
-        txrate = 2e6
-        rxrate = 2e6
+        txrate = 8000000 
+        rxrate = 8000000
 
         # TODO: calculate the number of RF transmit samples per-pulse
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
