@@ -114,15 +114,16 @@ class dataprm_struct(driver_command):
         driver_command.__init__(self, [socket], NO_COMMAND)
 
         prm_dict = {}
-
-        prm_dict['event_secs'] = 0
-        prm_dict['event_nsecs'] = 0
-        prm_dict['event_capture'] = 0
-        prm_dict['samples'] = 0
-        prm_dict['shm_memory'] = 0
-        prm_dict['status'] = 0
-        prm_dict['frame_header'] = 0
-        prm_dict['bufnum'] = 0
+        
+        # todo: populate event_secs and event_nsecs from GPS time (or USRP time?)
+        prm_dict['event_secs'] = 0      # uint32, start of pulse sequence, seconds, filled by site library if zero
+        prm_dict['event_nsecs'] = 0     # uint32, start of pulse sequence, nanoseconds (used only for seqlog?)
+        prm_dict['event_capture'] = 0   # flag used for seqlog 
+        prm_dict['samples'] = 0         # number of baseband rx samples
+        prm_dict['shm_memory'] = 0      # ? 
+        prm_dict['status'] = 0          # status, 0 is good
+        prm_dict['frame_header'] = 0    # ? 
+        prm_dict['bufnum'] = 0          # ?
 
         self.queue(prm_dict['event_secs'], np.uint32, 'event_secs')
         self.queue(prm_dict['event_nsecs'], np.uint32, 'event_nsecs')

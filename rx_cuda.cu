@@ -21,7 +21,7 @@ __device__ size_t rf_output_idx(int32_t output_idx)
 }
 
 
-__global__ void multiply_and_add(float *samples, float *odata, float *filter)
+__global__ void multiply_and_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block
     __shared__ float qtemp[1024];

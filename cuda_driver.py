@@ -499,7 +499,7 @@ class ProcessingGPU(object):
         self.rx_samples_if = np.float32(np.zeros([self.nants, self.nchans, 2 * nifsamps_rx]))
         self.rx_samples_bb = np.float32(np.zeros([self.nants, self.nchans, 2 * nbbsamps_rx]))
 
-        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_samples_rf = cuda.pagelocked_empty((self.nants, self.nchans, 2 * self.nrfsamps_rx), np.float32, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
 
         self.cu_rx_samples_rf = np.intp(self.rx_samples_rf.base.get_device_pointer())
 
@@ -562,7 +562,7 @@ class ProcessingGPU(object):
         shm.seek(0)
         for aidx in range(self.nants):
             for ch in range(self.nchans):
-                self.rx_samples_rf[aidx][ch] = np.frombuffer(shm, dtype=float, count = self.nrfsamps_rx)
+                self.rx_samples_rf[aidx][ch] = np.frombuffer(shm, dtype=np.int16, count = 2 * self.nrfsamps_rx)
                
     # kick off async data processing
     def rxsamples_process(self):

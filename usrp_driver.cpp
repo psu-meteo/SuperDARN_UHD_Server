@@ -686,8 +686,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     uint32_t channel_index;
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
-                    
-                    DEBUG_PRINT("READY_DATA usrp worker threads joined, sending metadata\n");
+
+                    DEBUG_PRINT("READY_DATA unlocking swing a semaphore\n");
+                    unlock_semaphore(swing, sem_swinga);
+        
+                    DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
                     channel_index = sock_get_int32(driverconn); 
 
@@ -785,7 +788,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
 
                         if (DEBUG) {
-         
                             start_time = usrp->get_time_now();
                             real_time = start_time.get_real_secs();
                             frac_time = start_time.get_frac_secs();
@@ -809,7 +811,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     " encountered at " << rx_error_time.get_real_secs() << std::endl;
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
-
+                    // TODO: investigate this.. why do I have 4 extra bytes sent to the usrp server?
                     sock_send_uint16(driverconn, 1); // so, either 1 sample offset or big/little endian
                     sock_send_uint16(driverconn, 1);
 
