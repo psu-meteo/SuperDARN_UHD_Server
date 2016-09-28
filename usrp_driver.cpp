@@ -429,11 +429,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
     ant = ai_ant->ival[0];
     std::string usrpargs(as_host->sval[0]);
-    usrpargs = "addr0=" + usrpargs; 
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=184.32e6";
     
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
-
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);

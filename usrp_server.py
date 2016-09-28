@@ -498,11 +498,11 @@ class RadarHardwareManager:
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
 
-        rfrate = 8000000 
-        txfreq = 10e6 # TODO: read from config file
-        rxfreq = 10e6 # TODO...
-        txrate = 8000000 
-        rxrate = 8000000
+        rfrate = 15360000 
+        txfreq = 12e6 # TODO: read from config file
+        rxfreq = 12e6 # TODO...
+        txrate = 15360000 
+        rxrate = 15360000
 
         # TODO: calculate the number of RF transmit samples per-pulse
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
