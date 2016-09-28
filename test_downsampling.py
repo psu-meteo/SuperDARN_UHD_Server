@@ -57,8 +57,9 @@ for i in range(max_connect_attempts):
         
 cprint('testing cuda get data (downsampling)', 'red')
 seq = create_testsequence_uafscan()
-seq.ctrlprm['rfreq'] = 2000
-seq.ctrlprm['tfreq'] = 2000
+lo_freq = 2e6
+seq.ctrlprm['rfreq'] = lo_freq / 1000
+seq.ctrlprm['tfreq'] = lo_freq / 1000
 
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
@@ -100,7 +101,7 @@ maxAmp = 2**15 * 0.9
 #sig  = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1])*np.pi*10000) * np.sin(2*np.pi*carrierFreq*timeVector) * maxAmp
 
 B = 1000 # bandwidth
-pulseFreq = 2e6 + B/2 + 500
+pulseFreq = lo_freq + B/2 + 500
 sig = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *250
 # add noise
 

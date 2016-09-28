@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 /*
-INDEXING for multiply_and_add()
+INDEXING for multiply_mix_add() (similar for multiply_and_add(), just IF => BB )
 
 threadIdx.x = iFilterSample*2
 threadIdx.y = iChannel
@@ -15,52 +15,28 @@ blockIdx.y  = iAntenna
 gridDim.x   = nSamplesIF
 gridDim.y   = nAntennas
 
+Input / Output format:
+  [rx_samples_FB] = nAntennas x nChannels x 2*nSamples_FB(I/Q-Interleaved)
+  for all frequency bands FB: RF, IF, and BB
+
+
+TODO:
+ - if filter_RFIF is complex: check if phase correction of local oscillator is correct
+ - if filter is real we could save calc time by removing all calculations with imag(filter) and phase correction, maybe write additional function multiply_add_real
+ - what is block arround line 122 checking for?
+ - get decimation rates from cuda_driver
 
 */
 
-/*
-// was samples[threadIdx.y][blockIdx.y][tsamp];
-__device__ size_t rf_sample_idx(uint32_t tsamp)
-{   //      iChannel    * nChannles  * nFilterSamles/2  + iAntenna    * nFilterSamples/2 + 1/8  * 4 * iSampleIF*nFilterSamples/2  + 4* iFilterSample*2
-    return (threadIdx.y * blockDim.y * blockDim.x)      + (blockIdx.y * blockDim.x) + tsamp;
-   // nSamplesRF = ?
-   // return tsamp + threadIdx.y *nSamplesRF + blockIdx.y * blockDim.y * nSamplesRF 
-
-}
-
-// was filter[threadIdx.y][tfilt]
-__device__ size_t rf_filter_idx(uint32_t tfilt)
-{
-    return tfilt + threadIdx.y*blockDim.x*4; // return 4 * threadIdx.x * threadIdx.y;
-}
-
-
-// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[iThread_lin];
-__device__ size_t rf_output_idx(int32_t output_idx)
-{  		
-    // old: return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
-    return output_idx + 2 * gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y); // or even replace output_idx with blockIdx.x*2
-}
-
-*/
 __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block
     __shared__ float qtemp[1024];
 
     uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;  // linear thread index in block
- //   int32_t tfilt;
- //   uint32_t tsamp;
-
-//    int32_t output_idx = 2*blockIdx.x;
-
-    // calculate index of sample from global memory samples array
-   // float stride = 1./8; // The number of filter taps is (1./stride) times the decimation rate
-   // tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
 
     // TODO: get from cuda_driver.py!
     uint32_t decimationRate_if2bb = 75;  
-//    float samplingFreq_rf = 8e6;
 
     uint32_t idxSample_filter = 4 * ( threadIdx.x  + gridDim.x * threadIdx.y);     // 2 samples per thread (unrolled) times 2 components per sample (I /Q) = 4
     uint32_t nSamples_if = decimationRate_if2bb * (gridDim.x - 1) + gridDim.x *2;  // nSamples_in = decimationRate * ( nSamples_out -1) + nSamples_filter
@@ -86,15 +62,6 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
     qtemp[iThread_lin] = p0re * q0 + p0im * i0 + p1re * q1 + p1im * i1;
 
      __syncthreads();
-
-    if (threadIdx.x == 0 && blockIdx.x == 1 ) {
-       printf("rx_cuda: %d \n", idxSample_if);
-       printf("rx_cuda: i/q: %f %f %f %f \n", i0, q0, i1, q1);
-       printf("rx_cuda: filter: %f %f %f %f \n",p0re, p0im, p1re, p1im);
-       printf("rx_cuda: iq temp 0 : %f %f  \n", itemp[iThread_lin], qtemp[iThread_lin]);
-     //  for(int iTmp = 0; iTmp < blockDim.x * blockDim.y; iTmp++){
-     //      printf("   tmp %d : %f  + i %f \n", iTmp, itemp[iTmp], qtemp[iTmp]);
-     //  }
 
     }
 
@@ -122,60 +89,34 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
      }
      __syncthreads();
 
-
+     // write back results
      if (threadIdx.x == 0) {
-
         uint32_t  output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
         odata[output_idx  ] = (float)  itemp[iThread_lin];
         odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }  
 }       
-/*
-// was samples[blockIdx.y][tsamp];
-__device__ size_t if_sample_idx(uint32_t tsamp)
-{
-    return (blockIdx.y * blockDim.x) + tsamp;
-}
 
-// was filter[threadIdx.y][tfilt]
-__device__ size_t if_filter_idx(uint32_t tfilt)
-{
-    return 4 * threadIdx.x * threadIdx.y; 
-}
 
-// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[iThread_lin];
-__device__ size_t if_output_idx(int32_t output_idx)
-{
-    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
-}
 
-*/
+
 __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];
     __shared__ float qtemp[1024];
 
     uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;
- //   int32_t tfilt;
+    
+    // TODO: mgu delete next block if I know what assert is checking for
     uint32_t tsamp;
-
-    //Each block writes exactly a baseband sample for each frequency
-    /*blockIdx.x corresponds to time-domain tiling; NBBSAMPS == gridDim.x
-    blockIdx.y corresponds to antenna channel tiling; NANTS == gridDim.y
-    threadIdx.y corresponds to frequency channel tiling; NFREQS == blockDim.y*/
-    int32_t output_idx = 2*blockIdx.x;
-
-
     // calculate index of sample from global memory samples array
     float stride = 1./2; // The number of filter taps is (1./stride) times the decimation rate
     tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
-
     // mix samples with nco, perform first reduction
     assert(tsamp <= (4 * blockDim.x * gridDim.x));
 
     // TODO: get from cuda_driver.py!
     uint32_t decimationRate_rf2if = 32;  
- //   float samplingFreq_rf = 8e6;
 
     uint32_t idxSample_filter = 4 * ( threadIdx.x  + gridDim.x * threadIdx.y);     // 2 samples per thread (unrolled) times 2 components per sample (I /Q) = 4
     uint32_t nSamples_rf = decimationRate_rf2if * (gridDim.x - 1) + gridDim.x *2;  // nSamples_in = decimationRate * ( nSamples_out -1) + nSamples_filter
@@ -206,9 +147,6 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
        float p1re = filter[idxSample_filter+2];
        float p1im = filter[idxSample_filter+3];
      
-       printf("rx_cuda:mix %d \n", idxSample_rf);
-       printf("rx_cuda:mix i/q: %f %f %f %f \n", i0, q0, i1, q1);
-       printf("rx_cuda:mix filter: %f %f %f %f \n",p0re, p0im, p1re, p1im);
     }
      __syncthreads();
 
@@ -258,23 +196,24 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
             atan(filter[idxSample_filter+3] / filter[idxSample_filter+2]) -
             atan(filter[idxSample_filter+1] / filter[idxSample_filter]);
 
+        // mgu: only makes sense for complex filters, for real phi_rem is always = 0
         /*Phase remainder exists because the NCO oscillator 
         may not complete an exact 360% rotation in a filter window*/
         double phi_rem = blockIdx.x*fmod((1*blockDim.x) * phase_inc, 2*M_PI);
+        
+        // mgu: these two lines should be correct. TODO: test if we use complex filters 
         double phiOffset = fmod(phase_inc * iSample_rf, 2*M_PI);
-
-        if (blockIdx.x < 3) {
-             printf("   => BlockIdx.x %d: phaseInc: %f  phi_rem: %f  phiOffset: %f  \n", blockIdx.x, phase_inc, phi_rem, phiOffset);
-        }
-
-
-     //   phi_rem = phiOffset; 
+        phi_rem = phiOffset;
+       
+        //if (blockIdx.x < 3) {
+        //     printf("   => BlockIdx.x %d: phaseInc: %f  phi_rem: %f  phiOffset: %f  \n", blockIdx.x, phase_inc, phi_rem, phiOffset);
+        //}
         double ltemp = (double) itemp[iThread_lin];
         itemp[iThread_lin] = itemp[iThread_lin] * cos(phi_rem) - qtemp[iThread_lin] * sin(phi_rem);
         qtemp[iThread_lin] = ltemp * sin(phi_rem) + qtemp[iThread_lin] * cos(phi_rem);
 
+        // write outout
         output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
-        //deciding the output
         odata[output_idx  ] = (float)  itemp[iThread_lin];
         odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }
