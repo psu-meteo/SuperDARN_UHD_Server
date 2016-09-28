@@ -599,6 +599,7 @@ class ProcessingGPU(object):
         print('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
+        # for testing: plot RF, IF and BB
         if True:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
@@ -690,7 +691,7 @@ class ProcessingGPU(object):
         self.rx_filtertap_ifbb[:,self.ntaps_ifbb/2,0] = 0.1 * 1. # handle the divide-by-zero condition
 
     def _raisedCosine_filter(self):
-        alpha = 0.5
+        alpha = 0.22
         self.rx_filtertap_ifbb[:,:,:] = 0
         nTaps = self.ntaps_ifbb-1
         for iTap in range(nTaps+1):

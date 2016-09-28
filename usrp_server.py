@@ -24,7 +24,6 @@ CHANNEL_STATE_TIMEOUT = 120000
 debug = True
 
 # TODO: pull these from config file
-RADAR_NBEAMS = 16
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
 STATE_WAIT = 'WAIT'
@@ -399,7 +398,6 @@ class RadarHardwareManager:
         
         # TODO: currently assuming samples is main samples, no back array!
 
-        channel.state = STATE_WAIT
 
         cmd.client_return()
         
@@ -434,9 +432,10 @@ class RadarHardwareManager:
 
             return beamformed_samples
 
-        main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
-        #back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
+        channel.main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
+        #channel.back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
 
+        channel.state = STATE_WAIT
 
 
     def exit(self):
@@ -817,47 +816,43 @@ class RadarChannelHandler:
 
     def GetDataHandler(self, rmsg):
         cprint('entering hardware manager get data handler', 'blue')
-        # TODO: setup dataprm_struct
-        # see self.ctrlprm_struct.payload['number_of_samples']
-        # TODO investigate possible race conditions
-        # pdb.set_trace()
+        self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
+
         self.dataprm_struct.transmit()
         cprint('sending dprm struct', 'green')
 
-        #pdb.set_trace()
         if not self.active or self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
             return RMSG_FAILURE
 
+        # TODO investigate possible race conditions
         cprint('waiting for channel to idle before GET_DATA', 'blue')
         self._waitForState(STATE_WAIT)
 
         cprint('entering GET_DATA state', 'blue')
         self.state = STATE_GET_DATA
+        cprint('waiting to return to WAIT before returning samples', 'blue')
         self._waitForState(STATE_WAIT)
         cprint('GET_DATA complete, returning samples', 'blue')
 
 
         # TODO: get data handler waits for control_program to set active flag in controlprg struct
         # need some sort of synchronizaion..
-        # TODO: gather main/back samples..
-
-        main_samples = np.zeros(self.dataprm_struct.get_data('samples'))
+        # TODO: back samples..
+        main_samples = self.main_beamformed
         back_samples = np.zeros(self.dataprm_struct.get_data('samples'))
+
         transmit_dtype(self.conn, main_samples, np.uint32)
         transmit_dtype(self.conn, back_samples, np.uint32)
         
 
-        # TODO: what are these *actually*?
-        badtrdat_len = 1
-        badtrdat_start_usec = np.zeros(badtrdat_len)
-        badtrdat_duration_usec = np.zeros(badtrdat_len)
-        transmit_dtype(self.conn, badtrdat_len, np.uint32)
+        badtrdat_start_usec = self.pulse_offsets_vector * 1e6 # convert to us
+        transmit_dtype(self.conn, self.npulses, np.uint32)
         transmit_dtype(self.conn, badtrdat_start_usec, np.uint32) # length badtrdat_len
-        transmit_dtype(self.conn, badtrdat_duration_usec, np.uint32) # length badtrdat_len
+        transmit_dtype(self.conn, self.pulse_lens, np.uint32) # length badtrdat_len
 
-        # TODO: what are these?.. really?
-        num_transmitters = 16
+        # stuff these with junk, they don't seem to be used..
+        num_transmitters = 16 
         txstatus_agc = np.zeros(num_transmitters)
         txstatus_lowpwr = np.zeros(num_transmitters)
 
