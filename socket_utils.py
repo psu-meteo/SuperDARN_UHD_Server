@@ -3,7 +3,7 @@ import pdb
 import pickle
 import socket
 
-verbose = True
+verbose = False
 
 # pack i/q samples into uint32 for sending samples over the network
 # between usrp_server and arbyserver

@@ -57,9 +57,12 @@ for i in range(max_connect_attempts):
         
 cprint('testing cuda get data (downsampling)', 'red')
 seq = create_testsequence_uafscan()
+seq.ctrlprm['rfreq'] = 2000
+seq.ctrlprm['tfreq'] = 2000
+
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
-fsamprx = 10000000
+fsamprx = 8000000
 
 nSamples_rx_rf = int(np.round(nSamplesBB / bbrate_rx * fsamprx))
 rx_shm_size = 160000000 # from driver confi.ini
@@ -85,15 +88,39 @@ cmd.client_return()
 
 
 nAnts = 1
-rx_rf_data = cuda.pagelocked_empty((nAnts, 1, 2 * nSamples_rx_rf), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+rx_rf_data = np.zeros((nAnts, 1, 2 * nSamples_rx_rf), dtype=np.int16)
  
-rx_rf_data[:] = 0
 timeVector = np.array(range(nSamples_rx_rf)) / fsamprx
-rx_rf_data[0][0][0::2] = np.sin(2*np.pi*1e6*timeVector)*250
+carrierFreq = 2e6
+maxAmp = 2**15 * 0.9
+
+# sine
+#sig  = np.sin(2*np.pi*carrierFreq*timeVector)*maxAmp
+# bandpass signal
+#sig  = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1])*np.pi*10000) * np.sin(2*np.pi*carrierFreq*timeVector) * maxAmp
+
+B = 1000 # bandwidth
+pulseFreq = 2e6 + B/2 + 500
+sig = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *250
+# add noise
+
+rx_rf_data[0][0][0::2] = np.int16(sig.real)
+rx_rf_data[0][0][1::2] = np.int16(sig.imag)
+
+rx_rf_data[0][0][:] += np.int16((np.random.rand(nSamples_rx_rf*2)-0.5)*maxAmp/100000  )
+
+import myPlotTools as mpt
+#pdb.set_trace()
+# mpt.plot_freq(rx_rf_data[0][0], 8e6, iqInterleaved=True)
 
 
+ 
+# inceasing numbers
+#rx_rf_data[0][0][:] = np.array(range(nSamples_rx_rf*2)) 
+
+ 
 rx_shm_list[0][0].seek(0)
-rx_shm_list[0][0].write(rx_rf_data[0].tobytes())
+rx_shm_list[0][0].write(rx_rf_data[0][0].tobytes())
 rx_shm_list[0][0].flush()
 
 
@@ -143,7 +170,7 @@ for ant in range(nants):
 cmd.client_return
 
 
-mpt.plot_time_freq(main_samples[0], bbrate_rx)
+##mpt.plot_time_freq(main_samples[0], bbrate_rx)
 #pdb.set_trace()
 
 # setupcmd = cuda_get_data_command([self.serversock]) #seq 
@@ -154,3 +181,13 @@ mpt.plot_time_freq(main_samples[0], bbrate_rx)
 
 stop_cudaserver(serversock)
 tearDown(serversock)
+
+
+
+
+
+
+
+
+
+

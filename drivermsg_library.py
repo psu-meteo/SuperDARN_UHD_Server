@@ -131,7 +131,7 @@ class server_ctrlprm(driver_command):
             ctrlprm_dict['tbeamwidth'] = 0
             ctrlprm_dict['tfreq'] = 0
             ctrlprm_dict['trise'] = 0
-            ctrlprm_dict['number_of_baseband_samples'] = 0
+            ctrlprm_dict['number_of_samples'] = 0
             ctrlprm_dict['buffer_index'] = 0
             ctrlprm_dict['baseband_samplerate'] = 0
             ctrlprm_dict['filter_bandwidth'] = 0
@@ -157,7 +157,7 @@ class server_ctrlprm(driver_command):
         self.queue(ctrlprm_dict['tfreq'], np.int32, 'tfreq')
         self.queue(ctrlprm_dict['trise'], np.int32, 'trise')
 
-        self.queue(ctrlprm_dict['number_of_baseband_samples'], np.int32, 'number_of_baseband_samples')
+        self.queue(ctrlprm_dict['number_of_samples'], np.int32, 'number_of_samples')
         self.queue(ctrlprm_dict['buffer_index'], np.int32, 'buffer_index')
 
         self.queue(ctrlprm_dict['baseband_samplerate'], np.float32, 'baseband_samplerate')
@@ -343,7 +343,7 @@ class sequence(object):
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
             raise ValueError('rfreq != tfreq, this behavior is not yet supported')
         
-        if self.ctrlprm['number_of_baseband_samples'] <= 0:
+        if self.ctrlprm['number_of_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')
 
         if self.npulses == 0:
@@ -358,6 +358,7 @@ def create_testsequence():
     import configparser
 
     ctrlprm = {\
+    '' : np.zeros(120, dtype=np.uint8), \
     'radar' : 0, \
     'channel' : 0, \
     'local' : 0, \
@@ -367,14 +368,14 @@ def create_testsequence():
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0.0, \
-    'tfreq': 21650, \
+    'tfreq': 2000, \
     'trise': 5000, \
     'number_of_samples' : 305, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 3333.3333, \
     'filter_bandwidth' : 3333, \
     'match_filter' : 0, \
-    'rfreq' : 21650, \
+    'rfreq' : 2000, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
@@ -386,7 +387,8 @@ def create_testsequence():
 
     tr_to_pulse_delay = 60
     #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
-    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] /1e6
+    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] 
+    pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
     txbbrate = ctrlprm['baseband_samplerate']
     pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
     phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
