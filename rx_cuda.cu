@@ -16,9 +16,9 @@ gridDim.x   = nSamplesIF
 gridDim.y   = nAntennas
 
 Input / Output format:
-  [rx_samples_FB] = nAntennas x nChannels x 2*nSamples_FB(I/Q-Interleaved)
-  for all frequency bands FB: RF, IF, and BB
-
+ - [rx_samples_FB] = nAntennas x nChannels x 2*nSamples_FB(I/Q-Interleaved)
+   for all frequency bands FB: RF, IF, and BB
+ - Filter has be be time reversed (doesn't matter for symmetric filters)
 
 TODO:
  - if filter_RFIF is complex: check if phase correction of local oscillator is correct
@@ -63,7 +63,6 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
      __syncthreads();
 
-    }
 
      // parallel reduce samples (could unroll loop for speedup?)
      // Do this as long as the reduction is a power of 2
@@ -135,19 +134,7 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
         filter[idxSample_filter+2] * samples[idxSample_rf+3] +
         filter[idxSample_filter+3] * samples[idxSample_rf+2];
 
-    if (threadIdx.x == 0 && blockIdx.x == 1 ) {
-       float i0 = (float) samples[idxSample_rf  ];
-       float q0 = (float) samples[idxSample_rf+1];
-       float i1 = (float) samples[idxSample_rf+2];
-       float q1 = (float) samples[idxSample_rf+3];
-
-       // get filter values from global memory
-       float p0re = filter[idxSample_filter  ];
-       float p0im = filter[idxSample_filter+1];
-       float p1re = filter[idxSample_filter+2];
-       float p1im = filter[idxSample_filter+3];
      
-    }
      __syncthreads();
 
      /* Example: dmrate==100,
@@ -213,10 +200,9 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
         qtemp[iThread_lin] = ltemp * sin(phi_rem) + qtemp[iThread_lin] * cos(phi_rem);
 
         // write outout
-        output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
+        uint32_t output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
         odata[output_idx  ] = (float)  itemp[iThread_lin];
         odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }
 }
-
 

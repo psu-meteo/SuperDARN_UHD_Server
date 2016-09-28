@@ -599,29 +599,30 @@ class ProcessingGPU(object):
         print('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
-        import myPlotTools as mpt
-        import matplotlib.pyplot as plt
-        #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
-        plt.figure()        
-        cuda.memcpy_dtoh(self.rx_samples_if, self.cu_rx_samples_if) 
-        cuda.memcpy_dtoh(self.rx_samples_bb, self.cu_rx_samples_bb) 
-        ax = plt.subplot(311)
-        mpt.plot_freq(self.rx_samples_rf[0][0],  8e6, iqInterleaved=True, show=False)
-        ax.set_ylim([-80, 20])
-        plt.ylabel('RF')
+        if True:
+            import myPlotTools as mpt
+            import matplotlib.pyplot as plt
+            #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
+            plt.figure()        
+            cuda.memcpy_dtoh(self.rx_samples_if, self.cu_rx_samples_if) 
+            cuda.memcpy_dtoh(self.rx_samples_bb, self.cu_rx_samples_bb) 
+            ax = plt.subplot(311)
+            mpt.plot_freq(self.rx_samples_rf[0][0],  8e6, iqInterleaved=True, show=False)
+            ax.set_ylim([-80, 20])
+            plt.ylabel('RF')
 
-        ax = plt.subplot(312)
-        mpt.plot_freq(self.rx_samples_if[0][0], 3333.3333 * 75, iqInterleaved=True, show=False)
-        ax.set_ylim([-50, 50])
-        plt.ylabel('IF')
+            ax = plt.subplot(312)
+            mpt.plot_freq(self.rx_samples_if[0][0], 3333.3333 * 75, iqInterleaved=True, show=False)
+            ax.set_ylim([-50, 50])
+            plt.ylabel('IF')
 
-        ax =plt.subplot(313)
-        mpt.plot_freq(self.rx_samples_bb[0][0], 3333.3333 , iqInterleaved=True, show=False)
-        ax.set_ylim([0, 100])
-        plt.ylabel('BB')
+            ax =plt.subplot(313)
+            mpt.plot_freq(self.rx_samples_bb[0][0], 3333.3333 , iqInterleaved=True, show=False)
+            ax.set_ylim([0, 100])
+            plt.ylabel('BB')
 
-        plt.show()
-        # pdb.set_trace()
+            plt.show()
+            # pdb.set_trace()
 
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):

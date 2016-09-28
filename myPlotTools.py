@@ -27,7 +27,7 @@ def plot_freq(timeData, samplingRate, iqInterleaved=False, show=True):
    ax.set_xlim([freqVec[sortIdx[1]], freqVec[sortIdx[-1]]])
    #ax.set_xscale('log')
    plt.xlabel('freq in Hz')
-   plt.legend()
+   plt.legend(loc=0)
   # plt.ylabel('abs spectrum in dBFS')	
    if show:
       plt.show()
