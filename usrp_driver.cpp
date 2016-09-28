@@ -753,7 +753,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO: does this take too long?
                     usrp->set_rx_rate(clrfreq_rate);
                     usrp->set_rx_freq(clrfreq_cfreq);
-                     
+                    clrfreq_rate = usrp->get_rx_rate() // read back actual rate
+
                     // set up for USRP sampling
                     md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
                     uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
@@ -811,8 +812,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
                     // TODO: investigate this.. why do I have 4 extra bytes sent to the usrp server?
-                    sock_send_uint16(driverconn, 1); // so, either 1 sample offset or big/little endian
-                    sock_send_uint16(driverconn, 1);
+                    sock_send_uint16(driverconn, 50); // so, either 1 sample offset or big/little endian
+                    sock_send_uint16(driverconn, 50);
+                    
+                    sock_send_int32(driverconn, 0); // TODO: send antenna number as int32
+                    sock_send_double(driverconn, clrfreq_rate);
 
                     // send back samples                   
                     for(uint32_t i = 0; i < num_clrfreq_samples; i++) {

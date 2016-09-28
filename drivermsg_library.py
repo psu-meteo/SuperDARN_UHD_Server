@@ -35,6 +35,8 @@ USRPDRIVER_PORT = int(54420) # + ant
 
 USRP_DRIVER_ERROR = -1
 
+TRIGGER_BUSY = 'b'
+
 # parent class for driver socket messages
 class driver_command(object):
     # class to help manage sending data 
