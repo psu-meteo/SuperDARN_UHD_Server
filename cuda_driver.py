@@ -465,7 +465,7 @@ class ProcessingGPU(object):
  
         # allocate page-locked memory on host for rf samples to decrease transfer time
         # TODO: benchmark this, see if I should move this to init function..
-        self.tx_rf_outdata = cuda.pagelocked_empty((self.nAntennas, self.nChannels, 2 * nrf_samples_total), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.tx_rf_outdata = cuda.pagelocked_empty((self.nAntennas, 2 * nrf_samples_total), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
         self.tx_bb_indata = np.float32(np.zeros([self.nAntennas, self.nChannels, self.npulses, nbb_samples_per_pulse * 2])) # * 2 pulse samples for interleaved i/q
 
         # TODO: look into memorypool and freeing page locked memory?
@@ -557,25 +557,27 @@ class ProcessingGPU(object):
         self.tx_init(txbb_samples_per_pulse)
 
         self.synth_tx_rf_pulses(bbtx, txbb_samples_per_pulse)
-        '''
+        if False:
         # save plot of transmit pulse for debugging...
-        import matplotlib
-        #matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        txpulse = self.tx_rf_outdata[0][0]
-        arp = np.sqrt(np.float32(txpulse[0::2]) ** 2 + np.float32(txpulse[1::2]) ** 2)
+            import matplotlib
+            #matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            txpulse = self.tx_rf_outdata[0]
+            arp  = np.sqrt(np.float32(txpulse[0::2]) ** 2 + np.float32(txpulse[1::2]) ** 2)
 
-        plt.subplot(3,1,1)
-        plt.plot(txpulse)
-        plt.subplot(3,1,2)
-        plt.plot(arp)
-        plt.subplot(3,1,3)
-        plt.plot(txpulse[0:5000:2])
-        plt.plot(txpulse[1:5000:2])
-        plt.show()
-        print('finished pulse generation, breakpoint..')
-        pdb.set_trace()
-        '''
+            plt.subplot(3,1,1)
+            plt.plot(txpulse)
+            plt.subplot(3,1,2)
+            plt.plot(arp)
+            plt.subplot(3,1,3)
+            plt.plot(txpulse[0:5000:2])
+            plt.plot(txpulse[1:5000:2])
+            plt.show()
+            print('finished pulse generation, breakpoint..')
+            import myPlotTools as mpt
+            mpt.plot_freq(txpulse, 8e6, iqInterleaved=True)
+            pdb.set_trace()
+        
     # calculates the threads in a block from a block size tuple
     def _blocksize(self, block):
         return functools.reduce(np.multiply, block)
@@ -600,7 +602,7 @@ class ProcessingGPU(object):
         self.cu_rx_multiply_and_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
         # for testing: plot RF, IF and BB
-        if True:
+        if False:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
