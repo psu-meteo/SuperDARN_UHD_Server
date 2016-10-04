@@ -9,7 +9,7 @@ INDEXING for multiply_mix_add() (similar for multiply_and_add(), just IF => BB )
 threadIdx.x = iFilterSample*2
 threadIdx.y = iChannel
 blockDim.x  = nFilterSamples /2
-blockDim.y  = nChannles
+blockDim.y  = nChannels
 blockIdx.x  = iSampleIF
 blockIdx.y  = iAntenna
 gridDim.x   = nSamplesIF
@@ -33,17 +33,25 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
     __shared__ float itemp[1024];//Array size is max number of threads in a block
     __shared__ float qtemp[1024];
 
-    uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;  // linear thread index in block
+    // clear variable names
+    uint32_t iFilterSampleTimes2  = threadIdx.x;
+    uint32_t iChannel             = threadIdx.y;
+    uint32_t nFilterSamplesDivBy2 = blockDim.x;
+    uint32_t nChannels            = blockDim.y;
+    uint32_t iSampleBB            = blockIdx.x;
+    uint32_t iAntenna             = blockIdx.y;
+    uint32_t nSamplesBB           = gridDim.x;
+//    uint32_t nAntennas            = gridDim.y; 
+
+    uint32_t iThread_lin = iFilterSampleTimes2 + iChannel*nFilterSamplesDivBy2;   // linear thread index in block
 
     // TODO: get from cuda_driver.py!
     uint32_t decimationRate_if2bb = 75;  
 
-    uint32_t idxSample_filter = 4 * ( threadIdx.x  + gridDim.x * threadIdx.y);     // 2 samples per thread (unrolled) times 2 components per sample (I /Q) = 4
-    uint32_t nSamples_if = decimationRate_if2bb * (gridDim.x - 1) + gridDim.x *2;  // nSamples_in = decimationRate * ( nSamples_out -1) + nSamples_filter
-   
-    uint32_t iSample_if   = blockIdx.x * decimationRate_if2bb + threadIdx.x *2;                                            // number of (complex) sample in rf signal
-    uint32_t idxSample_if = iSample_if * 2  +  threadIdx.y * nSamples_if * 2 + blockIdx.y * blockDim.y * nSamples_if * 2 ; // index in memory (account for  I/Q, iChannel, iAntenna)
-
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_if = decimationRate_if2bb * (nSamplesBB -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_if = iSampleBB * decimationRate_if2bb + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
+    uint32_t idxSample_if = iSample_if * 2 + iChannel * nSamples_if *2 + iAntenna * nChannels * nSamples_if *2; // index in memory (account for  I/Q, iChannel, iAntenna)
 
     float i0 =  samples[idxSample_if  ];
     float q0 =  samples[idxSample_if+1];
@@ -90,7 +98,8 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
      // write back results
      if (threadIdx.x == 0) {
-        uint32_t  output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
+
+        uint32_t output_idx = iSampleBB *2 + iChannel * nSamplesBB *2 + iAntenna * nChannels * nSamplesBB *2; 
         odata[output_idx  ] = (float)  itemp[iThread_lin];
         odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }  
@@ -103,6 +112,17 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];
     __shared__ float qtemp[1024];
+    
+
+    // clear variable names
+    uint32_t iFilterSampleTimes2  = threadIdx.x;
+    uint32_t iChannel             = threadIdx.y;
+    uint32_t nFilterSamplesDivBy2 = blockDim.x;
+    uint32_t nChannels            = blockDim.y;
+    uint32_t iSampleIF            = blockIdx.x;
+    uint32_t iAntenna             = blockIdx.y;
+    uint32_t nSamplesIF           = gridDim.x;
+   // uint32_t nAntennas            = gridDim.y; 
 
     uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;
     
@@ -117,11 +137,10 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
     // TODO: get from cuda_driver.py!
     uint32_t decimationRate_rf2if = 32;  
 
-    uint32_t idxSample_filter = 4 * ( threadIdx.x  + gridDim.x * threadIdx.y);     // 2 samples per thread (unrolled) times 2 components per sample (I /Q) = 4
-    uint32_t nSamples_rf = decimationRate_rf2if * (gridDim.x - 1) + gridDim.x *2;  // nSamples_in = decimationRate * ( nSamples_out -1) + nSamples_filter
-   
-    uint32_t iSample_rf   = blockIdx.x * decimationRate_rf2if + threadIdx.x *2;   // number of (complex) sample in rf signal
-    uint32_t idxSample_rf = iSample_rf * 2  +  threadIdx.y * nSamples_rf * 2 + blockIdx.y * blockDim.y * nSamples_rf * 2 ; // index in memory (account for  I/Q, iChannel, iAntenna)
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);   // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_rf = iSampleIF * decimationRate_rf2if + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
+    uint32_t idxSample_rf = iSample_rf * 2 + iChannel * nSamples_rf *2 + iAntenna * nChannels * nSamples_rf *2; // index in memory (account for  I/Q, iChannel, iAntenna)
 
     itemp[iThread_lin] =
         filter[idxSample_filter  ] * samples[idxSample_rf  ] -
@@ -200,7 +219,7 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
         qtemp[iThread_lin] = ltemp * sin(phi_rem) + qtemp[iThread_lin] * cos(phi_rem);
 
         // write outout
-        uint32_t output_idx = 2 * (blockIdx.x +  gridDim.x * ( threadIdx.y + blockIdx.y * blockDim.y)); 
+        uint32_t output_idx = iSampleIF *2 + iChannel * nSamplesIF *2 + iAntenna * nChannels * nSamplesIF *2; 
         odata[output_idx  ] = (float)  itemp[iThread_lin];
         odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }

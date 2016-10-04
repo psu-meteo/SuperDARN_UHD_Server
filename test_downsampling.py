@@ -59,7 +59,7 @@ cprint('testing cuda get data (downsampling)', 'red')
 seq = create_testsequence_uafscan()
 lo_freq = 2e6
 seq.ctrlprm['rfreq'] = lo_freq / 1000
-seq.ctrlprm['tfreq'] = 9e6 / 1000
+seq.ctrlprm['tfreq'] = 2e6 / 1000
 
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
@@ -102,7 +102,7 @@ maxAmp = 2**15 * 0.9
 
 B = 1000 # bandwidth
 pulseFreq = lo_freq + B/2 + 500
-sig = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *250
+sig = np.sinc((timeVector-timeVector[int(nSamples_rx_rf/2-1)]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *250
 # add noise
 
 rx_rf_data[0][0][0::2] = np.int16(sig.real)
@@ -147,7 +147,6 @@ cudasock = serversock
 transmit_dtype(cudasock, 0 , np.int32)
 nants = recv_dtype(cudasock, np.uint32)
 dbPrint(' received nants= {}'.format( nants))
-print(seq.ctrlprm)
 main_samples = np.complex64(np.zeros((nants, nSamplesBB)))
 
 

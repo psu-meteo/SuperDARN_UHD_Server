@@ -115,8 +115,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
             if channel != None:
                 cnum = channel.ctrlprm['channel']
                 bbtx[cnum], bbrates_tx[cnum] = self.generate_bbtx(channel, shapefilter = dsp_filters.gaussian_pulse)
-        #pdb.set_trace() 
-        if not (len(np.unique(bbrates_tx)) == 1 + (None in bbrates_tx)):
+        
+
+        if len(np.unique([rate for rate in bbrates_tx if rate is not None])) > 1:
             print("all baseband sampling rates must be the same?..")# TODO: investigate this case :(
             pdb.set_trace()
 
@@ -169,15 +170,15 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         nantennas = len(self.antennas)
         
         # tbuffer is the time between tr gate and transmit pulse 
-        nsamples = np.round((tpulse + 2 * tbuffer) * bbrate)
-        padding = np.zeros(np.round(tbuffer * bbrate))
-        pulse = np.ones(np.round(tpulse * bbrate))
+        nsamples   = np.round((tpulse + 2 * tbuffer) * bbrate)
+        padding    = np.zeros(int(np.round(tbuffer * bbrate)))
+        pulse      = np.ones( int(np.round(tpulse  * bbrate)))
         pulsesamps = np.complex64(np.concatenate([padding, pulse, padding]))
 
-        beam_sep = float(self.array_info['beam_sep']) # degrees
-        nbeams = int(self.array_info['nbeams'])
+        beam_sep  = float(self.array_info['beam_sep']) # degrees
+        nbeams    = int(self.array_info['nbeams'])
         x_spacing = float(self.array_info['x_spacing']) # meters
-        beamnum = ctrlprm['tbeam']
+        beamnum   = ctrlprm['tbeam']
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
@@ -226,7 +227,7 @@ class cuda_add_channel_handler(cudamsg_handler):
         ctrlprm = sequence.ctrlprm
         self.gpu.sequences[ctrlprm['channel']] = sequence
 
-        fc = ctrlprm['tfreq'] * 1000
+        # fc = ctrlprm['tfreq'] * 1000
         cnum = ctrlprm['channel']
 
         self.gpu._set_mixerfreq(cnum)
@@ -379,7 +380,7 @@ class ProcessingGPU(object):
         # maximum supported channels
         self.nChannels = int(maxchannels)
         self.nAntennas = len(antennas)
-        self.npulses = int(maxpulses)
+        self.npulses   = int(maxpulses)
 
         # number of taps for baseband and if filters
         self.ntaps_rfif = int(ntapsrx_rfif)
@@ -430,19 +431,20 @@ class ProcessingGPU(object):
     
     # generate tx rf samples from sequence
     def synth_tx_rf_pulses(self, bbtx, nbb_samples_per_pulse):
-        for (aidx, ant) in enumerate(self.antennas):
-            for chan in range(self.nChannels):
-                for pulse in range(bbtx[chan].shape[1]):
-                    # bbtx[channel][nantennas, npulses, len(pulsesamps)]
-                    # create interleaved real/complex bb vector
-                    bb_vec_interleaved = np.zeros(nbb_samples_per_pulse * 2)
-                    try:
-                        bb_vec_interleaved[0::2] = np.real(bbtx[chan][aidx][pulse][:])
-                        bb_vec_interleaved[1::2] = np.imag(bbtx[chan][aidx][pulse][:])
-                    except:
-                        print('error while merging baseband tx vectors..')
-                        pdb.set_trace()
-                    self.tx_bb_indata[aidx][chan][pulse][:] = bb_vec_interleaved[:]
+        for iChannel in range(self.nChannels):
+            if self.sequences[iChannel] != None:  # if channel is defined
+               for (iAntenna, ant) in enumerate(self.antennas):
+                   for iPulse in range(bbtx[iChannel].shape[1]):
+                       # bbtx[channel][nantennas, npulses, len(pulsesamps)]
+                       # create interleaved real/complex bb vector
+                       bb_vec_interleaved = np.zeros(nbb_samples_per_pulse * 2)
+                       try:
+                           bb_vec_interleaved[0::2] = np.real(bbtx[iChannel][iAntenna][iPulse][:])
+                           bb_vec_interleaved[1::2] = np.imag(bbtx[iChannel][iAntenna][iPulse][:])
+                       except:
+                           print('error while merging baseband tx vectors..')
+                           pdb.set_trace()
+                       self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
@@ -460,24 +462,24 @@ class ProcessingGPU(object):
         npulses = self.npulses
         nrf_samples_total = nrf_samples_per_pulse * npulses
 
-        print('nrf_samps: ' + str(nrf_samples_total))
-        print('nants: ' + str(self.nAntennas))
+        print('tx_init: nSamples_tx_rf: ' + str(nrf_samples_total))
+        print('tx_init: nAntennas     : ' + str(self.nAntennas))
  
         # allocate page-locked memory on host for rf samples to decrease transfer time
         # TODO: benchmark this, see if I should move this to init function..
         self.tx_rf_outdata = cuda.pagelocked_empty((self.nAntennas, 2 * nrf_samples_total), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-        self.tx_bb_indata = np.float32(np.zeros([self.nAntennas, self.nChannels, self.npulses, nbb_samples_per_pulse * 2])) # * 2 pulse samples for interleaved i/q
+        self.tx_bb_indata  = np.float32(np.zeros(  [self.nAntennas, self.nChannels, self.npulses, nbb_samples_per_pulse * 2])) # * 2 pulse samples for interleaved i/q
 
         # TODO: look into memorypool and freeing page locked memory?
         # https://stackoverflow.com/questions/7651450/how-to-create-page-locked-memory-from-a-existing-numpy-array-in-pycuda
 
         # point GPU to page-locked memory for rf rx and tx samples
         self.cu_tx_rf_outdata = np.intp(self.tx_rf_outdata.base.get_device_pointer())
-        self.cu_tx_bb_indata = cuda.mem_alloc_like(self.tx_bb_indata)
+        self.cu_tx_bb_indata  = cuda.mem_alloc_like(self.tx_bb_indata)
        
         # compute grid/block sizes for cuda kernels
         self.tx_block = self._intify((tx_upsample_rate, self.nChannels, 1))
-        self.tx_grid = self._intify((nbb_samples_per_pulse, self.nAntennas, self.npulses))
+        self.tx_grid  = self._intify((nbb_samples_per_pulse, self.nAntennas, self.npulses))
 
         print('tx block: ' + str(self.tx_block))
         print('tx grid: ' + str(self.tx_grid))
@@ -597,7 +599,7 @@ class ProcessingGPU(object):
     def rxsamples_process(self):
         print('processing rf -> if')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_samples_if, self.cu_rx_filtertaps_rfif, block = self.rx_block_if, grid = self.rx_grid_if, stream = self.streams[swing])
-
+ 
         print('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
@@ -671,17 +673,21 @@ class ProcessingGPU(object):
     def _kaiser_filter_s0(self):
         gain = 3.5
         beta = 5
-
+        # TODO: implement for more than one channel
         self.rx_filtertap_rfif[:,:,:] = 0
         m = self.ntaps_rfif - 1 
         b = scipy.special.i0(beta)
-        freq_LO = self.sequences[0].ctrlprm['tfreq'] * 1000
-        print('freq_LO: {} Hz', freq_LO)
-        for iTap in range(self.ntaps_rfif):
-            phi = 2*np.pi*freq_LO*iTap/self.fsamprx # phase of LO frequency
-            k = scipy.special.i0((2 * beta / m) * np.sqrt(iTap * (m - iTap)))
-            self.rx_filtertap_rfif[:,iTap,0] = gain * (k / b) * np.cos(phi)
-            self.rx_filtertap_rfif[:,iTap,1] = 0*np.sin(phi)
+        for iChannel in range(self.nChannels):
+            if self.sequences[iChannel] != None:
+               freq_LO = self.sequences[iChannel].ctrlprm['rfreq'] * 1000
+               print('channel {}: freq_LO: {} Hz'.format(iChannel, freq_LO))
+               for iTap in range(self.ntaps_rfif):
+                   phi = 2*np.pi*freq_LO*iTap/self.fsamprx # phase of LO frequency
+                   k = scipy.special.i0((2 * beta / m) * np.sqrt(iTap * (m - iTap)))
+                   self.rx_filtertap_rfif[iChannel,iTap,0] = gain * (k / b) * np.cos(phi)
+                   self.rx_filtertap_rfif[iChannel,iTap,1] = 0*np.sin(phi)
+            else:
+               print("skipping channel {}".format(iChannel))
         ##  pdb.set_trace()
 
     def _rolloff_filter_s1(self):

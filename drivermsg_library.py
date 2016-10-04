@@ -47,7 +47,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
