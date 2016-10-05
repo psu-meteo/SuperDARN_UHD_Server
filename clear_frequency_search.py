@@ -50,7 +50,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     power_threshold = clrfreq_struct.payload['pwr_threshold'] # (typically .9, threshold before changing freq)
     nave = clrfreq_struct.payload['nave']
 
-    # mimic behavior of gc316 drivers, cap nave at 10
+    # mimic behavior of gc316 drivers, cap nave
     if nave > MAX_CLRFREQ_AVERAGE:
             nave = MAX_CLRFREQ_AVERAGE
     
@@ -133,7 +133,6 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
 def fft_clrfreq_samples(samples):
     # return fft of width usable_bandwidth, kHz resolution
     power_spectrum = np.fft.fftshift(np.abs(np.fft.fft(samples, norm = 'ortho')) ** 2)
-    # TODO: normalize power spectrum
     return power_spectrum 
 
 def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):

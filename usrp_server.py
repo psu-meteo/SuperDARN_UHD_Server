@@ -172,6 +172,14 @@ class RadarHardwareManager:
         usrp_driver_socks = []
         # TODO: parse usrp_config.ini, read in array_idx + 1, generate list of antenna indexes
         USRP_ANTENNA_IDX = [0]
+        
+        # TODO: read these from a config file
+        # currently pulled from radar_config_constants.py
+        self.usrp_tx_cfreq = DEFAULT_USRP_CENTER_FREQ
+        self.usrp_rx_cfreq = DEFAULT_USRP_CENTER_FREQ 
+        self.usrp_rf_tx_rate = DEFAULT_USRP_RF_RATE
+        self.usrp_rf_rx_rate = DEFAULT_USRP_RF_RATE
+
         # open each 
         try:
             for (ant,aidx) in enumerate(usrp_drivers):
@@ -396,36 +404,36 @@ class RadarHardwareManager:
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
 
-        rfrate = 15360000 
-        txfreq = 12e6 # TODO: read from config file
-        rxfreq = 12e6 # TODO...
-        txrate = 15360000 
-        rxrate = 15360000
-
-        # TODO: calculate the number of RF transmit samples per-pulse
-        num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
+        # calculate the number of RF transmit and receive samples 
+        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
-        num_requested_tx_samples = np.uint64(np.round((rfrate)  * tx_time / 1e6))
-
-        cmd = usrp_setup_command(self.usrpsocks, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
+        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
+        
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
         cprint('running cuda_pulse_init command', 'blue')
 
-# TODO: untangle cuda pulse init handler
-#        pdb.set_trace()
-#        cmd = cuda_pulse_init_command(self.cudasocks)
-#        cmd.transmit()
-#        cprint('waiting for cuda driver return', 'blue')
-#        cmd.client_return()
-#        cprint('cuda return received', 'blue')
+        # TODO: untangle cuda pulse init handler
+        #        pdb.set_trace()
+        #        cmd = cuda_pulse_init_command(self.cudasocks)
+        #        cmd.transmit()
+        #        cprint('waiting for cuda driver return', 'blue')
+        #        cmd.client_return()
+        #        cprint('cuda return received', 'blue')
 
+        
+        
         synth_pulse = False
 
         for ch in self.channels:
             ch.state = STATE_WAIT
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
+                
+                # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate
+                assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_txrate / 2)
+
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
                 time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
