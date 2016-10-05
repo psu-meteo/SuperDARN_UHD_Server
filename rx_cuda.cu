@@ -21,12 +21,16 @@ Input / Output format:
  - Filter has be be time reversed (doesn't matter for symmetric filters)
 
 TODO:
- - if filter_RFIF is complex: check if phase correction of local oscillator is correct
+ -  check if phase correction of local oscillator is correct
  - if filter is real we could save calc time by removing all calculations with imag(filter) and phase correction, maybe write additional function multiply_add_real
  - what is block arround line 122 checking for?
- - get decimation rates from cuda_driver
+ - NTH: avoid duplicate code for indexing, multiplication and summation
 
 */
+
+#define MAXCHANNELS 8
+__device__ __constant__ double  phaseIncrement_NCO_rad[MAXCHANNELS];
+__device__ __constant__ int16_t decimationRates[2];                 // [0]: rf2if, [1]: if2bb
 
 __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 {
@@ -45,8 +49,7 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
     uint32_t iThread_lin = iFilterSampleTimes2 + iChannel*nFilterSamplesDivBy2;   // linear thread index in block
 
-    // TODO: get from cuda_driver.py!
-    uint32_t decimationRate_if2bb = 75;  
+    uint32_t decimationRate_if2bb = decimationRates[1];
 
     uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
     uint32_t nSamples_if = decimationRate_if2bb * (nSamplesBB -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
@@ -134,8 +137,7 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
     // mix samples with nco, perform first reduction
     assert(tsamp <= (4 * blockDim.x * gridDim.x));
 
-    // TODO: get from cuda_driver.py!
-    uint32_t decimationRate_rf2if = 32;  
+    uint32_t decimationRate_rf2if = decimationRates[0];  
 
     uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);   // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
     uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
@@ -208,12 +210,13 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
         double phi_rem = blockIdx.x*fmod((1*blockDim.x) * phase_inc, 2*M_PI);
         
         // mgu: these two lines should be correct. TODO: test if we use complex filters 
-        double phiOffset = fmod(phase_inc * iSample_rf, 2*M_PI);
+        double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
         phi_rem = phiOffset;
        
-        //if (blockIdx.x < 3) {
-        //     printf("   => BlockIdx.x %d: phaseInc: %f  phi_rem: %f  phiOffset: %f  \n", blockIdx.x, phase_inc, phi_rem, phiOffset);
-        //}
+//        if (blockIdx.x < 3){
+//             printf("   => BlockIdx.x %d: phaseInc: %f  phi_rem: %f  phiOffset: %f  \n", blockIdx.x, phase_inc, phi_rem, phiOffset);
+//             printf("   => BlockIdx.y %d: phaseIncGlobal %f   multiplicator: %d \n", blockIdx.x, phaseIncrement_NCO_rad[iChannel], iSampleIF*decimationRate_rf2if);
+//        }
         double ltemp = (double) itemp[iThread_lin];
         itemp[iThread_lin] = itemp[iThread_lin] * cos(phi_rem) - qtemp[iThread_lin] * sin(phi_rem);
         qtemp[iThread_lin] = ltemp * sin(phi_rem) + qtemp[iThread_lin] * cos(phi_rem);

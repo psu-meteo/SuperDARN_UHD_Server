@@ -21,14 +21,14 @@ TODO:
 #include <stdio.h>
 #include <complex.h>
 
-#define MAXFREQS 8
+#define MAXCHANNELS 8
 #define MAXANTS 32
 
 #define I_OFFSET 0
 #define Q_OFFSET 1
 
-__device__ __constant__ double txfreq_rads[MAXFREQS];
-__device__ __constant__ float  txphasedelay_rads[MAXANTS * MAXFREQS];
+__device__ __constant__ double txfreq_rads[MAXCHANNELS];
+__device__ __constant__ float  txphasedelay_rads[MAXANTS * MAXCHANNELS];
 
 
 // main function
@@ -93,8 +93,8 @@ __global__ void interpolate_and_multiply(
         }
 
         // write data
-        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / MAXFREQS);
-        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / MAXFREQS);
+        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / MAXCHANNELS);
+        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / MAXCHANNELS);
     }
 
 }

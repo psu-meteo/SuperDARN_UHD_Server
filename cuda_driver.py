@@ -227,12 +227,12 @@ class cuda_add_channel_handler(cudamsg_handler):
         ctrlprm = sequence.ctrlprm
         self.gpu.sequences[ctrlprm['channel']] = sequence
 
-        # fc = ctrlprm['tfreq'] * 1000
         cnum = ctrlprm['channel']
 
-        self.gpu._set_mixerfreq(cnum)
-        self.gpu._set_phasedelay(cnum)
-       
+        self.gpu._set_tx_mixerfreq(cnum)
+        self.gpu._set_tx_phasedelay(cnum)
+        self.gpu._set_rx_phaseIncrement(cnum)
+ 
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
@@ -403,7 +403,11 @@ class ProcessingGPU(object):
 
         # host side copy of channel transmit frequency array
         self.mixer_freqs = np.zeros(self.nChannels, dtype=np.float64)
-
+       
+        # host side copy of rx part: rx frequency and decimation rates
+        self.rx_phaseIncrement_rad = np.zeros(self.nChannels, dtype=np.float64)
+        self.rx_decimationRates    = np.zeros(2, dtype=np.int16)
+       
         # host side copy of per-channel, per-antenna array with calibrated cable phase offset
         self.phase_delays = np.zeros((self.nChannels, self.nAntennas), dtype=np.float32)
         # dictionaries to map usrp array indexes and sequence channels to indexes 
@@ -413,6 +417,8 @@ class ProcessingGPU(object):
             self.cu_rx = pycuda.compiler.SourceModule(f.read())
             self.cu_rx_multiply_and_add = self.cu_rx.get_function('multiply_and_add')
             self.cu_rx_multiply_mix_add = self.cu_rx.get_function('multiply_mix_add')
+            self.cu_rxPhaseIncrement_rad= self.cu_rx.get_global('phaseIncrement_NCO_rad')[0]
+            self.cu_rxDecimationRates   = self.cu_rx.get_global('decimationRates')[0]
 
         
         with open('tx_cuda.cu', 'r') as f:
@@ -496,6 +502,10 @@ class ProcessingGPU(object):
         decimationRate_rf2if = self.rfifrate
         decimationRate_if2bb = 75
 
+        # supply rx_cuda with decimation rates
+        self.rx_decimationRates[:] = (int(decimationRate_rf2if), int(decimationRate_if2bb))
+        cuda.memcpy_htod(self.cu_rxDecimationRates, self.rx_decimationRates)
+
         bbrate_rx = ctrlprm['baseband_samplerate']
         nSamples_rx_bb = int(ctrlprm['number_of_samples']) # number of recv samples
 
@@ -539,8 +549,8 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_rx_filtertaps_rfif, self.rx_filtertap_rfif)
         cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb, self.rx_filtertap_ifbb)
  
-        self.rx_grid_if = self._intify((nSamples_rx_if, self.nAntennas, 1))
-        self.rx_grid_bb = self._intify((nSamples_rx_bb, self.nAntennas, 1))
+        self.rx_grid_if  = self._intify((nSamples_rx_if, self.nAntennas, 1))
+        self.rx_grid_bb  = self._intify((nSamples_rx_bb, self.nAntennas, 1))
         self.rx_block_if = self._intify((self.ntaps_rfif / 2, self.nChannels, 1))
         self.rx_block_bb = self._intify((self.ntaps_ifbb / 2, self.nChannels, 1))
         
@@ -604,7 +614,7 @@ class ProcessingGPU(object):
         self.cu_rx_multiply_and_add(self.cu_rx_samples_if, self.cu_rx_samples_bb, self.cu_rx_filtertaps_ifbb, block = self.rx_block_bb, grid = self.rx_grid_bb, stream = self.streams[swing])
 
         # for testing: plot RF, IF and BB
-        if False:
+        if True:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
@@ -649,15 +659,20 @@ class ProcessingGPU(object):
             tx_shm_list[aidx].flush()
     
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
-    def _set_mixerfreq(self, channel):
+    def _set_tx_mixerfreq(self, channel):
         # TODO: determine fc from channel
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         self.mixer_freqs[channel] = np.float64(2 * np.pi * (self.fsamptx - fc) / self.fsamptx)
         cuda.memcpy_htod(self.cu_txfreq_rads, self.mixer_freqs)
     
+    # update pahse increment of NCO with current channel sequence, then refresh array on GPU
+    def _set_rx_phaseIncrement(self, channel):
+        fc = self.sequences[channel].ctrlprm['rfreq'] * 1000
+        self.rx_phaseIncrement_rad[channel] = np.float64(2 * np.pi * (self.fsamprx - fc) / self.fsamptx)
+        cuda.memcpy_htod(self.cu_rxPhaseIncrement_rad, self.rx_phaseIncrement_rad)
 
     # update host-side phase delay table with current channel sequence, then refresh array on GPU
-    def _set_phasedelay(self, channel):
+    def _set_tx_phasedelay(self, channel):
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         
         for ant in range(self.nAntennas):
