@@ -19,14 +19,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
 
-MIN_CLRFREQ_DELAY = .15 # TODO: lower this?
-MAX_CLRFREQ_AVERAGE = 10
+MIN_CLRFREQ_DELAY = .10 # TODO: lower this?
+MAX_CLRFREQ_AVERAGE = 5 
 MAX_CLRFREQ_BANDWIDTH = 512
 MAX_CLRFREQ_USABLE_BANDWIDTH = 300
 CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
 CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
+PLOT_CLEAR_FREQUENCY_SEARCH = False
 
 def read_restrict_file(restrict_file):
     restricted_frequencies = []
@@ -41,7 +42,7 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam, tbeamwidth):
+def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg):
     # unpack clear frequency search parameters
     fstart = clrfreq_struct.payload['start'] * 1000 # convert kHz in struct to Hz
     fstop = clrfreq_struct.payload['end'] * 1000  # convert kHz in struct to Hz
@@ -80,7 +81,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam, 
     clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
     
     # calculate phasing
-    bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam, tbeamwidth)
+    bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam_number, tbeam_width_deg)
     pshift_per_antenna = calc_phase_increment(bmazm, center_freq) # calculate phase shift between neighboring antennas for phasing of received samples
     # gather samples from usrps
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
@@ -92,11 +93,15 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam, 
         assert search_rate_usrp == search_rate_actual
         spectrum_power += fft_clrfreq_samples(samples)
     
-    #spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+    spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
+    
+    if (PLOT_CLEAR_FREQUENCY_SEARCH): 
+        plt.plot(spectrum_freqs/1e6, 10 * np.log(spectrum_power))
+        plt.xlabel('frequency (MHz)')
+        plt.ylabel('unnormalized power (dB)')
+        plt.show()
 
-    plt.plot(spectrum_freqs, np.log(spectrum_power))
-    plt.show()
     return tfreq, noise
 
 def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies):
@@ -189,7 +194,7 @@ def test_clrfreq():
     clrfreq_struct = clrfreqprm_struct(usrp_driver_socks)
 
     # simulate received clrfreq_struct
-    clrfreq_struct.payload['start'] = 10750
+    clrfreq_struct.payload['start'] = 10050
     clrfreq_struct.payload['end'] = 11050
     clrfreq_struct.payload['filter_bandwidth'] = 1250
     clrfreq_struct.payload['pwr_threshold'] = .9

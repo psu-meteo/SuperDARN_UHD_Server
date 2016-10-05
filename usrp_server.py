@@ -15,12 +15,15 @@ from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
 from radar_config_constants import *
+from clear_frequency_search import read_restrict_file, clrfreq_search
 
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1
 RMSG_SUCCESS = 0
 RADAR_STATE_TIME = .0001#.0005
 CHANNEL_STATE_TIMEOUT = 120000
+# TODO: move this out to a config file
+RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
 debug = True
 
@@ -47,6 +50,8 @@ class RadarHardwareManager:
         self.usrp_init()
         #self.rxfe_init()
         self.cuda_init()
+
+        self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
 
     def run(self):
         def spawn_channel(conn):
@@ -222,8 +227,9 @@ class RadarHardwareManager:
 
     def clrfreq(self, chan):
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
-        pdb.set_trace()
-        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrp_socks) 
+        tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
+        tbeamwidth = 3.24 # TODO: why is it zero, this should be chan.ctrlprm_struct.get_data('tbeamwidth')
+        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth) 
 
     def get_data(self, channel):
         ctrlprm = channel.ctrlprm_struct.payload
