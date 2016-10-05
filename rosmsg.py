@@ -79,11 +79,11 @@ class clrfreqprm_struct(driver_command):
 
         prm_dict = {}
 
-        prm_dict['start'] = 0
-        prm_dict['end'] = 0
-        prm_dict['filter_bandwidth'] = 0
-        prm_dict['pwr_threshold'] = 0
-        prm_dict['nave'] = 0
+        prm_dict['start'] = 0               # start frequency of search, units of kHz
+        prm_dict['end'] = 0                 # end frequency of search, units of kHz
+        prm_dict['filter_bandwidth'] = 0    # bandwidth of search, units of kHz
+        prm_dict['pwr_threshold'] = 0       # seems to be unused? 
+        prm_dict['nave'] = 0                # number of averages (capped at 10 by gc316 driver..?)
 
         self.queue(prm_dict['start'], np.int32, 'start')
         self.queue(prm_dict['end'], np.int32, 'end')

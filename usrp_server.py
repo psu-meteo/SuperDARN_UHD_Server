@@ -222,6 +222,7 @@ class RadarHardwareManager:
 
     def clrfreq(self, chan):
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
+        pdb.set_trace()
         chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrp_socks) 
 
     def get_data(self, channel):
