@@ -391,8 +391,8 @@ def create_testsequence():
     pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
     txbbrate = ctrlprm['baseband_samplerate']
     pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
-    phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
-    pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
+    phase_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
+    pulse_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
 
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
@@ -407,4 +407,5 @@ def create_testsequence_uafscan():
     fh = open('uafscan_sequence.pickle', 'rb')
     seq = pickle.load(fh)
     fh.close
+    
     return seq

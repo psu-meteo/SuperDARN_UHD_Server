@@ -21,6 +21,8 @@ def plot_freq(timeData, samplingRate, iqInterleaved=False, show=True):
  #  ax = plt.subplot(111)
    ax = plt.gca()
   # plt.plot(freqVec[sortIdx], np.abs(spk[sortIdx]))
+#   plt.plot(freqVec[sortIdx], (np.absolute(np.real(spk[sortIdx]))), label='real', marker=".")
+#   plt.plot(freqVec[sortIdx], (np.absolute(np.imag(spk[sortIdx]))), label='imag', marker=".")
    plt.plot(freqVec[sortIdx], 20*np.log10(np.absolute(np.real(spk[sortIdx]))), label='real', marker=".")
    plt.plot(freqVec[sortIdx], 20*np.log10(np.absolute(np.imag(spk[sortIdx]))), label='imag', marker=".")
    plt.grid(True)

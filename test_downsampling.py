@@ -58,8 +58,8 @@ for i in range(max_connect_attempts):
 cprint('testing cuda get data (downsampling)', 'red')
 seq = create_testsequence_uafscan()
 lo_freq = 2e6 
-seq.ctrlprm['rfreq'] = lo_freq / 1000
-seq.ctrlprm['tfreq'] = 2e6 / 1000
+seq.ctrlprm['rfreq'] = 16e6 / 1000
+seq.ctrlprm['tfreq'] = 16e6 / 1000
 
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
