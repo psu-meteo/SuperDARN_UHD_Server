@@ -14,6 +14,7 @@ from phasing_utils import *
 from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
+from radar_config_constants import *
 
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1
@@ -31,15 +32,6 @@ STATE_PRETRIGGER = 'PRETRIGGER'
 STATE_TRIGGER = 'TRIGGER'
 STATE_CLR_FREQ = 'CLR_FREQ_WAIT'
 STATE_GET_DATA = 'GET_DATA'
-
-TRIGGER_BUSY = 'b'
-
-# TODO: parse from config files or structs, move to radar hardware manger
-MAXANTENNAS_BACK = 0
-MAXANTENNAS_MAIN = 1 
-MAX_MAIN_ARRAY_TODO = 16
-RADAR_BEAMWIDTH = 3.24
-RADAR_NBEAMS = 20
 
 
 # handle arbitration with multiple channels accessing the usrp hardware
@@ -230,108 +222,8 @@ class RadarHardwareManager:
 
     def clrfreq(self, chan):
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
-        # TODO: check if radar is free
-        MIN_CLRFREQ_DELAY = .2 # TODO: lower this?
-        MAX_CLRFREQ_AVERAGE = 10
-        MAX_CLRFREQ_BANDWIDTH = 512
-        MAX_CLRFREQ_USABLE_BANDWIDTH = 300
-        CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
-
-        fstart = chan.clrfreq_struct.payload['start']
-        fstop = chan.clrfreq_struct.payload['end']
-        filter_bandwidth = chan.clrfreq_struct.payload['filter_bandwidth'] # kHz (c/(2 * rsep))
-        power_threshold = chan.clrfreq_struct.payload['pwr_threshold'] # (typically .9, threshold before changing freq)
-        nave = chan.clrfreq_struct.payload['nave']
-
-        usable_bandwidth = fstop - fstart
-        usable_bandwidth = np.floor(usable_bandwidth/2.0) * 2 # mimic behavior of gc316 driver, why does the old code do this?
-        cfreq = (fstart + (fstop-fstart/2.0)) # calculate center frequency of clrfreq search in KHz
-        assert usable_bandwidth > 0, "usable bandwidth for clear frequency search must be greater than 0"
-
-        # mimic behavior of gc316 drivers, if requested search bandwidth is broader than 1024 KHz, force it to 512 KHz?
-        # calculate the number of points in the FFT
-        num_clrfreq_samples = np.int32(pow(2, np.ceil(np.log10(1.25*usable_bandwidth)/np.log10(2))))
-        if num_clrfreq_samples > MAX_CLRFREQ_BANDWIDTH:
-            num_clrfreq_samples = MAX_CLRFREQ_BANDWIDTH
-            usable_bandwidth = MAX_CLRFREQ_USABLE_BANDWIDTH
-
-        # mimic behavior of gc316 drivers, cap nave at 10
-        if nave > MAX_CLRFREQ_AVERAGE:
-            nave = MAX_CLRFREQ_AVERAGE
-
-        fstart = np.ceil(cfreq - usable_bandwidth / 2.0)
-        fstop = np.ceil(cfreq + usable_bandwidth / 2.0)
-
-        unusable_sideband = np.int32((num_clrfreq_samples - usable_bandwidth)/2.0)
-        clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
-
-        # calculate center frequency of beamforming, form
-        # apply narrowband beamforming around center frequency
-        tbeamwidth = chan.ctrlprm_struct.payload['tbeamwidth']
-        tbeam = chan.ctrlprm_struct.payload['tbeam']
-        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam, tbeamwidth)
-        pshift = calc_phase_increment(bmazm, cfreq)
-        clrfreq_rate = 2.0 * chan.clrfreq_struct.payload['filter_bandwidth'] * 1000 # twice the filter bandwidth, convert from kHz to Hz
-        pwr2 = np.zeros(num_clrfreq_samples)
-        combined_samples = np.zeros(num_clrfreq_samples, dtype=np.complex128)
-
-        cprint('gathering samples for clrfreq on beam {} at {}'.format(tbeam, fstart), 'green')
-        for ai in range(nave):
-            cprint('gathering samples on avg {}'.format(ai), 'green')
-
-            # gather current UHD time
-            gettime_cmd = usrp_get_time_command(self.usrpsocks)
-            gettime_cmd.transmit()
-            usrptimes = []
-            for usrpsock in self.usrpsocks:
-                usrptimes.append(gettime_cmd.recv_time(usrpsock))
-
-            gettime_cmd.client_return()
-
-            # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
-            clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
-
-            # request clrfreq sample dump
-            # TODO: what is the clear frequency rate? (c / (2 * rsep?))
-
-            clrfreq_cmd = usrp_clrfreq_command(self.usrpsocks, num_clrfreq_samples, clrfreq_time, cfreq, clrfreq_rate)
-            clrfreq_cmd.transmit()
-
-            # grab raw samples, apply beamforming
-            for usrpsock in self.usrpsocks:
-                # receive
-                nantennas = recv_dtype(usrpsock, np.uint16)
-                antennas = recv_dtype(usrpsock, np.uint16, nantennas)
-
-                if isinstance(antennas, (np.ndarray, np.generic)):
-                    antennas = np.array([antennas])
-
-                for ant in antennas:
-                    ant_rotation = rad_to_rect(ant * pshift)
-                    samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
-                    samples = samples[0::2] + 1j * samples[1::2]
-                    combined_samples += ant_rotation * samples
-            fft_time_start = time.time()
-
-            # return fft of width usable_bandwidth, kHz resolution
-            # TODO: fft recentering, etc
-            c_fft = np.fft.fft(combined_samples)
-            # compute power..
-            pc_fft = (np.real(c_fft) ** 2) + (np.imag(c_fft) ** 2) / (num_clrfreq_samples ** 2)
-            pwr2 += pc_fft
-
-            fft_time_end = time.time()
-            cprint('fft time: {}'.format(fft_time_end - fft_time_start), 'yellow')
-            clrfreq_cmd.client_return()
-            # todo: convert fft to power spectrum
-
-        pwr2 /= nave
-
-        #pwr = pwr2[sideband-1:-sideband]
-
-        cprint('clrfreq complete for channel {}'.format(chan.cnum), 'blue')
-        #self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
-        self.noise = 100
+        pdb.set_trace()
+        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrp_socks) 
 
     def get_data(self, channel):
         ctrlprm = channel.ctrlprm_struct.payload
@@ -498,11 +390,11 @@ class RadarHardwareManager:
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
 
-        rfrate = 8000000 
-        txfreq = 10e6 # TODO: read from config file
-        rxfreq = 10e6 # TODO...
-        txrate = 8000000 
-        rxrate = 8000000
+        rfrate = 15360000 
+        txfreq = 12e6 # TODO: read from config file
+        rxfreq = 12e6 # TODO...
+        txrate = 15360000 
+        rxrate = 15360000
 
         # TODO: calculate the number of RF transmit samples per-pulse
         num_requested_rx_samples = np.uint64(np.round((rfrate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
@@ -666,7 +558,8 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def RequestAssignedFreqHandler(self, rmsg):
-        self._waitForState(STATE_WAIT)
+        # wait for clear frequency search to end, hardware manager will set channel state to WAIT
+        self._waitForState(STATE_WAIT) 
 
         transmit_dtype(self.conn, self.tfreq, np.int32)
         transmit_dtype(self.conn, self.noise, np.float32)
@@ -677,13 +570,12 @@ class RadarChannelHandler:
 
     def RequestClearFreqSearchHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
-
-        # start clear frequency search
         self.clrfreq_struct.receive(self.conn)
-        self.tfreq = self.clrfreq_struct.payload['start'] + (self.clrfreq_struct.payload['start'] + self.clrfreq_struct.payload['end']) / 2.0
-        self.noise = 10
-        self.state = STATE_CLR_FREQ
         self.clrfreq_start = time.time()
+
+        # request clear frequency search time from hardware manager
+        self.state = STATE_CLR_FREQ
+
         return RMSG_SUCCESS
 
     def UnsetReadyFlagHandler(self, rmsg):

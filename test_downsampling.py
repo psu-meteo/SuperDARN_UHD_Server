@@ -61,6 +61,13 @@ lo_freq = 2e6
 seq.ctrlprm['rfreq'] = 16e6 / 1000
 seq.ctrlprm['tfreq'] = 16e6 / 1000
 
+temp = seq.phase_masks
+temp = [np.zeros(1,dtype=np.uint8) for idx in range(len(temp))]
+seq.phase_masks = temp
+
+
+
+
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
 fsamprx = 8000000

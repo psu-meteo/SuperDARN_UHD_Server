@@ -429,11 +429,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
     ant = ai_ant->ival[0];
     std::string usrpargs(as_host->sval[0]);
-    usrpargs = "addr0=" + usrpargs; 
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=184.32e6";
     
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
-
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
@@ -754,7 +753,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO: does this take too long?
                     usrp->set_rx_rate(clrfreq_rate);
                     usrp->set_rx_freq(clrfreq_cfreq);
-                     
+                    
+                    // verify that rate is set..
+                    clrfreq_rate = usrp->get_rx_rate(); // read back actual rate
+                    DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
+
                     // set up for USRP sampling
                     md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
                     uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
@@ -811,9 +814,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     " encountered at " << rx_error_time.get_real_secs() << std::endl;
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
-                    // TODO: investigate this.. why do I have 4 extra bytes sent to the usrp server?
-                    sock_send_uint16(driverconn, 1); // so, either 1 sample offset or big/little endian
-                    sock_send_uint16(driverconn, 1);
+                    
+                    sock_send_int32(driverconn, 0); // TODO: send antenna number as int32
+                    sock_send_float64(driverconn, clrfreq_rate);
 
                     // send back samples                   
                     for(uint32_t i = 0; i < num_clrfreq_samples; i++) {

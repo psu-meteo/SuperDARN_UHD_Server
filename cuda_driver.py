@@ -564,7 +564,7 @@ class ProcessingGPU(object):
         self.synth_tx_rf_pulses(bb_signal, tx_bb_nSamples_per_pulse)
     
         # Debug plotting
-        if False:
+        if True:
         #  transmit pulse for debugging...
             import matplotlib
             #matplotlib.use('Agg')
@@ -618,7 +618,7 @@ class ProcessingGPU(object):
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
         # for testing: plot RF, IF and BB
-        if False:
+        if True:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
