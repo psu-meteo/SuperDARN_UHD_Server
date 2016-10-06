@@ -366,7 +366,7 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bbtx is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx):
+    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx, txupsamplerate):
         self.antennas = np.int16(antennas)
         # maximum supported channels
         self.nchans = int(maxchannels)
@@ -384,7 +384,8 @@ class ProcessingGPU(object):
         # USRP rx/tx sampling rates
         self.fsamptx = int(fsamptx)
         self.fsamprx = int(fsamprx)
-         
+        self.txupsamplerate = int(txupsamplerate)
+
         # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nants) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nants) # table to account for constant phase offset, e.g 180 degree phase flip
@@ -416,7 +417,7 @@ class ProcessingGPU(object):
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
-    def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
+    def addUSRP(self, usrp_hostname = '', driver_hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
         self.tdelays[int(array_idx)] = tdelay
         self.phase_offsets[int(array_idx)] = phase_offset
     

@@ -9,6 +9,8 @@ import logging
 import pdb
 import socket
 import time
+import configparser
+
 from termcolor import cprint
 from phasing_utils import *
 from socket_utils import *
@@ -47,6 +49,8 @@ class RadarHardwareManager:
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
         cprint('listening on port ' + str(port) + ' for control programs', 'blue')
+        
+        self.ini_file_init()
         self.usrp_init()
         #self.rxfe_init()
         self.cuda_init()
@@ -166,12 +170,31 @@ class RadarHardwareManager:
         self.client_sock.close()
 
 
+    # read in ini config files..
+    def ini_file_init(self):
+        driver_config = configparser.ConfigParser()
+        driver_config.read('driver_config.ini')
+        self.ini_shm_settings = driver_config['shm_settings']
+        self.ini_cuda_settings = driver_config['cuda_settings']
+        self.ini_network_settings = driver_config['network_settings']
+
+        usrp_config = configparser.ConfigParser()
+        usrp_config.read('usrp_config.ini')
+        usrp_configs = []
+        for usrp in usrp_config.sections():
+            usrp_configs.append(usrp_config[usrp])
+        self.ini_usrp_configs = usrp_configs
 
     def usrp_init(self):
-        usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
+        usrp_drivers = [] # hostname of usrp drivers
+        usrp_driver_base_port = int(self.ini_network_settings['USRPDriverPort'])
+
+        for usrp in self.ini_usrp_configs:
+            usrp_driver_hostname = usrp['driver_hostname'] 
+            usrp_driver_port = int(usrp['array_idx']) + usrp_driver_base_port 
+            usrp_drivers.append((usrp_driver_hostname, usrp_driver_port))
+	
         usrp_driver_socks = []
-        # TODO: parse usrp_config.ini, read in array_idx + 1, generate list of antenna indexes
-        USRP_ANTENNA_IDX = [0]
         
         # TODO: read these from a config file
         # currently pulled from radar_config_constants.py
@@ -182,11 +205,10 @@ class RadarHardwareManager:
 
         # open each 
         try:
-            for (ant,aidx) in enumerate(usrp_drivers):
-                usrp_driver_port = USRPDRIVER_PORT + USRP_ANTENNA_IDX[ant]
-                cprint('connecting to usrp driver on port {}'.format(usrp_driver_port), 'blue')
+            for usrp in usrp_drivers:
+                cprint('connecting to usrp driver on port {}'.format(usrp[1]), 'blue')
                 usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                usrpsock.connect((aidx, usrp_driver_port))
+                usrpsock.connect(usrp)
                 usrp_driver_socks.append(usrpsock)
         except ConnectionRefusedError:
             cprint('USRP server connection failed', 'blue')
@@ -215,13 +237,15 @@ class RadarHardwareManager:
     def cuda_init(self):
         time.sleep(.05)
         # connect cuda_driver servers
-        cuda_drivers = ['localhost']
         cuda_driver_socks = []
 
+        cuda_driver_port = int(self.ini_network_settings['CUDADriverPort'])
+        cuda_driver_hostnames = self.ini_network_settings['CUDADriverHostnames'].split(',')
+
         try:
-            for c in cuda_drivers:
+            for c in cuda_driver_hostnames:
                 cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                cudasock.connect((c, CUDADRIVER_PORT))
+                cudasock.connect((c, cuda_driver_port))
                 cuda_driver_socks.append(cudasock)
         except ConnectionRefusedError:
             logging.warnings.warn("cuda server connection failed")
@@ -238,6 +262,7 @@ class RadarHardwareManager:
         tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
         tbeamwidth = 3.24 # TODO: why is it zero, this should be chan.ctrlprm_struct.get_data('tbeamwidth')
         chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth) 
+        chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
 
     def get_data(self, channel):
         ctrlprm = channel.ctrlprm_struct.payload
@@ -403,13 +428,12 @@ class RadarHardwareManager:
         pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
-
         # calculate the number of RF transmit and receive samples 
         num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
         num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
         
-        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
         cprint('running cuda_pulse_init command', 'blue')
@@ -430,9 +454,12 @@ class RadarHardwareManager:
             ch.state = STATE_WAIT
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
-                
                 # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate
-                assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_txrate / 2)
+                print('tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
+                print('usrp tx cfreq: ' + str(self.usrp_tx_cfreq))
+                print('usrp rf tx rate: ' + str(self.usrp_rf_tx_rate))
+                
+                assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
                 time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
@@ -679,6 +706,9 @@ class RadarChannelHandler:
         phase_masks = []
         pulse_masks = []
         pulse_lens = []
+
+        # TODO: work with arbitrary baseband sample rates
+        pdb.set_trace()
         for i in range(npulses):
             pstart = rf_pulse_edge_idx[i]
             pend = pstart + _pulse_len(rf_pulse, pstart)
