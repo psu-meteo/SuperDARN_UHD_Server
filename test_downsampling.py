@@ -70,7 +70,8 @@ seq.phase_masks = temp
 
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
-fsamprx = 8000000
+fsamprx = 15360000
+usrp_mix_freq = 14e6
 
 nSamples_rx_rf = int(np.round(nSamplesBB / bbrate_rx * fsamprx))
 rx_shm_size = 160000000 # from driver confi.ini
@@ -99,7 +100,6 @@ nAnts = 1
 rx_rf_data = np.zeros((nAnts, 1, 2 * nSamples_rx_rf), dtype=np.int16)
  
 timeVector = np.array(range(nSamples_rx_rf)) / fsamprx
-carrierFreq = 2e6
 maxAmp = 2**15 * 0.9
 
 # sine
@@ -108,18 +108,32 @@ maxAmp = 2**15 * 0.9
 #sig  = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1])*np.pi*10000) * np.sin(2*np.pi*carrierFreq*timeVector) * maxAmp
 
 B = 1000 # bandwidth
-pulseFreq = lo_freq + B/2 + 500
-sig = np.sinc((timeVector-timeVector[int(nSamples_rx_rf/2-1)]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *250
+#pulseFreq = lo_freq + B/2 + 500
+pulseFreq = seq.ctrlprm['rfreq']*1000 - usrp_mix_freq 
+sig = np.sinc((timeVector-timeVector[int(nSamples_rx_rf/2-1)]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *maxAmp
+print(sig.size)
 # add noise
+
+# apply window
+if True: 
+   nSamples = 25000
+   window = np.hanning(nSamples*2)
+   sig[0:nSamples] *= window[0:nSamples]
+   sig[-nSamples:] *= window[-nSamples:]
+
+
+sig = np.round(sig) # important: typecast uses floor and this introduces distortions
 
 rx_rf_data[0][0][0::2] = np.int16(sig.real)
 rx_rf_data[0][0][1::2] = np.int16(sig.imag)
 
-rx_rf_data[0][0][:] += np.int16((np.random.rand(nSamples_rx_rf*2)-0.5)*maxAmp/100000  )
+# no need for noise since quantizing noise (16 bit) is enough
+# rx_rf_data[0][0][:] += np.int16((np.random.rand(nSamples_rx_rf*2)-0.5)*maxAmp/100000  )
 
 import myPlotTools as mpt
 #pdb.set_trace()
-# mpt.plot_freq(rx_rf_data[0][0], 8e6, iqInterleaved=True)
+#mpt.plot_time_freq(sig, fsamprx)
+#mpt.plot_time_freq(rx_rf_data[0][0], fsamprx, iqInterleaved=True)
 
 
  

@@ -198,28 +198,12 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      __syncthreads();
 
      if (threadIdx.x == 0) {
-        /*Now do phase adjustment on the output samples*/
-        // phase increment of the NCO can be calculated from two adjacent filter taps
-        double phase_inc =
-            atan(filter[idxSample_filter+3] / filter[idxSample_filter+2]) -
-            atan(filter[idxSample_filter+1] / filter[idxSample_filter]);
-
-        // mgu: only makes sense for complex filters, for real phi_rem is always = 0
-        /*Phase remainder exists because the NCO oscillator 
-        may not complete an exact 360% rotation in a filter window*/
-        double phi_rem = blockIdx.x*fmod((1*blockDim.x) * phase_inc, 2*M_PI);
-        
-        // mgu: these two lines should be correct. TODO: test if we use complex filters 
+        // the NCO inclueded in the filter causes a phase error. this is the correction
         double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
-        phi_rem = phiOffset;
-       
-//        if (blockIdx.x < 3){
-//             printf("   => BlockIdx.x %d: phaseInc: %f  phi_rem: %f  phiOffset: %f  \n", blockIdx.x, phase_inc, phi_rem, phiOffset);
-//             printf("   => BlockIdx.y %d: phaseIncGlobal %f   multiplicator: %d \n", blockIdx.x, phaseIncrement_NCO_rad[iChannel], iSampleIF*decimationRate_rf2if);
-//        }
-        double ltemp = (double) itemp[iThread_lin];
-        itemp[iThread_lin] = itemp[iThread_lin] * cos(phi_rem) - qtemp[iThread_lin] * sin(phi_rem);
-        qtemp[iThread_lin] = ltemp * sin(phi_rem) + qtemp[iThread_lin] * cos(phi_rem);
+        double ltemp = (double) itemp[iThread_lin]; // TODO: avoid numerical errors?? why only itemp? (mgu)
+        
+        itemp[iThread_lin] = itemp[iThread_lin] * cos(phiOffset) - qtemp[iThread_lin] * sin(phiOffset);
+        qtemp[iThread_lin] = ltemp * sin(phiOffset) + qtemp[iThread_lin] * cos(phiOffset);
 
         // write outout
         uint32_t output_idx = iSampleIF *2 + iChannel * nSamplesIF *2 + iAntenna * nChannels * nSamplesIF *2; 
