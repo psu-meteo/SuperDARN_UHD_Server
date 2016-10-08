@@ -429,7 +429,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
     ant = ai_ant->ival[0];
     std::string usrpargs(as_host->sval[0]);
-    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=184.32e6";
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
     
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));

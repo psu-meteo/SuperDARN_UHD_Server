@@ -200,8 +200,8 @@ class RadarHardwareManager:
         # currently pulled from radar_config_constants.py
         self.usrp_tx_cfreq = DEFAULT_USRP_CENTER_FREQ
         self.usrp_rx_cfreq = DEFAULT_USRP_CENTER_FREQ 
-        self.usrp_rf_tx_rate = DEFAULT_USRP_RF_RATE
-        self.usrp_rf_rx_rate = DEFAULT_USRP_RF_RATE
+        self.usrp_rf_tx_rate = int(self.ini_cuda_settings['FSampTX'])
+        self.usrp_rf_rx_rate = int(self.ini_cuda_settings['FSampRX'])
 
         # open each 
         try:
@@ -236,6 +236,9 @@ class RadarHardwareManager:
 
     def cuda_init(self):
         time.sleep(.05)
+
+        self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate'])
+
         # connect cuda_driver servers
         cuda_driver_socks = []
 
@@ -418,21 +421,21 @@ class RadarHardwareManager:
     # key error: 0?
     def pretrigger(self):
         cprint('running pretrigger', 'blue')
-
+        
         # TODO: handle channels with different pulse infomation..
         # TODO: parse tx sample rate dynamocially
         # TODO: handle pretrigger with no channels
         # rfrate = np.int32(self.cuda_config['FSampTX'])
         # extract sampling info from cuda driver
         # print('rf rate parsed from ini: ' + str(rfrate))
-        pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels
+        pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels (or check that pulses occur at the same times)
         npulses = self.channels[0].npulses # TODO: merge..
         ctrlprm = self.channels[0].ctrlprm_struct.payload
         # calculate the number of RF transmit and receive samples 
         num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
         num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
-        
+
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
@@ -656,7 +659,11 @@ class RadarChannelHandler:
         tx_tsg_idx = self.seqprm_struct.get_data('index')
         tx_tsg_len = self.seqprm_struct.get_data('len')
         tx_tsg_step = self.seqprm_struct.get_data('step')
-
+        
+        # ratio between tsg step (units of microseconds) to baseband sampling period
+        # TODO: calculate this from TXUpsampleRate, FSampTX in cuda_config.ini
+        # however, it should always be 1..
+        tsg_bb_per_step = 1
 
         # psuedo-run length encoded tsg
         tx_tsg_rep = self.seq_rep
@@ -664,7 +671,7 @@ class RadarChannelHandler:
 
         seq_buf = []
         for i in range(tx_tsg_len):
-            for j in range(0, np.int32(tx_tsg_step * tx_tsg_rep[i])):
+            for j in range(0, np.int32(tsg_bb_per_step * tx_tsg_rep[i])):
                 seq_buf.append(tx_tsg_code[i])
         seq_buf = np.uint8(np.array(seq_buf))
 
@@ -684,21 +691,19 @@ class RadarChannelHandler:
 
         # extract and number of samples
         sample_idx = np.nonzero(samples)[0]
-        if len(sample_idx) < 3:
-            logging.warnings.warn("Warning, cannot register empty sequence")
-            return
+        assert len(sample_idx) > 3, 'register empty sequence'
 
         nbb_samples = len(sample_idx)
 
         # extract pulse start timing
         tr_window_idx = np.nonzero(tr_window)[0]
         tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
-        pulse_offsets_vector = tr_rising_edge_idx
+        pulse_offsets_vector = tr_rising_edge_idx * tx_tsg_step
 
         # extract tr window to rf pulse delay
         rf_pulse_idx = np.nonzero(rf_pulse)[0]
         rf_pulse_edge_idx = _rising_edge_idx(rf_pulse_idx)
-        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0])
+        tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * tx_tsg_step
         npulses = len(rf_pulse_edge_idx)
 
         # extract per-pulse phase coding and transmit pulse masks
@@ -707,14 +712,12 @@ class RadarChannelHandler:
         pulse_masks = []
         pulse_lens = []
 
-        # TODO: work with arbitrary baseband sample rates
-        pdb.set_trace()
         for i in range(npulses):
             pstart = rf_pulse_edge_idx[i]
             pend = pstart + _pulse_len(rf_pulse, pstart)
             phase_masks.append(phase_mask[pstart:pend])
             pulse_masks.append(rf_pulse[pstart:pend])
-            pulse_lens.append((pend - pstart))
+            pulse_lens.append((pend - pstart) * tx_tsg_step)
 
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector / 1e6
@@ -729,6 +732,8 @@ class RadarChannelHandler:
             raise ValueError('number of pulses must be greater than zero!')
         if nbb_samples == 0:
             raise ValueError('number of samples in sequence must be nonzero!')
+
+        pdb.set_trace()
 
         return RMSG_SUCCESS
 
