@@ -18,7 +18,7 @@ from socket_utils import *
 from shm_library import *
 
 
-
+CUDADRIVER_PORT = 55420
 
 def stop_cudaserver(sock):
     # transmit clean exit command
@@ -43,7 +43,7 @@ serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 max_connect_attempts = 5 
 for i in range(max_connect_attempts): 
-    print('attempting connection to usrp_driver') 
+    print('attempting connection to cuda_driver at localhost:{}'.format(CUDADRIVER_PORT)) 
     try: 
         serversock.connect(('localhost', CUDADRIVER_PORT))
         break

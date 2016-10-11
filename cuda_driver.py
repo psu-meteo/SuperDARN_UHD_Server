@@ -366,7 +366,8 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bb_signal is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx, txupsamplingrate):
+    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx, txupsamplerate):
+
         self.antennas = np.int16(antennas)
         # maximum supported channels
         self.nChannels = int(maxchannels)
@@ -388,7 +389,7 @@ class ProcessingGPU(object):
         # USRP NCO mixing frequency TODO: get from usrp_server
         self.usrp_mixing_freq = 13e6
         
-        self.tx_upsamplingRate = int(txupsamplingrate) #  TODO: get from driver_config.ini !
+        self.tx_upsamplingRate = int(txupsamplerate) #  TODO: adjust name later
         # calc base band sampling rates 
         self.tx_bb_samplingRate = self.tx_rf_samplingRate / self.tx_upsamplingRate
         self.rx_bb_samplingRate = self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate / self.rx_if2bb_downsamplingRate
@@ -430,7 +431,7 @@ class ProcessingGPU(object):
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
-    def addUSRP(self, hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
+    def addUSRP(self, usrp_hostname = '', driver_hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
         self.tdelays[int(array_idx)] = tdelay
         self.phase_offsets[int(array_idx)] = phase_offset
     
@@ -866,7 +867,7 @@ def main():
     signal.signal(signal.SIGINT, sigint_handler)
 
     if(verbose):
-        print('cuda_driver waiting for socket connection')
+        print('cuda_driver waiting for socket connection at {}:{}'.format(network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
 
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
