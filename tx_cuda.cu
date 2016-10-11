@@ -1,94 +1,100 @@
-// CUDA function for transmit beamforming 
+/* CUDA function for upsampling, upmixing, phase delay compensation and channel combination  
+
+grid:    nSamples_BB  x nAntennas x nPulses
+block:   upsampleRate x nChannels x  1
+
+memory formats:
+   inData:   (float) nAntennas x nChannels x nPulses x 2*nSamplesBB
+   outData:  (int16) nAntennas x 2*nSamplesRF 
+                                                    (nSamplesRF = nInputSamples*updampling*nPulses)
+
+TODO:
+ - if we need speedup:
+   - calc sin&cos(phi) only once and save it
+   - calc pulse only once if there is no difference 
+ - if I have time
+   - what is the error of using linear interpolation instead of lowpass after upsampling???
+*/
+
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <complex.h>
-// threadIdx.x - time
-// blockDim.x - number of times (bb?)
-// threadIdx.y - frequency
-// blockDim.y - number of frequencies
-// blockIdx.x - upsample factor
-// blockIdx.y - antenna number
 
-// blocks: (sample index, frequency index, 1)
-// grids : (baseband sample index, antenna index, pulse index)
-
-#define MAXFREQS 8
+#define MAXCHANNELS 8
 #define MAXANTS 32
 
 #define I_OFFSET 0
 #define Q_OFFSET 1
 
-__device__ __constant__ double txfreq_rads[MAXFREQS];
-__device__ __constant__ float txphasedelay_rads[MAXANTS * MAXFREQS];
+__device__ __constant__ double txfreq_rads[MAXCHANNELS];
+__device__ __constant__ float  txphasedelay_rads[MAXANTS * MAXCHANNELS];
 
-// index into rf sample array
-// [antenna][channel][pulse][sample]
-__device__ size_t outdata_idx(void) {
-    size_t upsamp_idx = threadIdx.x;
-    size_t upsamp_offset = blockIdx.x * blockDim.x;
-    size_t pulse_offset = blockDim.x * gridDim.x * blockIdx.z;
-    size_t antenna_offset = blockIdx.y * blockDim.x * gridDim.z * gridDim.x;
-    // multiply by two for interleaved i/q
-    return 2 * (antenna_offset + pulse_offset + upsamp_offset + upsamp_idx);
-}
-// [pulse][sample]
-// index into input baseband samples
-__device__ size_t indata_idx(int32_t offset) {
-    return 2 * blockIdx.x + offset;
-}
 
-// dummy function for setting breakpoints...
-// this source file hops around in a /tmp outside of the gdb path, so setting breakpoints on line numbers is hard
-// instead, break on db (debug..).
-__device__ int dbf(void) {
-    return 0;
-}
-// so, structure indata and outdata 
+// main function
 __global__ void interpolate_and_multiply(
-    float* indata,
-    int16_t* outdata
+    float*   inData,
+    int16_t* outData
 ){
     /* Declare shared memory array for samples.
     Vectors are written into this array, one for each
     frequency/beam channel.  Then the thread block linearly combines
     the frequency/beam channels into a single vector to be
     transmitted on the antenna */
+
     // irf/qrf_samples indexed as baseband 
     __shared__ float irf_samples[1024];
     __shared__ float qrf_samples[1024];
 
-    //Calculate the increment between two adjacent rf samples
-    float inc_i;
-    float inc_q;
-    inc_i = (indata[indata_idx(I_OFFSET)+2] - indata[indata_idx(I_OFFSET)]) / blockDim.x; // baseband sample - 
-    inc_q = (indata[indata_idx(Q_OFFSET)+2] - indata[indata_idx(Q_OFFSET)]) / blockDim.x; // 
 
-    /* Calculate the sample's phase value due to NCO mixing and beamforming */
-    float phase = fmod((double)(blockDim.x*blockIdx.x + threadIdx.x)*txfreq_rads[threadIdx.y], 2*M_PI) +
-        blockIdx.y*txphasedelay_rads[threadIdx.y];
+    // define clear variable names
+    int32_t upSampleRate = blockDim.x;
+    int32_t nChannels    = blockDim.y;
+    int32_t nSamples_bb  = gridDim.x;
+    int32_t nAntennas    = gridDim.y;
+    int32_t nPulses      = gridDim.z;
 
-    /* Calculate the output sample vectors, one for each freq/beam channel */
-    unsigned int localInx = threadIdx.y*blockDim.x+threadIdx.x;
+    int32_t iUpsample    = threadIdx.x;
+    int32_t iChannel     = threadIdx.y;
+    int32_t iSample_bb   = blockIdx.x;
+    int32_t iAntenna     = blockIdx.y;
+    int32_t iPulse       = blockIdx.z;
+
+    // calculate index in input and output array
+    int32_t idxInput  = 2*iSample_bb + iPulse*2*nSamples_bb + iChannel*nPulses*2*nSamples_bb + iAntenna*nChannels*nPulses*2*nSamples_bb;
+    int32_t idxOutput = 2*(iSample_bb*upSampleRate+iUpsample) + iPulse*2*nSamples_bb*upSampleRate + iAntenna*nPulses*2*nSamples_bb*upSampleRate;
+
+    // linear interpolation between two baseband samples
+    float inc_i = (inData[idxInput + I_OFFSET+2] - inData[idxInput + I_OFFSET]) / upSampleRate * iUpsample;
+    float inc_q = (inData[idxInput + Q_OFFSET+2] - inData[idxInput + Q_OFFSET]) / upSampleRate * iUpsample;  
+    
+    // Calculate phase for each sample by adding phase of local oscillator and cabel phase offset 
+    float phase = fmod( (double)( iSample_bb*upSampleRate + iUpsample )*txfreq_rads[iChannel], 2*M_PI) + txphasedelay_rads[iAntenna+iChannel*nAntennas];     
+
+
+    // Calculate the output sample vectors, one for each freq/beam channel 
+    unsigned int localInx =  iChannel*upSampleRate + iUpsample;
     irf_samples[localInx] =
-        (indata[indata_idx(I_OFFSET)] + threadIdx.x*inc_i) * cos(phase) -
-        (indata[indata_idx(Q_OFFSET)] + threadIdx.x*inc_q) * sin(phase);
+        (inData[idxInput + I_OFFSET] + inc_i ) * cos(phase) -
+        (inData[idxInput + Q_OFFSET] + inc_q ) * sin(phase);
     qrf_samples[localInx] =
-        (indata[indata_idx(I_OFFSET)] + threadIdx.x*inc_i) * sin(phase) +
-        (indata[indata_idx(Q_OFFSET)] + threadIdx.x*inc_q) * cos(phase);
+        (inData[idxInput + I_OFFSET] + inc_i ) * sin(phase) +
+        (inData[idxInput + Q_OFFSET] + inc_q ) * cos(phase);
 
     /* Now linearly combine all freq/beam channels into a single vector */
     // TODO: Will this synchronization work for multiple channels?
     __syncthreads();
-    size_t outidx = outdata_idx();
-    if(threadIdx.y == 0){
-        for (unsigned int i=1; i<blockDim.y; i++){
-            irf_samples[threadIdx.x] += irf_samples[threadIdx.x + i*blockDim.x];
-            qrf_samples[threadIdx.x] += qrf_samples[threadIdx.x + i*blockDim.x];
+
+    // threads for first channels sum up all remaining channels 
+    if(iChannel == 0){
+        for (unsigned int iChan2sum=1; iChan2sum<nChannels; iChan2sum++){
+            irf_samples[iUpsample] += irf_samples[iUpsample + iChan2sum * upSampleRate];
+            qrf_samples[iUpsample] += qrf_samples[iUpsample + iChan2sum * upSampleRate];
         }
-        outdata[outidx] = (int16_t) (0.95 * 32768 * irf_samples[threadIdx.x] / MAXFREQS);
-        outdata[outidx+1] = (int16_t) (0.95 * 32768 * qrf_samples[threadIdx.x] / MAXFREQS);
-        dbf();
+
+        // write data
+        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / MAXCHANNELS);
+        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / MAXCHANNELS);
     }
 
 }
