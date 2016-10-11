@@ -56,8 +56,11 @@ for i in range(max_connect_attempts):
    
         
 cprint('testing cuda get data (downsampling)', 'red')
+
+
+# get test sequence and adjust ...
 seq = create_testsequence_uafscan()
-lo_freq = 2e6 
+
 seq.ctrlprm['rfreq'] = 16e6 / 1000
 seq.ctrlprm['tfreq'] = 16e6 / 1000
 
@@ -70,11 +73,13 @@ seq.phase_masks = temp
 
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx = seq.ctrlprm['baseband_samplerate']
-fsamprx = 15360000
-usrp_mix_freq = 14e6
+
+# values from ini file
+fsamprx = 10e6
+usrp_mix_freq = 13e6
+rx_shm_size = 160000000 # from driver confi.ini
 
 nSamples_rx_rf = int(np.round(nSamplesBB / bbrate_rx * fsamprx))
-rx_shm_size = 160000000 # from driver confi.ini
 
 cudasocks = [] # TODO...
 #rx_shm_list[0].append(shm_mmap(shm_namer(ANTENNA, SWING0, SIDEA, direction = 'rx')))
@@ -108,11 +113,12 @@ maxAmp = 2**15 * 0.9
 #sig  = np.sinc((timeVector-timeVector[nSamples_rx_rf/2-1])*np.pi*10000) * np.sin(2*np.pi*carrierFreq*timeVector) * maxAmp
 
 B = 1000 # bandwidth
-#pulseFreq = lo_freq + B/2 + 500
 pulseFreq = seq.ctrlprm['rfreq']*1000 - usrp_mix_freq 
 sig = np.sinc((timeVector-timeVector[int(nSamples_rx_rf/2-1)]) * B ) * np.exp(1j*2*np.pi*pulseFreq*timeVector) *maxAmp
-print(sig.size)
-# add noise
+
+# add other frequencies (think of faster way...)
+if False:
+  sig += np.convolve(np.sinc((timeVector-timeVector[int(nSamples_rx_rf/2-1)]) * B*2 ), np.random.rand(nSamples_rx_rf), mode='same') * np.exp(1j*2*np.pi*(pulseFreq - 2e6) *timeVector) *maxAmp
 
 # apply window
 if True: 

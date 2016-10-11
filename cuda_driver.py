@@ -386,7 +386,7 @@ class ProcessingGPU(object):
         self.rx_rf_samplingRate = int(fsamprx)
 
         # USRP NCO mixing frequency TODO: get from usrp_server
-        self.usrp_mixing_freq = 14e6
+        self.usrp_mixing_freq = 13e6
         
         self.tx_upsamplingRate = int(txupsamplingrate) #  TODO: get from driver_config.ini !
         # calc base band sampling rates 
@@ -569,9 +569,15 @@ class ProcessingGPU(object):
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nChannels, self.ntaps_ifbb, 2]))
     
         # generate filters
-        self._kaiser_filter_s0()    
-        # self._rolloff_filter_s1()
-        self._raisedCosine_filter()
+        channelFreqVec = [None for i in range(self.nChannels)]
+        for iChannel in range(self.nChannels):
+            if self.sequences[iChannel] != None:
+               channelFreqVec[iChannel] =-( self.sequences[iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq)
+ 
+
+        self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
+        # dsp_filters.rolloff_filter_s1()
+        self.rx_filtertap_ifbb = dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
         self._plot_filter()
         
@@ -641,7 +647,7 @@ class ProcessingGPU(object):
           
             plt.figure()
             mpt.plot_freq(txpulse[0:tx_bb_nSamples_per_pulse*self.tx_upsamplingRate*2], self.tx_rf_samplingRate, iqInterleaved=True, show=False)
-            plt.gca().set_ylim([-50, 100])
+            plt.gca().set_ylim([0, 150])
             plt.title('spectrum of one TX RF pulse')
             
             plt.show()
@@ -768,31 +774,8 @@ class ProcessingGPU(object):
             self.phase_delays[channel][ant] = np.float32(np.mod(2 * np.pi * 1e-9 * self.tdelays[ant] * fc, 2 * np.pi)) 
 
         cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
- 
-    def _rect_filter_s0(self):
-        self.rx_filtertap_rfif[:,:,:] = 0
-        self.rx_filtertap_rfif[:,:,0] = 1
-    
-    # filter also includes down mixing with LO       
-    def _kaiser_filter_s0(self):
-        gain = 3.5
-        beta = 5
-        self.rx_filtertap_rfif[:,:,:] = 0
-        m = self.ntaps_rfif - 1 
-        b = scipy.special.i0(beta)
-        for iChannel in range(self.nChannels):
-            if self.sequences[iChannel] != None:
-               freq_LO = -( self.sequences[iChannel].ctrlprm['rfreq'] * 1000 - self.usrp_mixing_freq)
-               dbPrint('filter generation: channel {}: freq_LO: {} kHz'.format(iChannel, freq_LO/1e3))
-               for iTap in range(self.ntaps_rfif):
-                   phi = 2 * np.pi * freq_LO*iTap / self.rx_rf_samplingRate # phase of LO frequency
-                   k = scipy.special.i0((2 * beta / m) * np.sqrt(iTap * (m - iTap)))
-                   self.rx_filtertap_rfif[iChannel,iTap,0] = gain * (k / b) * np.cos(phi)
-                   self.rx_filtertap_rfif[iChannel,iTap,1] = gain * (k / b) * np.sin(phi) # I changed this to be a complex filter to avoid aliasing TODO: check for any downsides with real signal (mgu)
-            else:
-               dbPrint("filter generation: channel {}: skipping because undefined".format(iChannel))
-        ##  pdb.set_trace()
-
+   
+    # plot filters 
     def _plot_filter(self):
         import matplotlib.pyplot as plt
         import myPlotTools as mpt
@@ -817,35 +800,6 @@ class ProcessingGPU(object):
 
         plt.show() 
 
-
-    def _rolloff_filter_s1(self):
-        self.rx_filtertap_ifbb[:,:,:] = 0
-        for i in range(self.ntaps_ifbb):
-            x = 8 * (2 * np.pi * (float(i) / self.ntaps_ifbb) - np.pi)
-            self.rx_filtertap_ifbb[:,i,0] = 0.1 * (0.54 - 0.46 * np.cos((2 * np.pi * (float(i) + 0.5)) / self.ntaps_ifbb)) * np.sin(x) / x
-        
-        self.rx_filtertap_ifbb[:,self.ntaps_ifbb/2,0] = 0.1 * 1. # handle the divide-by-zero condition
-
-    def _raisedCosine_filter(self):
-        # TODO: I changed this to be a complex filter. check if this makes sense for real radar signals! (mgu)
-        alpha = 0.22
-        self.rx_filtertap_ifbb[:,:,:] = 0
-        nTaps = self.ntaps_ifbb-1
-        for iTap in range(nTaps+1):
-            t = 2*iTap - nTaps
-            if t == 0:
-               self.rx_filtertap_ifbb[:,iTap,:] = 1
-            elif np.absolute(t) ==  nTaps/(2*alpha): 
-               self.rx_filtertap_ifbb[:,iTap,:] = np.sin(np.pi/(2*alpha)) / (np.pi/(2*alpha)) * np.pi/4
-            else: 
-               self.rx_filtertap_ifbb[:,iTap,:] = np.sin(np.pi*t/nTaps) / (np.pi*t/nTaps) * np.cos(alpha*np.pi*t / nTaps) / (1-2*(alpha*t/nTaps)**2) 
-
-    
-    def _matched_filter_s1(self, dmrate1):
-        self.rx_filtertap_ifbb[:,:,:] = 0.
-
-        for i in range(ntaps1/2-dmrate1/4, self.ntaps_ifbb/2+dmrate1/4):
-            self.rx_filtertap_ifbb[:,i,0] = 4./dmrate1
 
 # returns a list of antennas indexes in the usrp_config.ini file
 def parse_usrpconfig_antennas(usrpconfig):
