@@ -90,6 +90,20 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
         __syncthreads();
      }
+
+    // Do this as long as the reduction is a power of 5
+     rem = s % 5;
+     while(s > 0 && rem == 0){
+        s /= 5;
+        if (threadIdx.x < s) {
+            itemp[iThread_lin] = itemp[iThread_lin] + itemp[iThread_lin + s] + itemp[iThread_lin+2*s] + itemp[iThread_lin+3*s] + itemp[iThread_lin+4*s];
+            qtemp[iThread_lin] = qtemp[iThread_lin] + qtemp[iThread_lin + s] + qtemp[iThread_lin+2*s] + qtemp[iThread_lin+3*s] + qtemp[iThread_lin+4*s];
+        }
+        rem = s % 5;
+
+        __syncthreads();
+     }
+
      //// Now do a serial reduction for the remaining
      if(threadIdx.x == 0){
         for(int32_t i=1; i<s; i++){
