@@ -554,6 +554,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     
                     DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) num_requested_rx_samples);
                     DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) num_tx_rf_samples);
+                    DEBUG_PRINT("USRP_SETUP existing tx rate: : %f\n", txrate);
+                    DEBUG_PRINT("USRP_SETUP requested tx rate: : %f\n", txrate_new);
 
                     pulse_offsets.resize(npulses);
                     for(uint32_t i = 0; i < npulses; i++) {
@@ -589,19 +591,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                     if(txrate != txrate_new) {
-                        usrp->set_tx_rate(txrate);
-                        txfreq = usrp->get_tx_rate();
+                        usrp->set_tx_rate(txrate_new);
+                        txrate = usrp->get_tx_rate();
    
                     }
                     
                     if(rxfreq != rxfreq_new) {
-                        usrp->set_rx_freq(rxfreq);
+                        usrp->set_rx_freq(rxfreq_new);
                         rxfreq = usrp->get_rx_freq();
                     }
 
                     if(txfreq != txfreq_new) {
-                        usrp->set_tx_freq(txfreq);
-                        txrate = usrp->get_tx_freq();
+                        usrp->set_tx_freq(txfreq_new);
+                        txfreq = usrp->get_tx_freq();
                     }
 
                     if(verbose) {
