@@ -66,9 +66,13 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     search_rate_supported = search_rate_supported[search_rate_supported == search_rate_supported_integer] * 1e3
     
     # pick the lowested supported sampling rate that is equal to or greater than requested sampling rate 
-    search_rate_actual = search_rate_supported[np.argmax(np.diff(search_rate_supported > search_rate_requested))]
-    assert search_rate_actual >= search_rate_requested
+    if search_rate_requested > min(search_rate_supported):
+        search_rate_actual = search_rate_supported[np.argmax(np.diff(search_rate_supported > search_rate_requested))]
+    else:
+        search_rate_actual = min(search_rate_supported)
 
+    assert search_rate_actual >= search_rate_requested, "actual clear frequency search sampling rate must be equal or faster to requested rate"
+    
     # calculate center frequency of clrfreq search
     center_freq = (fstart + (fstop-fstart)/2.0)
     
@@ -86,7 +90,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     # gather samples from usrps
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
     spectrum_power = np.zeros(len(spectrum_freqs))
-
+    
     for ai in range(nave):
         cprint('gathering samples on avg {}'.format(ai), 'green')
         samples, search_rate_usrp = grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, search_rate_actual, pshift_per_antenna)
