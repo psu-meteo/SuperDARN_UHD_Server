@@ -59,6 +59,8 @@
 #define NSWINGS 2 // swings are slots in the swing buffer
 #define VERBOSE 1
 
+#define SAVE_RAW_SAMPLES_DEBUG 1
+
 #define MAX_SOCKET_RETRYS 5
 #define TRIGGER_BUSY 'b'
 #define SETUP_READY 'y'
@@ -345,7 +347,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     size_t rxshm_size;
     size_t txshm_size;
 
-    int32_t verbose = 0; 
+    int32_t verbose = 1; 
     int32_t rx_worker_status;
 
     // clean up to fix it later..
@@ -702,6 +704,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
+
+                    if(SAVE_RAW_SAMPLES_DEBUG) {
+                        FILE *raw_dump_fp;
+                        char raw_dump_name[80];
+                        sprintf(raw_dump_name,"raw_samples_ant_%d.cint16", ant);
+                        raw_dump_fp = fopen(raw_dump_name, "wb");
+                        fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), num_requested_rx_samples, raw_dump_fp);
+                        fclose(raw_dump_fp);
+                    }
+
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
                     state = ST_READY; 
                     DEBUG_PRINT("changing state to ST_READY\n");
