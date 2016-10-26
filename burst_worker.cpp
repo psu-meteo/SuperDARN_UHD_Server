@@ -14,6 +14,7 @@
 #include "burst_worker.h"
 
 #define TEST_TXWORKER 0
+#define SAVE_TX_SAMPLES_DEBUG 0
 #define DEBUG 1
 
 #ifdef DEBUG
@@ -54,7 +55,6 @@ void tx_worker(
               
         
         //Initialize the temporary pointers according to the argument passed to the function
-        std::vector<std::complex<int16_t> *> temp_ptrs(pulse_times.size());
         if (DEBUG) std::cout << "BURST_WORKER pulse " << i << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER num tx channels: " << tx_stream->get_num_channels() << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER sequence length : " << pulse_length << std::endl;
@@ -71,7 +71,7 @@ void tx_worker(
         //Now go for it!
         while(nacc_samps < pulse_length){
             size_t samps_to_send = std::min(pulse_length - nacc_samps, spb);
-            size_t ntx_samps = tx_stream->send(pulse_seq_ptrs.at(i), samps_to_send, md, timeout);
+            size_t ntx_samps = tx_stream->send(&pulse_seq_ptrs.at(i)[nacc_samps], samps_to_send, md, timeout);
 
             md.start_of_burst = false;
             md.has_time_spec = false;
@@ -81,7 +81,7 @@ void tx_worker(
         }
 
         md.end_of_burst = true;
-        tx_stream->send(temp_ptrs, 0, md, timeout);
+        tx_stream->send(&pulse_seq_ptrs.at(i), 0, md, timeout);
     
         if (DEBUG) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
         uhd::async_metadata_t async_md;
@@ -95,6 +95,19 @@ void tx_worker(
 
         DEBUG_PRINT("BURST_WORKER finished pulse\n");
     }
+
+    
+	if(SAVE_TX_SAMPLES_DEBUG) {
+        for(size_t i = 0; i < pulse_length; i++) {
+            std::cout << "pulse sample " << i << ": " << pulse_seq_ptrs.at(0)[i] << std::endl;
+        }
+		FILE *raw_dump_fp;
+		char raw_dump_name[80];
+		sprintf(raw_dump_name,"tx_samples.int16");
+		raw_dump_fp = fopen(raw_dump_name, "wb");
+		fwrite(&pulse_seq_ptrs.at(0)[0], sizeof(std::complex<int16_t>), pulse_length, raw_dump_fp);
+		fclose(raw_dump_fp);
+	}
 
     gettimeofday(&t1,NULL);
     double elapsed=(t1.tv_sec-t0.tv_sec)*1E6;

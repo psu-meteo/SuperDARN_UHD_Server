@@ -68,7 +68,7 @@ __global__ void interpolate_and_multiply(
 
     // linear interpolation between two baseband samples
     if ( iSample_bb == (nSamples_bb-1) && iPulse == (nPulses-1) && iChannel == ( nChannels-1) && iAntenna == (nAntennas-1) ) {
-        printf("tx_cuda: Last sample => fade out! \n");
+        //printf("tx_cuda: Last sample => fade out! \n");
         inc_i = (0 - inData[idxInput + I_OFFSET]) / upSampleRate * iUpsample;
         inc_q = (0 - inData[idxInput + Q_OFFSET]) / upSampleRate * iUpsample;  
   } else {
