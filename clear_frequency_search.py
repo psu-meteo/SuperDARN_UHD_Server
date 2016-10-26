@@ -27,7 +27,8 @@ CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
 CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
-PLOT_CLEAR_FREQUENCY_SEARCH = False
+PLOT_CLEAR_FREQUENCY_SEARCH = False 
+OBEY_RESTRICTED_FREQS = True 
 
 def read_restrict_file(restrict_file):
     restricted_frequencies = []
@@ -96,8 +97,10 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
         samples, search_rate_usrp = grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, search_rate_actual, pshift_per_antenna)
         assert search_rate_usrp == search_rate_actual
         spectrum_power += fft_clrfreq_samples(samples)
-    
-    spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+
+    if OBEY_RESTRICTED_FREQS: 
+        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
     
     if (PLOT_CLEAR_FREQUENCY_SEARCH): 
@@ -180,9 +183,10 @@ def test_clrfreq():
     usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
     usrp_driver_socks = []
     USRP_ANTENNA_IDX = [0]
+    USRP_DRIVER_PORT = 54420
     
     for aidx in USRP_ANTENNA_IDX:
-        usrp_driver_port = USRPDRIVER_PORT + aidx
+        usrp_driver_port = USRP_DRIVER_PORT + aidx
 
         try:
             cprint('connecting to usrp driver on port {}'.format(usrp_driver_port), 'blue')
@@ -198,8 +202,8 @@ def test_clrfreq():
 
     # simulate received clrfreq_struct
     clrfreq_struct.payload['start'] = 10050
-    clrfreq_struct.payload['end'] = 11050
-    clrfreq_struct.payload['filter_bandwidth'] = 1250
+    clrfreq_struct.payload['end'] = 13050
+    clrfreq_struct.payload['filter_bandwidth'] = 3250
     clrfreq_struct.payload['pwr_threshold'] = .9
     clrfreq_struct.payload['nave'] =  10
     clear_freq, noise = clrfreq_search(clrfreq_struct, usrp_driver_socks, restricted_frequencies, 3, 3.24)
