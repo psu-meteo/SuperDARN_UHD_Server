@@ -1,62 +1,79 @@
 #include <math.h>
 #include <stdint.h>
 #include "assert.h"
+#include <stdio.h>
 
-// was samples[threadIdx.y][blockIdx.y][tsamp];
-__device__ size_t rf_sample_idx(uint32_t tsamp)
-{
-    return (threadIdx.y * blockDim.y * blockDim.x) + (blockIdx.y * blockDim.x) + tsamp;
-}
+/*
+INDEXING for multiply_mix_add() (similar for multiply_and_add(), just IF => BB )
 
-// was filter[threadIdx.y][tfilt]
-__device__ size_t rf_filter_idx(uint32_t tfilt)
-{
-    return 4 * threadIdx.x * threadIdx.y; 
-}
+threadIdx.x = iFilterSample*2
+threadIdx.y = iChannel
+blockDim.x  = nFilterSamples /2
+blockDim.y  = nChannels
+blockIdx.x  = iSampleIF
+blockIdx.y  = iAntenna
+gridDim.x   = nSamplesIF
+gridDim.y   = nAntennas
 
-// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
-__device__ size_t rf_output_idx(int32_t output_idx)
-{
-    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
-}
+Input / Output format:
+ - [rx_samples_FB] = nAntennas x nChannels x 2*nSamples_FB(I/Q-Interleaved)
+   for all frequency bands FB: RF, IF, and BB
+ - Filter has be be time reversed (doesn't matter for symmetric filters)
 
+TODO:
+ -  check if phase correction of local oscillator is correct
+ - if filter is real we could save calc time by removing all calculations with imag(filter) and phase correction, maybe write additional function multiply_add_real
+ - what is block arround line 122 checking for?
+ - NTH: avoid duplicate code for indexing, multiplication and summation
+
+*/
+
+#define MAXCHANNELS 8
+__device__ __constant__ double  phaseIncrement_NCO_rad[MAXCHANNELS];
+__device__ __constant__ int16_t decimationRates[2];                 // [0]: rf2if, [1]: if2bb
 
 __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block
     __shared__ float qtemp[1024];
 
-    uint32_t tid = threadIdx.y*blockDim.x+threadIdx.x;
-    int32_t tfilt;
-    uint32_t tsamp;
+    // clear variable names
+    uint32_t iFilterSampleTimes2  = threadIdx.x;
+    uint32_t iChannel             = threadIdx.y;
+    uint32_t nFilterSamplesDivBy2 = blockDim.x;
+    uint32_t nChannels            = blockDim.y;
+    uint32_t iSampleBB            = blockIdx.x;
+    uint32_t iAntenna             = blockIdx.y;
+    uint32_t nSamplesBB           = gridDim.x;
+//    uint32_t nAntennas            = gridDim.y; 
 
-    //Each block writes exactly a baseband sample for each frequency
-    /*blockIdx.x corresponds to time-domain tiling; NBBSAMPS == gridDim.x
-    blockIdx.y corresponds to antenna channel tiling; NANTS == gridDim.y*/
-    int32_t output_idx = 2*blockIdx.x;
+    uint32_t iThread_lin = iFilterSampleTimes2 + iChannel*nFilterSamplesDivBy2;   // linear thread index in block
 
-    // calculate index of sample from global memory samples array
-    float stride = 1./8; // The number of filter taps is (1./stride) times the decimation rate
-    tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
+    uint32_t decimationRate_if2bb = decimationRates[1];
 
-    float i0 = samples[rf_sample_idx(tsamp)];
-    float q0 = samples[rf_sample_idx(tsamp+1)];
-    float i1 = samples[rf_sample_idx(tsamp+2)];
-    float q1 = samples[rf_sample_idx(tsamp+3)];
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_if = decimationRate_if2bb * (nSamplesBB -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_if = iSampleBB * decimationRate_if2bb + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
+    uint32_t idxSample_if = iSample_if * 2 + iChannel * nSamples_if *2 + iAntenna * nChannels * nSamples_if *2; // index in memory (account for  I/Q, iChannel, iAntenna)
 
+    float i0 =  samples[idxSample_if  ];
+    float q0 =  samples[idxSample_if+1];
+    float i1 =  samples[idxSample_if+2];
+    float q1 =  samples[idxSample_if+3];
 
     // get filter values from global memory
-    tfilt = 4*threadIdx.x;
-    float p0re = filter[rf_filter_idx(tfilt)];
-    float p0im = filter[rf_filter_idx(tfilt+1)];
-    float p1re = filter[rf_filter_idx(tfilt+2)];
-    float p1im = filter[rf_filter_idx(tfilt+3)];
+    float p0re = filter[idxSample_filter  ];
+    float p0im = filter[idxSample_filter+1];
+    float p1re = filter[idxSample_filter+2];
+    float p1im = filter[idxSample_filter+3];
 
-    // mix samples with nco, perform first reduction
-    itemp[tid] = p0re * i0 - p0im * q0 + p1re * i1 - p1im * q1;
-    qtemp[tid] = p0re * q0 + p0im * i0 + p1re * q1 + p1im * i1;
+   
+    // multiply filter
+    itemp[iThread_lin] = p0re * i0 - p0im * q0 + p1re * i1 - p1im * q1;
+    qtemp[iThread_lin] = p0re * q0 + p0im * i0 + p1re * q1 + p1im * i1;
 
      __syncthreads();
+
 
      // parallel reduce samples (could unroll loop for speedup?)
      // Do this as long as the reduction is a power of 2
@@ -66,84 +83,93 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
      while(s > 0 && rem == 0){
         s /= 2;
         if (threadIdx.x < s) {
-            itemp[tid] += itemp[tid + s];
-            qtemp[tid] += qtemp[tid + s];
+            itemp[iThread_lin] += itemp[iThread_lin + s];
+            qtemp[iThread_lin] += qtemp[iThread_lin + s];
         }
         rem = s % 2;
 
         __syncthreads();
      }
+
+    // Do this as long as the reduction is a power of 5
+     rem = s % 5;
+     while(s > 0 && rem == 0){
+        s /= 5;
+        if (threadIdx.x < s) {
+            itemp[iThread_lin] = itemp[iThread_lin] + itemp[iThread_lin + s] + itemp[iThread_lin+2*s] + itemp[iThread_lin+3*s] + itemp[iThread_lin+4*s];
+            qtemp[iThread_lin] = qtemp[iThread_lin] + qtemp[iThread_lin + s] + qtemp[iThread_lin+2*s] + qtemp[iThread_lin+3*s] + qtemp[iThread_lin+4*s];
+        }
+        rem = s % 5;
+
+        __syncthreads();
+     }
+
      //// Now do a serial reduction for the remaining
      if(threadIdx.x == 0){
         for(int32_t i=1; i<s; i++){
-           itemp[tid] += itemp[tid + i];
-           qtemp[tid] += qtemp[tid + i];
+           itemp[iThread_lin] += itemp[iThread_lin + i];
+           qtemp[iThread_lin] += qtemp[iThread_lin + i];
         }
      }
      __syncthreads();
 
-
+     // write back results
      if (threadIdx.x == 0) {
-        odata[rf_output_idx(output_idx)] = (float) itemp[tid];
-        odata[rf_output_idx(output_idx+1)] = (float) qtemp[tid];
+
+        uint32_t output_idx = iSampleBB *2 + iChannel * nSamplesBB *2 + iAntenna * nChannels * nSamplesBB *2; 
+        odata[output_idx  ] = (float)  itemp[iThread_lin];
+        odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }  
 }       
 
-// was samples[blockIdx.y][tsamp];
-__device__ size_t if_sample_idx(uint32_t tsamp)
-{
-    return (blockIdx.y * blockDim.x) + tsamp;
-}
 
-// was filter[threadIdx.y][tfilt]
-__device__ size_t if_filter_idx(uint32_t tfilt)
-{
-    return 4 * threadIdx.x * threadIdx.y; 
-}
-
-// odata[threadIdx.y][blockIdx.y][output_idx] = (float) itemp[tid];
-__device__ size_t if_output_idx(int32_t output_idx)
-{
-    return (threadIdx.y * blockDim.y * 2 * blockDim.x) + (blockIdx.y * 2 * blockDim.x) + output_idx; 
-}
 
 
 __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];
     __shared__ float qtemp[1024];
+    
 
-    uint32_t tid = threadIdx.y*blockDim.x+threadIdx.x;
-    int32_t tfilt;
+    // clear variable names
+    uint32_t iFilterSampleTimes2  = threadIdx.x;
+    uint32_t iChannel             = threadIdx.y;
+    uint32_t nFilterSamplesDivBy2 = blockDim.x;
+    uint32_t nChannels            = blockDim.y;
+    uint32_t iSampleIF            = blockIdx.x;
+    uint32_t iAntenna             = blockIdx.y;
+    uint32_t nSamplesIF           = gridDim.x;
+   // uint32_t nAntennas            = gridDim.y; 
+
+    uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;
+    
+    // TODO: mgu delete next block if I know what assert is checking for
     uint32_t tsamp;
-
-    //Each block writes exactly a baseband sample for each frequency
-    /*blockIdx.x corresponds to time-domain tiling; NBBSAMPS == gridDim.x
-    blockIdx.y corresponds to antenna channel tiling; NANTS == gridDim.y
-    threadIdx.y corresponds to frequency channel tiling; NFREQS == blockDim.y*/
-    int32_t output_idx = 2*blockIdx.x;
-
-
     // calculate index of sample from global memory samples array
     float stride = 1./2; // The number of filter taps is (1./stride) times the decimation rate
     tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
-
-    // get filter values from global memory
-    tfilt = 4*threadIdx.x;
     // mix samples with nco, perform first reduction
     assert(tsamp <= (4 * blockDim.x * gridDim.x));
 
-    itemp[tid] =
-        filter[if_filter_idx(tfilt)]   * samples[if_sample_idx(tsamp)] -
-        filter[if_filter_idx(tfilt+1)] * samples[if_sample_idx(tsamp+1)] +
-        filter[if_filter_idx(tfilt+2)] * samples[if_sample_idx(tsamp+2)] -
-        filter[if_filter_idx(tfilt+3)] * samples[if_sample_idx(tsamp+3)];
-    qtemp[tid] =
-        filter[if_filter_idx(tfilt)]   * samples[if_sample_idx(tsamp+1)] +
-        filter[if_filter_idx(tfilt+1)] * samples[if_sample_idx(tsamp)] +
-        filter[if_filter_idx(tfilt+2)] * samples[if_sample_idx(tsamp+3)] +
-        filter[if_filter_idx(tfilt+3)] * samples[if_sample_idx(tsamp+2)];
+    uint32_t decimationRate_rf2if = decimationRates[0];  
 
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);   // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_rf = iSampleIF * decimationRate_rf2if + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
+    uint32_t idxSample_rf = iSample_rf * 2 + iChannel * nSamples_rf *2 + iAntenna * nChannels * nSamples_rf *2; // index in memory (account for  I/Q, iChannel, iAntenna)
+
+    itemp[iThread_lin] =
+        filter[idxSample_filter  ] * samples[idxSample_rf  ] -
+        filter[idxSample_filter+1] * samples[idxSample_rf+1] +
+        filter[idxSample_filter+2] * samples[idxSample_rf+2] -
+        filter[idxSample_filter+3] * samples[idxSample_rf+3];
+    qtemp[iThread_lin] =
+        filter[idxSample_filter  ] * samples[idxSample_rf+1] +
+        filter[idxSample_filter+1] * samples[idxSample_rf  ] +
+        filter[idxSample_filter+2] * samples[idxSample_rf+3] +
+        filter[idxSample_filter+3] * samples[idxSample_rf+2];
+
+     
      __syncthreads();
 
      /* Example: dmrate==100,
@@ -156,8 +182,8 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      while(s > 0 && rem == 0){
         s /= 2;
         if (threadIdx.x < s) {
-            itemp[tid] += itemp[tid + s];
-            qtemp[tid] += qtemp[tid + s];
+            itemp[iThread_lin] += itemp[iThread_lin + s];
+            qtemp[iThread_lin] += qtemp[iThread_lin + s];
         }
         rem = s % 2;
 
@@ -168,8 +194,8 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      while(s > 0 && rem == 0){
         s /= 5;
         if (threadIdx.x < s) {
-            itemp[tid] = itemp[tid] + itemp[tid + s] + itemp[tid+2*s] + itemp[tid+3*s] + itemp[tid+4*s];
-            qtemp[tid] = qtemp[tid] + qtemp[tid + s] + qtemp[tid+2*s] + qtemp[tid+3*s] + qtemp[tid+4*s];
+            itemp[iThread_lin] = itemp[iThread_lin] + itemp[iThread_lin + s] + itemp[iThread_lin+2*s] + itemp[iThread_lin+3*s] + itemp[iThread_lin+4*s];
+            qtemp[iThread_lin] = qtemp[iThread_lin] + qtemp[iThread_lin + s] + qtemp[iThread_lin+2*s] + qtemp[iThread_lin+3*s] + qtemp[iThread_lin+4*s];
         }
         rem = s % 5;
 
@@ -179,31 +205,24 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      // Now do a serial reduction for the remaining
      if(threadIdx.x == 0){
         for(int32_t i=1; i<s; i++){
-           itemp[tid] += itemp[tid + i];
-           qtemp[tid] += qtemp[tid + i];
+           itemp[iThread_lin] += itemp[iThread_lin + i];
+           qtemp[iThread_lin] += qtemp[iThread_lin + i];
         }
      }
      __syncthreads();
 
      if (threadIdx.x == 0) {
-        /*Now do phase adjustment on the output samples*/
-        // phase increment of the NCO can be calculated from two adjacent filter taps
-        double phase_inc =
-            atan(filter[if_filter_idx(tfilt+3)] / filter[if_filter_idx(tfilt+2)]) -
-            atan(filter[if_filter_idx(tfilt+1)] / filter[if_filter_idx(tfilt)]);
+        // the NCO inclueded in the filter causes a phase error. this is the correction
+        double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
+        double ltemp = (double) itemp[iThread_lin]; // TODO: avoid numerical errors?? why only itemp? (mgu)
+        
+        itemp[iThread_lin] = itemp[iThread_lin] * cos(phiOffset) - qtemp[iThread_lin] * sin(phiOffset);
+        qtemp[iThread_lin] = ltemp * sin(phiOffset) + qtemp[iThread_lin] * cos(phiOffset);
 
-        /*Phase remainder exists because the NCO oscillator 
-        may not complete an exact 360% rotation in a filter window*/
-        double phi_rem = blockIdx.x*fmod((1*blockDim.x) * phase_inc, 2*M_PI);
-
-        double ltemp = (double) itemp[tid];
-        itemp[tid] = itemp[tid] * cos(phi_rem) - qtemp[tid] * sin(phi_rem);
-        qtemp[tid] = ltemp * sin(phi_rem) + qtemp[tid] * cos(phi_rem);
-
-        //deciding the output
-        odata[if_output_idx(output_idx)] = (float) itemp[tid];
-        odata[if_output_idx(output_idx+1)] = (float) qtemp[tid];
+        // write outout
+        uint32_t output_idx = iSampleIF *2 + iChannel * nSamplesIF *2 + iAntenna * nChannels * nSamplesIF *2; 
+        odata[output_idx  ] = (float)  itemp[iThread_lin];
+        odata[output_idx+1] = (float)  qtemp[iThread_lin];
      }
 }
-
 

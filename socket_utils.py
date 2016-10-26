@@ -3,6 +3,8 @@ import pdb
 import pickle
 import socket
 
+verbose = False
+
 # pack i/q samples into uint32 for sending samples over the network
 # between usrp_server and arbyserver
 def complex_ui32_pack(isamp, qsamp):
@@ -14,11 +16,18 @@ def complex_ui32_pack(isamp, qsamp):
     return np.uint32(packed_sample)
 
 def recv_dtype(sock, dtype, nitems = 1):
-    if dtype == str:
-        data = sock.recv(nitems)
-    else:
-        dstr = sock.recv(dtype().nbytes * nitems)
-        data = np.fromstring(dstr, dtype=dtype, count=nitems)
+    try:
+        if dtype == str:
+            data = sock.recv(nitems)
+        else:
+            dstr = sock.recv(dtype().nbytes * nitems)
+            if verbose:
+                print(' => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes * nitems , dstr  ))
+            data = np.fromstring(dstr, dtype=dtype, count=nitems)
+    except ValueError:
+        print('timed out waiting for ' + str(dtype))
+        import pdb
+        pdb.set_trace()
     if nitems == 1:
         return data[0]
     return data
@@ -43,3 +52,5 @@ def transmit_dtype(sock, data, dtype = None):
         data = dtype(data)
 
     dstr = sock.sendall(data.tobytes())
+    if verbose:
+        print(' => {}  transmitted {} as {} ({} bytes): {}'.format(__file__, data, dtype, len(data.tobytes()), data.tobytes()))

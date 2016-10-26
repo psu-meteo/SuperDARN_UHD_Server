@@ -59,6 +59,8 @@
 #define NSWINGS 2 // swings are slots in the swing buffer
 #define VERBOSE 1
 
+#define SAVE_RAW_SAMPLES_DEBUG 1
+
 #define MAX_SOCKET_RETRYS 5
 #define TRIGGER_BUSY 'b'
 #define SETUP_READY 'y'
@@ -195,6 +197,17 @@ uint32_t sock_get_uint32(int32_t sock)
    }
    return d;
 }
+
+int32_t sock_get_int32(int32_t sock)
+{
+   int32_t d = 0;
+   ssize_t status = recv(sock, &d, sizeof(int32_t), 0);
+   if(status != sizeof(int32_t)) {
+        fprintf(stderr, "error receiving int32_t\n");
+   }
+   return d;
+}
+
 
 ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
@@ -334,7 +347,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     size_t rxshm_size;
     size_t txshm_size;
 
-    int32_t verbose = 0; 
+    int32_t verbose = 1; 
     int32_t rx_worker_status;
 
     // clean up to fix it later..
@@ -418,11 +431,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
     ant = ai_ant->ival[0];
     std::string usrpargs(as_host->sval[0]);
-    usrpargs = "addr0=" + usrpargs; 
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
     
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
-
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
@@ -544,6 +556,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     
                     DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) num_requested_rx_samples);
                     DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) num_tx_rf_samples);
+                    DEBUG_PRINT("USRP_SETUP existing tx rate: : %f\n", txrate);
+                    DEBUG_PRINT("USRP_SETUP requested tx rate: : %f\n", txrate_new);
 
                     pulse_offsets.resize(npulses);
                     for(uint32_t i = 0; i < npulses; i++) {
@@ -579,19 +593,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                     if(txrate != txrate_new) {
-                        usrp->set_tx_rate(txrate);
-                        txfreq = usrp->get_tx_rate();
+                        usrp->set_tx_rate(txrate_new);
+                        txrate = usrp->get_tx_rate();
    
                     }
                     
                     if(rxfreq != rxfreq_new) {
-                        usrp->set_rx_freq(rxfreq);
+                        usrp->set_rx_freq(rxfreq_new);
                         rxfreq = usrp->get_rx_freq();
                     }
 
                     if(txfreq != txfreq_new) {
-                        usrp->set_tx_freq(txfreq);
-                        txrate = usrp->get_tx_freq();
+                        usrp->set_tx_freq(txfreq_new);
+                        txfreq = usrp->get_tx_freq();
                     }
 
                     if(verbose) {
@@ -672,11 +686,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 case READY_DATA: {
                     DEBUG_PRINT("READY_DATA command, waiting for uhd threads to join back\n");
-                    uint32_t i;
+                    uint32_t channel_index;
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
-                    
-                    DEBUG_PRINT("READY_DATA usrp worker threads joined, sending metadata\n");
+
+                    DEBUG_PRINT("READY_DATA unlocking swing a semaphore\n");
+                    unlock_semaphore(swing, sem_swinga);
+        
+                    DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
+                    // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
+                    channel_index = sock_get_int32(driverconn); 
 
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %d\n", state, ant, num_requested_rx_samples);
                     sock_send_int32(driverconn, state);  // send status
@@ -685,6 +704,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
+
+                    if(SAVE_RAW_SAMPLES_DEBUG) {
+                        FILE *raw_dump_fp;
+                        char raw_dump_name[80];
+                        sprintf(raw_dump_name,"raw_samples_ant_%d.cint16", ant);
+                        raw_dump_fp = fopen(raw_dump_name, "wb");
+                        fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), num_requested_rx_samples, raw_dump_fp);
+                        fclose(raw_dump_fp);
+                    }
+
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
                     state = ST_READY; 
                     DEBUG_PRINT("changing state to ST_READY\n");
@@ -738,7 +767,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO: does this take too long?
                     usrp->set_rx_rate(clrfreq_rate);
                     usrp->set_rx_freq(clrfreq_cfreq);
-                     
+                    
+                    // verify that rate is set..
+                    clrfreq_rate = usrp->get_rx_rate(); // read back actual rate
+                    DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
+
                     // set up for USRP sampling
                     md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
                     uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
@@ -772,7 +805,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
 
                         if (DEBUG) {
-         
                             start_time = usrp->get_time_now();
                             real_time = start_time.get_real_secs();
                             frac_time = start_time.get_frac_secs();
@@ -796,9 +828,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     " encountered at " << rx_error_time.get_real_secs() << std::endl;
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
-
-                    sock_send_uint16(driverconn, 1); // so, either 1 sample offset or big/little endian
-                    sock_send_uint16(driverconn, 1);
+                    
+                    sock_send_int32(driverconn, 0); // TODO: send antenna number as int32
+                    sock_send_float64(driverconn, clrfreq_rate);
 
                     // send back samples                   
                     for(uint32_t i = 0; i < num_clrfreq_samples; i++) {

@@ -1,5 +1,7 @@
 #!/bin/bash
 #pycallgraph graphviz -- 
-./usrp_driver --intclk --antenna 1 --host usrp1
+#gdb --args ./usrp_driver --intclk --antenna 0 --host usrp1
+
+./usrp_driver --intclk --antenna 0 --host usrp1
 echo "press enter to continue: "
 read

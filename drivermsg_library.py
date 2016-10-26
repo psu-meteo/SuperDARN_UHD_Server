@@ -24,16 +24,14 @@ CUDA_EXIT = ord('e')
 
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
-CUDA_GENERATE_PULSE = ord('p')
+CUDA_GENERATE_PULSE = ord('l')
 CUDA_PULSE_INIT = ord('i')
 
 NO_COMMAND = ord('n')
 
-ARBYSERVER_PORT = int(55421)
-CUDADRIVER_PORT = int(55420)
-USRPDRIVER_PORT = int(54420) # + ant
-
 USRP_DRIVER_ERROR = -1
+
+TRIGGER_BUSY = 'b'
 
 # parent class for driver socket messages
 class driver_command(object):
@@ -47,7 +45,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            #print('\ttransmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
@@ -65,6 +63,7 @@ class driver_command(object):
         self.command = np.uint8(command)
     
     def queue(self, data, dtype, name = '', nitems = 1):
+        # pdb.set_trace()
         self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
    
     
@@ -130,7 +129,7 @@ class server_ctrlprm(driver_command):
             ctrlprm_dict['tbeamwidth'] = 0
             ctrlprm_dict['tfreq'] = 0
             ctrlprm_dict['trise'] = 0
-            ctrlprm_dict['number_of_baseband_samples'] = 0
+            ctrlprm_dict['number_of_samples'] = 0
             ctrlprm_dict['buffer_index'] = 0
             ctrlprm_dict['baseband_samplerate'] = 0
             ctrlprm_dict['filter_bandwidth'] = 0
@@ -156,7 +155,7 @@ class server_ctrlprm(driver_command):
         self.queue(ctrlprm_dict['tfreq'], np.int32, 'tfreq')
         self.queue(ctrlprm_dict['trise'], np.int32, 'trise')
 
-        self.queue(ctrlprm_dict['number_of_baseband_samples'], np.int32, 'number_of_baseband_samples')
+        self.queue(ctrlprm_dict['number_of_samples'], np.int32, 'number_of_samples')
         self.queue(ctrlprm_dict['buffer_index'], np.int32, 'buffer_index')
 
         self.queue(ctrlprm_dict['baseband_samplerate'], np.float32, 'baseband_samplerate')
@@ -357,38 +356,41 @@ def create_testsequence():
     import configparser
 
     ctrlprm = {\
+    '' : np.zeros(120, dtype=np.uint8), \
     'radar' : 0, \
     'channel' : 0, \
     'local' : 0, \
-    'priority' : 0, \
+    'priority' : 1, \
     'current_pulseseq_idx': 0, \
     'tbeam' : 0, \
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
-    'tbeamwidth': 0, \
-    'tfreq': 10010, \
-    'trise': 100, \
-    'number_of_baseband_samples' : 500, \
+    'tbeamwidth': 0.0, \
+    'tfreq': 2000, \
+    'trise': 5000, \
+    'number_of_samples' : 305, \
     'buffer_index' : 0, \
-    'baseband_samplerate' : 200000, \
-    'filter_bandwidth' : 0, \
+    'baseband_samplerate' : 3333.3333, \
+    'filter_bandwidth' : 3333, \
     'match_filter' : 0, \
-    'rfreq' : 10010, \
+    'rfreq' : 2000, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
-    'rbeamwidth' : 0, \
-    'status' : 0}
+    'rbeamwidth' : 0.0, \
+    'status' : 0, \
+    'pulseseq_idx' : 0}
         
-    npulses = 3
+    npulses = 8
 
-    tr_to_pulse_delay = 50e-6
-    pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
-
+    tr_to_pulse_delay = 60
+    #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
+    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] 
+    pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
     txbbrate = ctrlprm['baseband_samplerate']
-    pulse_lens = [300e-6, 300e-6, 300e-6]
-    phase_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
-    pulse_masks = [np.ones(int(p*txbbrate)) for p in pulse_lens]
+    pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
+    phase_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
+    pulse_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
 
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
@@ -396,4 +398,12 @@ def create_testsequence():
 
     seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
 
+    return seq
+
+def create_testsequence_uafscan():
+    import pickle
+    fh = open('uafscan_sequence.pickle', 'rb')
+    seq = pickle.load(fh)
+    fh.close
+    
     return seq
