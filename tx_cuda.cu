@@ -64,9 +64,17 @@ __global__ void interpolate_and_multiply(
     int32_t idxInput  = 2*iSample_bb + iPulse*2*nSamples_bb + iChannel*nPulses*2*nSamples_bb + iAntenna*nChannels*nPulses*2*nSamples_bb;
     int32_t idxOutput = 2*(iSample_bb*upSampleRate+iUpsample) + iPulse*2*nSamples_bb*upSampleRate + iAntenna*nPulses*2*nSamples_bb*upSampleRate;
 
+    float inc_i, inc_q;
+
     // linear interpolation between two baseband samples
-    float inc_i = (inData[idxInput + I_OFFSET+2] - inData[idxInput + I_OFFSET]) / upSampleRate * iUpsample;
-    float inc_q = (inData[idxInput + Q_OFFSET+2] - inData[idxInput + Q_OFFSET]) / upSampleRate * iUpsample;  
+    if ( iSample_bb == (nSamples_bb-1) && iPulse == (nPulses-1) && iChannel == ( nChannels-1) && iAntenna == (nAntennas-1) ) {
+        printf("tx_cuda: Last sample => fade out! \n");
+        inc_i = (0 - inData[idxInput + I_OFFSET]) / upSampleRate * iUpsample;
+        inc_q = (0 - inData[idxInput + Q_OFFSET]) / upSampleRate * iUpsample;  
+  } else {
+        inc_i = (inData[idxInput + I_OFFSET+2] - inData[idxInput + I_OFFSET]) / upSampleRate * iUpsample;
+        inc_q = (inData[idxInput + Q_OFFSET+2] - inData[idxInput + Q_OFFSET]) / upSampleRate * iUpsample;  
+  }
     
     // Calculate phase for each sample by adding phase of local oscillator and cabel phase offset 
     float phase = fmod( (double)( iSample_bb*upSampleRate + iUpsample )*txfreq_rads[iChannel], 2*M_PI) + txphasedelay_rads[iAntenna+iChannel*nAntennas];     

@@ -728,12 +728,14 @@ class RadarChannelHandler:
         # self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
 
+        if debug:
+           print("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay, self.tx_time))
         if npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
         if nbb_samples == 0:
             raise ValueError('number of samples in sequence must be nonzero!')
 
-        pdb.set_trace()
+      #  pdb.set_trace()
 
         return RMSG_SUCCESS
 

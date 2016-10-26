@@ -26,8 +26,8 @@ def recv_dtype(sock, dtype, nitems = 1):
             data = np.fromstring(dstr, dtype=dtype, count=nitems)
     except ValueError:
         print('timed out waiting for ' + str(dtype))
-        import pdb
-        pdb.set_trace()
+       # import pdb
+       # pdb.set_trace()
     if nitems == 1:
         return data[0]
     return data
