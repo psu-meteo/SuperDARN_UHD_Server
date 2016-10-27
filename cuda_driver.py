@@ -716,7 +716,7 @@ class ProcessingGPU(object):
         
 
         # for testing RX: plot RF, IF and BB
-        if True:
+        if False:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
