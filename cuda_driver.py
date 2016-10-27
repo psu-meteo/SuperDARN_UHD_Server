@@ -114,7 +114,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
             if currentSequence != None:
                 cNum = currentSequence.ctrlprm['channel']
                 bb_signal[cNum]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
-        
+                
         # synthesize rf waveform (up mixing in cuda)
         self.gpu.synth_channels(bb_signal)
         
@@ -190,7 +190,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # compute pulse compression 
 
                 # apply phase shifting to pulse using phase_mask
-                psamp = pulsesamps
+                psamp = np.copy(pulsesamps)
                 psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse])
                 # TODO: support non-1us resolution phase masks
         
@@ -630,7 +630,7 @@ class ProcessingGPU(object):
 
         self.synth_tx_rf_pulses(bb_signal, tx_bb_nSamples_per_pulse)
     
-        # Debug plotting
+        # Debug plotting for TX
         if False:
         #  transmit pulse for debugging...
             import matplotlib
@@ -715,8 +715,8 @@ class ProcessingGPU(object):
          #   plt.show()
         
 
-        # for testing: plot RF, IF and BB
-        if False:
+        # for testing RX: plot RF, IF and BB
+        if True:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
@@ -750,7 +750,10 @@ class ProcessingGPU(object):
             plt.title("BB")
 
             plt.show()
-        #    pdb.set_trace()
+
+            mpt.plot_time_freq(self.rx_rf_samples[0][0][400000:440000], self.rx_rf_samplingRate, iqInterleaved=True)
+            plt.title("Second pulse separate")
+            # pdb.set_trace()
 
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
