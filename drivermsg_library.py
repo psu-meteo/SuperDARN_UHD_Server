@@ -15,6 +15,8 @@ UHD_TRIGGER_PROCESS = ord('p')
 UHD_SETUP_READY = ord('y')
 UHD_CLRFREQ = ord('c')
 UHD_GETTIME = ord('m')
+UHD_SYNC = ord('S')
+
 UHD_EXIT = ord('e')
 
 CUDA_SETUP = ord('s')
@@ -306,7 +308,13 @@ class usrp_get_time_command(driver_command):
         self.full_sec = recv_dtype(sock, np.uint32)
         self.frac_sec = recv_dtype(sock, np.float64)
         return self.full_sec + self.frac_sec
+ 
+# command to query usrp time
+class usrp_sync_time_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_SYNC)
     
+   
 # command to prompt usrp drivers to run clear frequency sequence
 class usrp_clrfreq_command(driver_command):
     def __init__(self, usrps, num_clrfreq_samples, clrfreq_uhd_time, clrfreq_freq, clrfreq_rate):
@@ -339,7 +347,8 @@ class sequence(object):
          
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
-            raise ValueError('rfreq != tfreq, this behavior is not yet supported')
+            print('rfreq != tfreq!?, this may not actually be a problem due to clear frequency searches..?')
+        #    raise ValueError('rfreq != tfreq, this behavior is not yet supported')
         
         if self.ctrlprm['number_of_samples'] <= 0:
             raise ValueError('number of samples must be greater than zero!')

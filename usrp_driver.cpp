@@ -71,6 +71,7 @@
 #define MAX_TX_PULSES 10
 
 #define USRP_SETUP 's'
+#define UHD_SYNC 'S'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
 #define READY_DATA 'd'
@@ -440,31 +441,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
     // TODO: this should be sized for a maximum reasonable sample request 
+    //
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
- 
-    // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
-    if(al_intclk->count > 0) {
-        usrp->set_clock_source("internal");
-        usrp->set_time_source("external");
-        usrp->set_time_now(uhd::time_spec_t(0.0));
-    }
-
-    else {
-    // sync clock with external 10 MHz and PPS
-        usrp->set_clock_source("external");
-        usrp->set_time_source("external");
-        const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
-        while (last_pps_time == usrp->get_time_last_pps()) {
-            usleep(5e4);
-        }
-        usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
-        boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
-    }
-
-
-
-    // init rxfe
+   // init rxfe
     kodiak_init_rxfe(usrp);
     
     signal(SIGINT, siginthandler);
@@ -737,7 +717,32 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_uint8(driverconn, UHD_GETTIME);
                     break;
                     }
+                // command to reset time, sync time with external PPS pulse
+                case UHD_SYNC: {
+                    DEBUG_PRINT("entering UHD_SYNC command\n");
 
+                    // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
+                    if(al_intclk->count > 0) {
+                        usrp->set_clock_source("internal");
+                        usrp->set_time_source("internal");
+                        usrp->set_time_now(uhd::time_spec_t(0.0));
+                    }
+
+                    else {
+                    // sync clock with external 10 MHz and PPS
+                        usrp->set_clock_source("external");
+                        usrp->set_time_source("external");
+                        const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
+                        while (last_pps_time == usrp->get_time_last_pps()) {
+                            usleep(5e4);
+                        }
+                        usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
+                        boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
+                    }
+
+                    sock_send_uint8(driverconn, UHD_SYNC);
+                    break;
+                    }
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
                     uhd::rx_metadata_t md;

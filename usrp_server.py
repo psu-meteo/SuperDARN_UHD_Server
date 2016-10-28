@@ -22,7 +22,7 @@ from clear_frequency_search import read_restrict_file, clrfreq_search
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1
 RMSG_SUCCESS = 0
-RADAR_STATE_TIME = .0001#.0005
+RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 120000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
@@ -196,7 +196,7 @@ class RadarHardwareManager:
 	
         usrp_driver_socks = []
         
-        # TODO: read these from a config file
+        # TODO: read these from ini config file
         # currently pulled from radar_config_constants.py
         self.usrp_tx_cfreq = DEFAULT_USRP_CENTER_FREQ
         self.usrp_rx_cfreq = DEFAULT_USRP_CENTER_FREQ 
@@ -215,6 +215,12 @@ class RadarHardwareManager:
             sys.exit(1)
 
         self.usrpsocks = usrp_driver_socks
+
+        # once USRPs are connected, synchronize clocks/timers 
+        cmd = usrp_sync_time_command(self.usrpsocks)
+        cmd.transmit()
+        cmd.client_return()
+
 
     def rxfe_init(self):
         # TODO: fix this function
@@ -235,7 +241,7 @@ class RadarHardwareManager:
 
 
     def cuda_init(self):
-        time.sleep(.05)
+        #time.sleep(.05)
 
         self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate'])
 
@@ -452,23 +458,28 @@ class RadarHardwareManager:
         
         
         synth_pulse = False
-
+        print('self.channels: ' + str(self.channels))
+        
         for ch in self.channels:
-            ch.state = STATE_WAIT
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
                 # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate
                 print('tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
+                print('rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
                 print('usrp tx cfreq: ' + str(self.usrp_tx_cfreq))
                 print('usrp rf tx rate: ' + str(self.usrp_rf_tx_rate))
                 
                 assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
-                time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
+                #time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
+                #print('after 50 ms of delay..')
+                #print('tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
+                #print('rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
+
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     cprint('tfreq != rfreq!', 'yellow')
-                    pdb.set_trace()
+                    #pdb.set_trace()
                 cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
                 # TODO: separate loading sequences from generating baseband samples..
 
@@ -479,6 +490,7 @@ class RadarHardwareManager:
                 cmd.client_return()
                 synth_pulse = True
 
+
         if synth_pulse:
             cprint('transmitting generate pulse command', 'blue')
             cmd = cuda_generate_pulse_command(self.cudasocks)
@@ -488,6 +500,8 @@ class RadarHardwareManager:
 
             cprint('pulse generated, end of pretrigger', 'blue')
 
+        for ch in self.channels:
+            ch.state = STATE_WAIT
 
 class RadarChannelHandler:
     def __init__(self, conn):
