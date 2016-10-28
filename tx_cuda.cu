@@ -101,8 +101,8 @@ __global__ void interpolate_and_multiply(
         }
 
         // write data
-        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / MAXCHANNELS);
-        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / MAXCHANNELS);
+        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / nChannels);
+        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / nChannels);
     }
 
 }
