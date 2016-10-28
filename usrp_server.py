@@ -217,6 +217,8 @@ class RadarHardwareManager:
         self.usrpsocks = usrp_driver_socks
 
         # once USRPs are connected, synchronize clocks/timers 
+        # TODO: add check that sync worked, sometimes there is an offset between usrps by an integer number of seconds..
+        # TODO: investigate offsets in timing for pulse sequences
         cmd = usrp_sync_time_command(self.usrpsocks)
         cmd.transmit()
         cmd.client_return()
@@ -285,9 +287,11 @@ class RadarHardwareManager:
         cmd.transmit()
         cprint('sending READY_DATA command sent, waiting on READY_DATA status', 'blue')
 
-        main_samples = np.complex64(np.zeros((MAXANTENNAS_MAIN, nbb_samples)))
-        main_beamformed = np.uint32(np.zeros(nbb_samples))
-        back_samples = np.complex64(np.zeros((MAXANTENNAS_BACK, nbb_samples)))
+        # TODO: seperate tracking of number of antennas in main and back array from nants
+        # the following line will fail once we start testing with the back array or test with spare arrays
+        main_samples = np.complex64(np.zeros((len(self.usrpsocks), nbb_samples))) # TODO: support sparse array.., this assumes no missing elements
+        main_beamformed = np.uint32(np.zeros(nbb_samples)) # samples for control program are packed 16 bit i/q pairs in a 32 bit array..
+        back_samples = np.complex64(np.zeros((MAXANTENNAS_BACK, nbb_samples))) # TODO: don't hardcode back array size, support missing elements
         main_beamformed = np.uint32(np.zeros(nbb_samples))
 
         # check status of usrp drivers
@@ -311,14 +315,9 @@ class RadarHardwareManager:
 
         cmd.transmit()
 
-        # TODO: setup through all sockets
         # recv metadata from cuda drivers about antenna numbers and whatnot
         # fill up provided main and back baseband sample buffers
-
-        # TODO: fill in sample buffer with baseband sample array
         for cudasock in self.cudasocks:
-            # TODO: recieve antenna number
-
             transmit_dtype(cudasock, channel.cnum, np.int32)
             nants = recv_dtype(cudasock, np.uint32)
 
@@ -327,7 +326,7 @@ class RadarHardwareManager:
                 num_samples = recv_dtype(cudasock, np.uint32)
                 samples = recv_dtype(cudasock, np.float32, num_samples)
                 samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
-
+                
                 if ant < MAX_MAIN_ARRAY_TODO:
                     main_samples[ant] = samples[:]
 

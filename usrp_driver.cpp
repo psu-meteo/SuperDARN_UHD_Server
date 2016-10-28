@@ -59,7 +59,7 @@
 #define NSWINGS 2 // swings are slots in the swing buffer
 #define VERBOSE 1
 
-#define SAVE_RAW_SAMPLES_DEBUG 1
+#define SAVE_RAW_SAMPLES_DEBUG 0
 
 #define MAX_SOCKET_RETRYS 5
 #define TRIGGER_BUSY 'b'
