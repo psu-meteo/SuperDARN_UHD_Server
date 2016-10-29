@@ -66,7 +66,7 @@
 #define SETUP_READY 'y'
 #define TRIGGER_PROCESS 'p'
 
-#define START_OFFSET .1
+#define START_OFFSET 0.1  
 #define ARG_MAXERRORS 10
 #define MAX_TX_PULSES 10
 
@@ -635,6 +635,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga);
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
+                        
+                        init_timing_signals(usrp);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
+                        
                         // todo: num_requested_rx_samples
                         start_time = usrp->get_time_now();
 
@@ -647,7 +650,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_times[p_i].get_real_secs());
                         }
-
+                        
+                       //  send_timing_for_sequence(usrp, start_time, pulse_times);
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp,  start_time,  pulse_times)); 
+                        
+ 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
                         uhd_threads.create_thread(boost::bind(recv_and_hold, usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status)); 
                         //recv_and_hold(usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status); 
