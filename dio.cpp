@@ -1,8 +1,16 @@
+// Function uses GPIO of USRP to generate timing signals and control RXFE
+//  Timing signals:
+//   io_tx[1]   SYNC
+//   io_tx[3]   TR_TX
+//   io_tx[4]   TR_RX
+//   io_tx[11]  MIMIC_TX
+//   io_tx[12]  MIMIC_RX
+//
 // Functions to handle timing card/dio card on USRP
 // broken out and expanded from Alex's recv_and_hold.cpp timing card code
 // added rxfe dio and command issue time sorting
 // JTK
-#include <complex>
+
 #include <vector>
 #include <queue>
 #include <iostream>
@@ -24,25 +32,25 @@
 #define MANUAL_CONTROL 0x00
 
 // timing signals
-#define SYNC_PINS 0x02
-#define TR_PINS 0x18
-#define TR_TX 0x08
-#define TR_RX 0x10
+#define SYNC_PINS 0x02 // 0000 0010 => io_tx[1]
+#define TR_PINS   0x18 // 0001 1000 => io_tx[3,4]
+#define TR_TX     0x08 // 0000 1000 => io_tx[3]
+#define TR_RX     0x10 // 0001 0000 => io_tx[4] 
 
-#define FAULT 0x0001
+#define FAULT 0x0001 
 
-#define RX_OFFSET 290e-6 // microseconds, alex had 450-e6 set here
+#define RX_OFFSET           290e-6  // microseconds, alex had 450-e6 set here
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
-#define SYNC_OFFSET_END (-400e-6) // start of sync pulse
+#define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
 
 
 
 // MIMIC
-#define USEMIMIC 1
-#define MIMIC_PINS 0x1800 
-#define MIMIC_TX 0x0800
-#define MIMIC_RX 0x1000
-#define MIMIC_RANGE 6600 // microseconds
+#define USEMIMIC    1
+#define MIMIC_PINS  0x1800 // io_tx[11,12]
+#define MIMIC_TX    0x0800 // io_tx[11]
+#define MIMIC_RX    0x1000 // io_tx[12]
+#define MIMIC_RANGE 6600e-6   // seconds
 
 
 // RXFE pins
@@ -51,16 +59,16 @@
 #define RXFE_AMP_SHIFT 0
 #define RXFE_ATT_SHIFT 2
 
-#define RXFE_MASK 0xFF
-#define RXFE_AMP_MASK 0xD0
-#define RXFE_ATT_MASK 0x3F
+#define RXFE_MASK     0xFF  // 1111 1111
+#define RXFE_AMP_MASK 0xD0  // 1101 0000
+#define RXFE_ATT_MASK 0x3F  // 0011 1111
 #define ATT_D1 4
 #define ATT_D2 3
 #define ATT_D3 2
 #define ATT_D4 1
 #define ATT_D5 0
-#define AMP_1 7
-#define AMP_2 6
+#define AMP_1  7
+#define AMP_2  6
 
 
 #define DEBUG 1
@@ -75,8 +83,8 @@
 //#include "rtypes.h"
 //#include "rosmsg.h"
 //#define RXFE_CONTROL 0x00 // manual control
+//#include <complex>
 
-#define PULSE_LENGTH 420e-6 // TODO: get from usrp_driver
 
 
 void init_timing_signals(
@@ -86,14 +94,17 @@ void init_timing_signals(
     double debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO queing GPIO commands at usrp_time %2.4f\n", debugt);
 
-    // setup gpio direction and control
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,SYNC_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,TR_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
+    // setup gpio to manual control and direction (output)
+    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, SYNC_PINS);
+    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, TR_PINS);
+    usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS,  SYNC_PINS);
+    usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,  TR_PINS);
 
-    usrp->set_gpio_attr("TXA","DDR",SYNC_PINS,SYNC_PINS);
-    usrp->set_gpio_attr("TXA","DDR",TR_PINS, TR_PINS);
-    usrp->set_gpio_attr("TXA","DDR",MIMIC_PINS, MIMIC_PINS);
+   if (USEMIMIC) {
+       usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
+       usrp->set_gpio_attr("TXA","DDR" ,MIMIC_PINS, MIMIC_PINS);
+   }
+
 
     debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO: set gpio attrs at usrp_time %2.4f\n", debugt);
@@ -124,7 +135,8 @@ public:
 void send_timing_for_sequence(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::time_spec_t start_time,
-    std::vector<uhd::time_spec_t> pulse_times
+    std::vector<uhd::time_spec_t> pulse_times,
+    double pulseLength
 ) {
 
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
@@ -132,40 +144,53 @@ void send_timing_for_sequence(
     std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
 
 
-    // TODO: fix sync?
-    //set sync pin
-    usrp->set_command_time(offset_time_spec(start_time, SYNC_OFFSET_START));
-    usrp->set_gpio_attr("TXA","OUT",SYNC_PINS, SYNC_PINS);
+    // CREATE QUEUE WITH ALL SIGNAL CHANGES
+    
+    // set SYNC to high
+    c.port     = "TXA";
+    c.gpiocmd  = "OUT";
+    c.mask     = SYNC_PINS;
+    c.value    = SYNC_PINS;
+    c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_START);
+    cmdq.push(c);
 
-    // lower sync pin when rx streaming starts
-    c.port = "TXA";
-    c.gpiocmd = "OUT";
-    c.mask = SYNC_PINS;
+    // lower SYNC pin
     c.value = 0;
-  //  c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END).get_real_secs();
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END);
     cmdq.push(c);
     
+    //debug
     fprintf( stderr, "DIO setting start of SYNC to %2.11f\n", offset_time_spec(start_time, SYNC_OFFSET_START).get_real_secs() ); 
     fprintf( stderr, "DIO setting end   of SYNC to %2.11f\n", offset_time_spec(start_time, SYNC_OFFSET_END).get_real_secs() ); 
 
 
-    // set TX line
+    // set TX and RX line for each pulse
+    for(size_t iPulse = 0; iPulse < pulse_times.size() ; iPulse++) {
 
-    for(size_t iPulse = 0; iPulse < pulse_times.size() ; iPulse++) { //pulse_times.size()
-        // bock here to tets if this call by reference error
-        GPIOCommand c;
-        c.port = "TXA";
-        c.gpiocmd = "OUT";
-        c.mask = TR_PINS;
-    
-        c.value = TR_TX; 
-      //  c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END).get_real_secs();
+        // set TX high, RX low    
+        c.mask     = TR_PINS;
+        c.value    = TR_TX;   
         c.cmd_time = pulse_times[iPulse];
         cmdq.push(c);
-        c.value = TR_RX;
-        c.cmd_time = offset_time_spec(pulse_times[iPulse], PULSE_LENGTH);
+
+        // set RX high and TX low
+        c.value    = TR_RX;
+        c.cmd_time = offset_time_spec(pulse_times[iPulse], pulseLength);
         cmdq.push(c);
+
+        if (USEMIMIC) {
+            // set mimic TX high, mimic RX low    
+            c.mask     = MIMIC_PINS;
+            c.value    = MIMIC_TX;   
+            c.cmd_time = offset_time_spec(pulse_times[iPulse], MIMIC_RANGE);
+            cmdq.push(c);
+
+            // set mimic RX high and mimic TX low
+            c.value    = MIMIC_RX;
+            c.cmd_time = offset_time_spec(pulse_times[iPulse], MIMIC_RANGE + pulseLength);
+            cmdq.push(c);
+
+        }
 
     }
 
@@ -179,11 +204,9 @@ void send_timing_for_sequence(
     // clear_command_time does not clear or bypass the buffer as of 10/2014..
     while (!cmdq.empty()) {
         c = cmdq.top();
-     //   usrp->set_command_time(uhd::time_spec_t(c.cmd_time));
         usrp->set_command_time(c.cmd_time);
         usrp->set_gpio_attr(c.port,c.gpiocmd,c.value,c.mask);
-        DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.0u at usrp_time %2.6f\n", c.value, c.mask,  c.cmd_time.get_real_secs());
-
+       // DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.0u at usrp_time %2.6f\n", c.value, c.mask,  c.cmd_time.get_real_secs());
 
         cmdq.pop();
     }

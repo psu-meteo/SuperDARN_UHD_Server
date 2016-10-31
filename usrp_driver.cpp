@@ -652,7 +652,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
                         
                        //  send_timing_for_sequence(usrp, start_time, pulse_times);
-                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp,  start_time,  pulse_times)); 
+                        double pulseLength = num_tx_rf_samples / usrp->get_tx_rate();
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp,  start_time,  pulse_times, pulseLength)); 
                         
  
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);

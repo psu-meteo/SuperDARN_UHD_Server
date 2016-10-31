@@ -1,6 +1,6 @@
 void kodiak_set_rxfe(uhd::usrp::multi_usrp::sptr usrp, struct RXFESettings rf_settings);
 void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp);
-void send_timing_for_sequence(uhd::usrp::multi_usrp::sptr usrp, uhd::time_spec_t start_time, std::vector<uhd::time_spec_t> pulse_times);
+void send_timing_for_sequence(uhd::usrp::multi_usrp::sptr usrp, uhd::time_spec_t start_time, std::vector<uhd::time_spec_t> pulse_times, double pulseLength);
 void init_timing_signals( uhd::usrp::multi_usrp::sptr usrp);
 
 

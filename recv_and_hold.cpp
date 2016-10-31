@@ -77,14 +77,7 @@ void recv_and_hold(
     stream_cmd.stream_now = false;
     stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
    
-
-  //  init_timing_signals(usrp);
-
     usrp->issue_stream_cmd(stream_cmd);
-    
-  
-   // send_timing_for_sequence(usrp, start_time);
-
     
     size_t num_acc_samps = 0;
     const size_t num_max_request_samps = rx_stream->get_max_num_samps();
