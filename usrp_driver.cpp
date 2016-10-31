@@ -720,7 +720,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 // command to reset time, sync time with external PPS pulse
                 case UHD_SYNC: {
                     DEBUG_PRINT("entering UHD_SYNC command\n");
-
                     // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
                     if(al_intclk->count > 0) {
                         usrp->set_clock_source("internal");
@@ -730,15 +729,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     else {
                     // sync clock with external 10 MHz and PPS
-                        usrp->set_clock_source("external");
-                        usrp->set_time_source("external");
+                        usrp->set_clock_source("external", 0);
+                        usrp->set_time_source("external", 0);
+
                         const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
                         while (last_pps_time == usrp->get_time_last_pps()) {
-                            usleep(5e4);
+                            boost::this_thread::sleep(boost::posix_time::milliseconds(100));
                         }
-                        usrp->set_time_next_pps(uhd::time_spec_t(0.0), 0);
+                        usrp->set_time_next_pps(uhd::time_spec_t(0.0));
                         boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
-                    }
+
+                        usrp->set_time_unknown_pps(uhd::time_spec_t());
+                     }
 
                     sock_send_uint8(driverconn, UHD_SYNC);
                     break;
