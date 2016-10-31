@@ -216,29 +216,34 @@ class RadarHardwareManager:
             sys.exit(1)
 
         self.usrpsocks = usrp_driver_socks
-
-        # once USRPs are connected, synchronize clocks/timers 
-        # TODO: add check that sync worked, sometimes there is an offset between usrps by an integer number of seconds..
-        # TODO: investigate offsets in timing for pulse sequences
-        cmd = usrp_sync_time_command(self.usrpsocks)
-        cmd.transmit()
-        cmd.client_return()
+        self._resync_usrps()
 
 
-        cmd = usrp_get_time_command(self.usrpsocks)
-        cmd.transmit() 
+    def _resync_usrps(self):
+        usrps_synced = False
 
-       	usrptimes = []
-        for usrpsock in self.usrpsocks:
-            usrptimes.append(cmd.recv_time(usrpsock))
-       
-        cmd.client_return()
- 
-        # check if sync succeeded..
-        if max(np.array(usrptimes) - usrptimes[0]) > 1:
-            pdb.set_trace()
+        while not usrps_synced:
+            cmd = usrp_sync_time_command(self.usrpsocks)
+            cmd.transmit()
+            cmd.client_return()
 
-        pdb.set_trace()
+            # once USRPs are connected, synchronize clocks/timers 
+            cmd = usrp_get_time_command(self.usrpsocks)
+            cmd.transmit() 
+
+            usrptimes = []
+            for usrpsock in self.usrpsocks:
+                usrptimes.append(cmd.recv_time(usrpsock))
+           
+            cmd.client_return()
+     
+            # check if sync succeeded..
+            if max(np.array(usrptimes) - usrptimes[0]) < 1:
+                usrps_synced = True
+            else:
+                # TODO: why does USRP synchronization fail?
+                print('USRP syncronization failed, trying again..')
+                time.sleep(1)
 
 
     def rxfe_init(self):
