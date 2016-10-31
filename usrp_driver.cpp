@@ -66,7 +66,6 @@
 #define SETUP_READY 'y'
 #define TRIGGER_PROCESS 'p'
 
-#define START_OFFSET .1
 #define ARG_MAXERRORS 10
 #define MAX_TX_PULSES 10
 
@@ -635,13 +634,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga);
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
-                        // todo: num_requested_rx_samples
-                        start_time = usrp->get_time_now();
 
-                        DEBUG_PRINT("TRIGGER_PULSE start time, before offset: %2.5f\n", start_time.get_real_secs());
-                        start_time = offset_time_spec(start_time, START_OFFSET);
-                        
-                        DEBUG_PRINT("TRIGGER_PULSE start time, start_offset: %2.5f, %2.5f\n", start_time.get_real_secs(), START_OFFSET);
+                        // read in time for start of pulse sequence over socket
+                        uint32_t pulse_time_full = sock_get_uint32(driverconn);
+                        double pulse_time_frac = sock_get_float64(driverconn);
+                        start_time = uhd::time_spec_t(pulse_time_full, pulse_time_frac);
+
                         for(uint32_t p_i = 0; p_i < pulse_offsets.size(); p_i++) {
                             pulse_times[p_i] = offset_time_spec(start_time, pulse_offsets[p_i]);
 

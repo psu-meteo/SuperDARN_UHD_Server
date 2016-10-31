@@ -278,8 +278,11 @@ class usrp_rxfe_setup_command(driver_command):
 
 # start usrp trigger
 class usrp_trigger_pulse_command(driver_command):
-    def __init__(self, usrps):
+    def __init__(self, usrps, trigger_time):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
+        self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'clrfreq_uhd_time_int')
+        self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'clrfreq_uhd_time_frac')
+
 
 # command usrp drivers to ready rx sample data into shared memory
 class usrp_ready_data_command(driver_command):

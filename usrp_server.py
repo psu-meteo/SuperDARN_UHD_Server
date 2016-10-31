@@ -29,6 +29,7 @@ RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/ta
 
 debug = True
 
+USRP_TRIGGER_START_DELAY = .05 # TODO: move this to a config file
 # TODO: pull these from config file
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
@@ -224,6 +225,22 @@ class RadarHardwareManager:
         cmd.client_return()
 
 
+        cmd = usrp_get_time_command(self.usrpsocks)
+        cmd.transmit() 
+
+       	usrptimes = []
+        for usrpsock in self.usrpsocks:
+            usrptimes.append(cmd.recv_time(usrpsock))
+       
+        cmd.client_return()
+ 
+        # check if sync succeeded..
+        if max(np.array(usrptimes) - usrptimes[0]) > 1:
+            pdb.set_trace()
+
+        pdb.set_trace()
+
+
     def rxfe_init(self):
         # TODO: fix this function
         pdb.set_trace()
@@ -399,7 +416,14 @@ class RadarHardwareManager:
         cprint('running trigger, triggering usrp drivers', 'yellow')
 
         if len(self.channels):
-            cmd = usrp_trigger_pulse_command(self.usrpsocks)
+        
+            # grab current time from a usrp
+            cmd = usrp_get_time_command(self.usrpsocks[0])
+            cmd.transmit() 
+            usrp_time = cmd.recv_time(self.usrpsocks[0])
+            cmd.client_return()
+            trigger_time = usrp_time + USRP_TRIGGER_START_DELAY
+            cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time)
             cprint('sending trigger pulse command', 'yellow')
             cmd.transmit()
             # TODO: handle multiple usrps with trigger..
