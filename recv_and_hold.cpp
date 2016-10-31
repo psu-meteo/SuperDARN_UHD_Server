@@ -15,6 +15,7 @@
 
 #include "recv_and_hold.h"
 #include "usrp_utils.h"
+#include "dio.h"
 
 #define DEBUG 1
 #ifdef DEBUG
@@ -26,23 +27,8 @@
 
 #define TEST_RXWORKER 0
 
-#define SYNC_PINS 0x02
-#define TR_PINS 0x18
-#define MIMIC_PINS 0x1800 
-#define USEMIMIC 1 // add extra pulses with some offset from the transmit pulses to gate an external synthetic target
-
-#define TR_TX 0x08 // pins on TX(A/B) connected to control board for TR
-#define TR_RX 0x10 
-
-#define MIMIC_TX 0x0800 
-#define MIMIC_RX 0x1000
-#define MIMIC_RANGE (5100) // microseconds  (765 km)
-#define FAULT 0x0001
 
 #define RX_OFFSET 290e-6 // microseconds, alex had 450-e6 set here
-#define SYNC_OFFSET_START (-500e-6) // start of sync pulse
-#define SYNC_OFFSET_END (-400e-6) // start of sync pulse
-#define MANUAL_CONTROL 0x0
 
 struct GPIOCommand {
     uhd::time_spec_t cmd_time;
@@ -79,8 +65,6 @@ void recv_and_hold(
 ){
 
     DEBUG_PRINT("entering RECV_AND_HOLD\n");
-    GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
-    std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
 
     //setup streaming
     uhd::rx_metadata_t md;
@@ -93,74 +77,7 @@ void recv_and_hold(
     stream_cmd.stream_now = false;
     stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
    
-    
-    double debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RECV_AND_HOLD queing GPIO commands at usrp_time %2.4f\n", debugt);
-
-    // setup gpio direction and control
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,SYNC_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,TR_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
-
-    usrp->set_gpio_attr("TXA","DDR",SYNC_PINS,SYNC_PINS);
-    usrp->set_gpio_attr("TXA","DDR",TR_PINS, TR_PINS);
-    usrp->set_gpio_attr("TXA","DDR",MIMIC_PINS, MIMIC_PINS);
-   
-	debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RECV_AND_HOLD set gpio attrs at usrp_time %2.4f\n", debugt);
- 
     usrp->issue_stream_cmd(stream_cmd);
-    
-	debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RECV_AND_HOLD issued stream command at usrp_time %2.4f\n", debugt);
-
-    // TODO: fix sync?
-    //set sync pin
-    usrp->set_command_time(offset_time_spec(start_time, SYNC_OFFSET_START));
-    usrp->set_gpio_attr("TXA","OUT",SYNC_PINS, SYNC_PINS);
-
-    // lower sync pin when rx streaming starts
-    c.port = "TXA";
-    c.gpiocmd = "OUT";
-    c.mask = SYNC_PINS;
-    c.value = 0;
-    c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END).get_real_secs();
-    cmdq.push(c);
-	debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RECV_AND_HOLD pushed gpio commands at usrp_time %2.4f\n", debugt);
-    // issue gpio commands in time sorted order 
-    // set_command_time must be sent in temporal order, they are sent into a fifo queue on the usrp and will block until executed
-    // clear_command_time does not clear or bypass the buffer as of 10/2014..
-    while (!cmdq.empty()) {
-        c = cmdq.top();
-        usrp->set_command_time(uhd::time_spec_t(c.cmd_time));
-        usrp->set_gpio_attr(c.port,c.gpiocmd,c.value,c.mask);
-        cmdq.pop();
-    }
-
-    debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RECV_AND_HOLD set gpio commands at usrp_time %2.4f\n", debugt);
-
-    usrp->clear_command_time();
-
-    /*
-    // commands to the USRP are now blocked until the pulse sequence is completed
-    // usrp_set_command_time will delay any future commands until the command queue is empty (once the pulse sequence including any diagnostic targets is completed)
-    
-    // the maximum size of the queue is 64
-    // a dual polarization radar with timing on separate daughtercards and a 7 pulse sequence plus sync and two mimic targets
-    // would have 2 * 2 * 2 * 7 + 2 = 60 entries in the buffer..
-    // for more complicated pulse sequences, we may need to fill the buffer partway through the pulse sequence.. 
-    //
-    // TODO: set timeout dynamically 
-
-    */
-    /*
-	debugt = usrp->get_time_now().get_real_secs();
-
-    DEBUG_PRINT("RECV_AND_HOLD recv samples, requesting %d samples at usrp time %.4f for time %.4f, timeout %2.4f\n", (int32_t) num_requested_samps, debugt, stream_cmd.time_spec.get_real_secs(), timeout);
-    */
-    // reform using /home/kleinjt/repos/uhd/host/examples/rx_samples_to_file.cpp?
     
     size_t num_acc_samps = 0;
     const size_t num_max_request_samps = rx_stream->get_max_num_samps();
