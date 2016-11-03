@@ -141,9 +141,6 @@ class RadarHardwareManager:
                     for ch in self.channels:
                         self.get_data(ch)
 
-                    cmd = cuda_process_command(self.cudasocks)
-                    cmd.transmit()
-                    cmd.client_return()
 
                 if self.state == STATE_RESET:
                     cprint('stuck in STATE_RESET?!', 'yellow')
@@ -331,10 +328,15 @@ class RadarHardwareManager:
         cmd.client_return()
         cprint('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status), 'blue')
 
-        # by this point, the cuda drivers will have already recieved a process command
-        # they will not process the get_data command until processing is complete
-        cmd = cuda_get_data_command(self.cudasocks)
+        # DOWNSAMPLING
+        cprint('GET_DATA: send CUDA_PROCESS', 'blue')
+        cmd = cuda_process_command(self.cudasocks)
+        cmd.transmit()
+        cmd.client_return()
+        cprint('GET_DATA: finished CUDA_PROCESS', 'blue')
 
+        # RECEIVER RX BB SAMPLES 
+        cmd = cuda_get_data_command(self.cudasocks)
         cmd.transmit()
 
         # recv metadata from cuda drivers about antenna numbers and whatnot
@@ -358,10 +360,9 @@ class RadarHardwareManager:
             # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
         
         # TODO: currently assuming samples is main samples, no back array!
-
-
         cmd.client_return()
         
+        # BEAMFORMING
         # calculate beam azimuth from transmit beam number 
         bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
 
@@ -395,6 +396,7 @@ class RadarHardwareManager:
 
         channel.main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
         #channel.back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
+
 
         channel.state = STATE_WAIT
 
@@ -454,7 +456,7 @@ class RadarHardwareManager:
     # TODO: pretrigger cuda client return fails
     # key error: 0?
     def pretrigger(self):
-        cprint('running pretrigger', 'blue')
+        cprint('running RadarHardwareManager.pretrigger()', 'blue')
         
         # TODO: handle channels with different pulse infomation..
         # TODO: parse tx sample rate dynamocially
@@ -470,11 +472,7 @@ class RadarHardwareManager:
         tx_time = self.channels[0].tx_time
         num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
 
-        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
-        cmd.transmit()
-        cmd.client_return()
-        cprint('running cuda_pulse_init command', 'blue')
-
+       #  cprint('running cuda_pulse_init command', 'blue')
         # TODO: untangle cuda pulse init handler
         #        pdb.set_trace()
         #        cmd = cuda_pulse_init_command(self.cudasocks)
@@ -511,25 +509,32 @@ class RadarHardwareManager:
                 cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
                 # TODO: separate loading sequences from generating baseband samples..
 
-                cprint('transmitting cuda add channel command', 'blue')
+                cprint('sending CUDA_ADD_CHANNEL', 'blue')
                 cmd.transmit()
 
-                cprint('waiting for cuda channel handler return', 'blue')
+                cprint('waiting for CUDA_ADD_CHANNEL to return', 'blue')
                 cmd.client_return()
                 synth_pulse = True
 
 
         if synth_pulse:
-            cprint('transmitting generate pulse command', 'blue')
+            cprint('sending CUDA_GENERATE_PULSE', 'blue')
             cmd = cuda_generate_pulse_command(self.cudasocks)
             cmd.transmit()
-
             cmd.client_return()
+            cprint('finished CUDA_GENERATE_PULSE', 'blue')
 
-            cprint('pulse generated, end of pretrigger', 'blue')
+
+        cprint('sending USRP_SETUP', 'blue')
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
+        cmd.transmit()
+        cmd.client_return()
 
         for ch in self.channels:
             ch.state = STATE_WAIT
+
+        cprint('end of RadarHardwareManager.pretrigger()', 'blue')
+
 
 class RadarChannelHandler:
     def __init__(self, conn):
