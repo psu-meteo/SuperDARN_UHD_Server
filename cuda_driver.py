@@ -224,10 +224,10 @@ class cuda_add_channel_handler(cudamsg_handler):
         cnum = ctrlprm['channel']
 
         if verbose:
-           print("===> adding new channel:")
-           print("  num {}".format(cnum))
-           print("  tx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
-           print("  rx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['rfreq'] ))
+           dbPrint("===> adding new channel:")
+           dbPrint("  num {}".format(cnum))
+           dbPrint("  tx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
+           dbPrint("  rx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['rfreq'] ))
 #           print("  num {}".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
         self.gpu._set_tx_mixerfreq(cnum)
         self.gpu._set_tx_phasedelay(cnum)
@@ -582,7 +582,8 @@ class ProcessingGPU(object):
         channelFreqVec = [None for i in range(self.nChannels)]
         for iChannel in range(self.nChannels):
             if self.sequences[iChannel] != None:
-               channelFreqVec[iChannel] = -( self.sequences[iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq)
+               channelFreqVec[iChannel] = -( self.sequences[iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq) # use negative frequency here since filter is not time inverted for convolution
+               dbPrint('generatin rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[iChannel].ctrlprm['rfreq'],  self.sequences[iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq /1000 ))
  
 
         self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
@@ -639,15 +640,15 @@ class ProcessingGPU(object):
             txpulse = self.tx_rf_outdata[0]
             arp  = np.sqrt(np.float32(txpulse[0::2]) ** 2 + np.float32(txpulse[1::2]) ** 2)
 
-            plt.subplot(3,1,1)
-            plt.plot(txpulse)
-            plt.subplot(3,1,2)
-            plt.plot(arp)
-            plt.subplot(3,1,3)
-            plt.plot(txpulse[0:5000:2])
-            plt.plot(txpulse[1:5000:2])
+        #    plt.subplot(3,1,1)
+        #    plt.plot(txpulse)
+        #    plt.subplot(3,1,2)
+        #    plt.plot(arp)
+         #   plt.subplot(3,1,3)
+         #   plt.plot(txpulse[0:5000:2])
+         #   plt.plot(txpulse[1:5000:2])
            # plt.show()
-            print('finished pulse generation, breakpoint..')
+        #    print('finished pulse generation, breakpoint..')
             import myPlotTools as mpt
             plt.figure()
             mpt.plot_freq(bb_signal[0][0][0], self.tx_bb_samplingRate, show=False)
@@ -679,10 +680,10 @@ class ProcessingGPU(object):
                
     # kick off async data processing
     def rxsamples_process(self):
-        print('processing rf -> if')
+        dbPrint('processing rf -> if')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif, block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
  
-        print('processing if -> bb')
+        dbPrint('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
         # sim  steps rf_sig, multiply with nco  and filter 
@@ -751,8 +752,8 @@ class ProcessingGPU(object):
 
             plt.show()
 
-            mpt.plot_time_freq(self.rx_rf_samples[0][0][400000:440000], self.rx_rf_samplingRate, iqInterleaved=True)
-            plt.title("Second pulse separate")
+        #    mpt.plot_time_freq(self.rx_rf_samples[0][0][400000:440000], self.rx_rf_samplingRate, iqInterleaved=True)
+        #    plt.title("Second pulse separate")
             # pdb.set_trace()
 
     # pull baseband samples from GPU into host memory
@@ -766,7 +767,6 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
       #  import myPlotTools as mpt
       #  pdb.set_trace()
- 
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
     
     # copy rf samples to shared memory for transmission by usrp driver
@@ -774,20 +774,23 @@ class ProcessingGPU(object):
         # TODO: assumes single polarization
         for aidx in range(self.nAntennas):
             tx_shm_list[aidx].seek(0)
+            dbPrint('copy tx sampes to shm (ant {}): {}'.format( aidx, tx_shm_list[aidx]))
             tx_shm_list[aidx].write(self.tx_rf_outdata[aidx].tobytes())
             tx_shm_list[aidx].flush()
-    
+
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
     def _set_tx_mixerfreq(self, channel):
         # TODO: determine fc from channel
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         self.tx_mixer_freqs[channel] = np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq ) / self.tx_rf_samplingRate)
+        dbPrint('setting tx mixer freq for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
         cuda.memcpy_htod(self.cu_tx_mixer_freq_rads, self.tx_mixer_freqs)
     
     # update pahse increment of NCO with current channel sequence, then refresh array on GPU
     def _set_rx_phaseIncrement(self, channel):
         fc = self.sequences[channel].ctrlprm['rfreq'] * 1000
         self.rx_phaseIncrement_rad[channel] = - np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq ) / self.rx_rf_samplingRate)
+        dbPrint('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
         cuda.memcpy_htod(self.cu_rx_phaseIncrement_rad, self.rx_phaseIncrement_rad)
 
     # update host-side phase delay table with current channel sequence, then refresh array on GPU

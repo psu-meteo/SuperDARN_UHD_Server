@@ -486,7 +486,7 @@ class RadarHardwareManager:
         
         
         synth_pulse = False
-        print('self.channels: ' + str(self.channels))
+        print('self.channels len : ' + str(len(self.channels)))
         
         for ch in self.channels:
             #pdb.set_trace()
@@ -511,7 +511,7 @@ class RadarHardwareManager:
                 cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
                 # TODO: separate loading sequences from generating baseband samples..
 
-                cprint('transmitting cuda channel handler', 'blue')
+                cprint('transmitting cuda add channel command', 'blue')
                 cmd.transmit()
 
                 cprint('waiting for cuda channel handler return', 'blue')
@@ -588,7 +588,7 @@ class RadarChannelHandler:
             rmsg.receive(self.conn)
             command = chr(rmsg.payload['type'] & 0xFF) # for some reason, libtst is sending out 4 byte commands with junk..
             try:
-                cprint('received command: {}, {}'.format(command, RMSG_COMMAND_NAMES[command]), 'red')
+                cprint('received command (ROS=>USRP_Server): {}, {}'.format(command, RMSG_COMMAND_NAMES[command]), 'red')
             except KeyError:
                 print('unrecognized command!')
                 print(rmsg.payload)
@@ -786,6 +786,9 @@ class RadarChannelHandler:
         self._waitForState(STATE_WAIT)
         cprint('channel {} starting PRETRIGGER'.format(self.cnum), 'green')
         self.ctrlprm_struct.receive(self.conn)
+        print('usrp_server RadarChannelHandler.SetParametersHandler: tfreq: ' + str(self.ctrlprm_struct.payload['tfreq']))
+        print('usrp_server RadarChannelHandler.SetParametersHandler: rfreq: ' + str(self.ctrlprm_struct.payload['rfreq']))
+
         self.state = STATE_PRETRIGGER
         cprint('channel {} going into PRETRIGGER state'.format(self.cnum), 'green')
         # TODO for a SetParametersHandler, prepare transmit and receive sample buffers
