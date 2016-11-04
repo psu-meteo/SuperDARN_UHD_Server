@@ -89,7 +89,7 @@ if len(sys.argv) == 1:
     import glob
     import os
     print('No input. Looking for newest file in /data/diagnostic_samples/ ...')    
-    fileName = min(glob.iglob('/data/diagnostic_samples/*.txt.*'), key=os.path.getctime)
+    fileName = max(glob.iglob('/data/diagnostic_samples/*.txt.*'), key=os.path.getctime)
     print('found :{}'.format(fileName[25:]))
 else:
     fileName = sys.argv[1]

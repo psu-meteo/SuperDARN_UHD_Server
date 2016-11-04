@@ -29,7 +29,7 @@ RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/ta
 
 debug = True
 
-USRP_TRIGGER_START_DELAY = .05 # TODO: move this to a config file
+USRP_TRIGGER_START_DELAY = .5 # TODO: move this to a config file
 # TODO: pull these from config file
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
@@ -301,10 +301,10 @@ class RadarHardwareManager:
         # stall until all channels are ready
         nbb_samples = ctrlprm['number_of_samples']
 
-        cprint('sending READY_DATA command ', 'blue')
+        cprint('sending USRP_READY_DATA command ', 'blue')
         cmd = usrp_ready_data_command(self.usrpsocks)
         cmd.transmit()
-        cprint('sending READY_DATA command sent, waiting on READY_DATA status', 'blue')
+        cprint('sending USRP_READY_DATA command sent, waiting on READY_DATA status', 'blue')
 
         # TODO: seperate tracking of number of antennas in main and back array from nants
         # the following line will fail once we start testing with the back array or test with spare arrays

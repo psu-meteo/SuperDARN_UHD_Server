@@ -312,6 +312,7 @@ class cuda_process_handler(cudamsg_handler):
         semaphore_list[SIDEA][SWING0].acquire()
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 
+        semaphore_list[SIDEA][SWING0].release()
 
 cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
