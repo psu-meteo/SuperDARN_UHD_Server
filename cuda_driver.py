@@ -22,6 +22,9 @@ import pycuda.driver as cuda
 import pycuda.compiler
 import pycuda.autoinit
 
+import pickle # for cuda dump
+from datetime import datetime
+
 from termcolor import cprint
 from socket_utils import *
 from drivermsg_library import *
@@ -112,7 +115,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         bb_signal    = [None for c in range(nChannels)] 
         for currentSequence in self.gpu.sequences:
             if currentSequence != None:
-                cNum = currentSequence.ctrlprm['channel']
+                cNum = currentSequence.ctrlprm['channel'] - 1 # sequence channel nummer starts with 1
                 bb_signal[cNum]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
@@ -120,6 +123,12 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         
         # copy rf waveform to shared memory from GPU memory 
         self.gpu.txsamples_host_to_shm()
+
+        if os.path.isfile('cuda.dump.tx'):
+             name = datetime.now().strftime('%Y-%m-%d_%H%M%S')
+             with open('/data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl', 'wb') as f:
+                  pickle.dump(self.gpu.tx_rf_outdata, f, pickle.HIGHEST_PROTOCOL)
+             os.remove('cuda.dump.tx') # only save tx samples once
 
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
@@ -131,7 +140,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
-        chnum = channel.ctrlprm['channel']
+     ##   chnum = channel.ctrlprm['channel']
         ctrlprm = channel.ctrlprm
 
         tpulse = channel.pulse_lens[0] / 1e6 # read in array of pulse lengths in seconds 
@@ -219,15 +228,17 @@ class cuda_add_channel_handler(cudamsg_handler):
         print('received command')
         sequence = cmd.sequence
         ctrlprm = sequence.ctrlprm
-        self.gpu.sequences[ctrlprm['channel']] = sequence
+        cnum = ctrlprm['channel'] - 1# sequence channel nummer starts with 1
+        self.gpu.sequences[cnum] = sequence
 
-        cnum = ctrlprm['channel']
+ 
 
         if verbose:
            dbPrint("===> adding new channel:")
-           dbPrint("  num {}".format(cnum))
+           dbPrint("  num (cuda: {}, sequence: {})".format(cnum, cnum+1))
            dbPrint("  tx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
            dbPrint("  rx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['rfreq'] ))
+           dbPrint("  tx pulse offset (us)  "+ str(  self.gpu.sequences[cnum].pulse_offsets_vector) )
 #           print("  num {}".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
         self.gpu._set_tx_mixerfreq(cnum)
         self.gpu._set_tx_phasedelay(cnum)
@@ -274,7 +285,7 @@ class cuda_get_data_handler(cudamsg_handler):
         cmd.receive(self.sock)
 
         channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
-        dbPrint('received channel={}'.format(channel))
+        dbPrint('received channel={}(cuda: {}))'.format(channel, channel-1))
         dbPrint('pulling data...') 
         samples = self.gpu.pull_rxdata()
         dbPrint('finished pullind data')
@@ -687,34 +698,6 @@ class ProcessingGPU(object):
         dbPrint('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
-        # sim  steps rf_sig, multiply with nco  and filter 
-        if False:
-            import myPlotTools as mpt
-            import matplotlib.pyplot as plt
-            #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
-       #     plt.figure()        
-            cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
-            cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
-            
-            ##
-            sig  = self.rx_rf_samples[0][0][0::2] + 1j* self.rx_rf_samples[0][0][1::2]
-            filt = self.rx_filtertap_rfif[0,:,0] + 1j * self.rx_filtertap_rfif[0,:,1] 
-            nco = np.zeros_like(sig)
-            freq_LO = -( self.sequences[0].ctrlprm['rfreq'] * 1000 - self.usrp_mixing_freq)
-            for iSample in range(nco.size):
-                   phi = 2 * np.pi * freq_LO*iSample / self.rx_rf_samplingRate # phase of LO frequency
-                   nco[iSample] =  np.cos(phi) + 1j*np.sin(phi)
-          #  pdb.set_trace()
-                
-          #  ax = plt.subplot(311)
-          #  mpt.plot_freq(sig, self.rx_rf_samplingRate)
-            
-          #  ax = plt.subplot(312)
-          #  mpt.plot_freq(sig*nco, self.rx_rf_samplingRate)
-
-         #   ax = plt.subplot(313)
-         #   mpt.plot_freq(np.convolve(sig*nco, filt, mode='same'))
-         #   plt.show()
         
 
         # for testing RX: plot RF, IF and BB
@@ -734,6 +717,7 @@ class ProcessingGPU(object):
 
             ax = plt.subplot(312)
             mpt.plot_freq(self.rx_if_samples[0][0], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_if_samples[0][1], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('IF')
 
@@ -749,6 +733,7 @@ class ProcessingGPU(object):
 
             ax = plt.subplot(212) 
             mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+            mpt.plot_time(self.rx_bb_samples[0][1], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
             plt.title("BB")
 
             plt.show()

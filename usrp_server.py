@@ -458,19 +458,6 @@ class RadarHardwareManager:
     def pretrigger(self):
         cprint('running RadarHardwareManager.pretrigger()', 'blue')
         
-        # TODO: handle channels with different pulse infomation..
-        # TODO: parse tx sample rate dynamocially
-        # TODO: handle pretrigger with no channels
-        # rfrate = np.int32(self.cuda_config['FSampTX'])
-        # extract sampling info from cuda driver
-        # print('rf rate parsed from ini: ' + str(rfrate))
-        pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels (or check that pulses occur at the same times)
-        npulses = self.channels[0].npulses # TODO: merge..
-        ctrlprm = self.channels[0].ctrlprm_struct.payload
-        # calculate the number of RF transmit and receive samples 
-        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
-        tx_time = self.channels[0].tx_time
-        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
 
        #  cprint('running cuda_pulse_init command', 'blue')
         # TODO: untangle cuda pulse init handler
@@ -524,6 +511,19 @@ class RadarHardwareManager:
             cmd.client_return()
             cprint('finished CUDA_GENERATE_PULSE', 'blue')
 
+        # TODO: handle channels with different pulse infomation..
+        # TODO: parse tx sample rate dynamocially
+        # TODO: handle pretrigger with no channels
+        # rfrate = np.int32(self.cuda_config['FSampTX'])
+        # extract sampling info from cuda driver
+        # print('rf rate parsed from ini: ' + str(rfrate))
+        pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels (or check that pulses occur at the same times)
+        npulses = self.channels[0].npulses # TODO: merge..
+        ctrlprm = self.channels[0].ctrlprm_struct.payload
+        # calculate the number of RF transmit and receive samples 
+        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
+        tx_time = self.channels[0].tx_time
+        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
 
         cprint('sending USRP_SETUP', 'blue')
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
@@ -858,6 +858,9 @@ class RadarChannelHandler:
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
+        
+        self.ctrlprm_struct.set_data('channel', self.cnum)
+        self.ctrlprm_struct.set_data('radar',  self.rnum)
 
         # TODO: how to handle channel contention?
         if(debug):
