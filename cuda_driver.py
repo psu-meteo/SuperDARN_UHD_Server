@@ -607,7 +607,7 @@ class ProcessingGPU(object):
         self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
         self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
 
-        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas, self.nChannels, self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
 
         self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
 
@@ -687,8 +687,9 @@ class ProcessingGPU(object):
     def rxsamples_shm_to_gpu(self, shm):
         shm.seek(0)
         for aidx in range(self.nAntennas):
-            for ch in range(self.nChannels):
-                self.rx_rf_samples[aidx][ch] = np.frombuffer(shm, dtype=np.int16, count = self.rx_rf_nSamples*2)
+            self.rx_rf_samples[aidx] = np.frombuffer(shm, dtype=np.int16, count = self.rx_rf_nSamples*2) 
+
+
                
     # kick off async data processing
     def rxsamples_process(self):
@@ -711,7 +712,7 @@ class ProcessingGPU(object):
 
             # PLOT all three frequency bands
             ax = plt.subplot(311)
-            mpt.plot_freq(self.rx_rf_samples[0][0],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_rf_samples[0],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('RF')
 
@@ -728,7 +729,7 @@ class ProcessingGPU(object):
 
             plt.figure()
             ax = plt.subplot(211) 
-            mpt.plot_time(self.rx_rf_samples[0][0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+            mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
             plt.title("RF")
 
             ax = plt.subplot(212) 

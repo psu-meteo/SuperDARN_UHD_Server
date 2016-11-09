@@ -17,13 +17,11 @@ gridDim.y   = nAntennas
 
 Input / Output format:
  - [rx_samples_FB] = nAntennas x nChannels x 2*nSamples_FB(I/Q-Interleaved)
-   for all frequency bands FB: RF, IF, and BB
+   for all frequency bands FB: RF, IF, and BB (RF is only one channel)
  - Filter has be be time reversed (doesn't matter for symmetric filters)
 
 TODO:
- -  check if phase correction of local oscillator is correct
  - if filter is real we could save calc time by removing all calculations with imag(filter) and phase correction, maybe write additional function multiply_add_real
- - what is block arround line 122 checking for?
  - NTH: avoid duplicate code for indexing, multiplication and summation
 
 */
@@ -32,6 +30,8 @@ TODO:
 __device__ __constant__ double  phaseIncrement_NCO_rad[MAXCHANNELS];
 __device__ __constant__ int16_t decimationRates[2];                 // [0]: rf2if, [1]: if2bb
 
+
+// downsampling and filter
 __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];//Array size is max number of threads in a block
@@ -124,7 +124,7 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
 
 
-
+// multiply with filter (that includes NCO), downsampling, apply filter phase correction
 __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 {
     __shared__ float itemp[1024];
@@ -143,20 +143,12 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 
     uint32_t iThread_lin = threadIdx.y*blockDim.x+threadIdx.x;
     
-    // TODO: mgu delete next block if I know what assert is checking for
-    uint32_t tsamp;
-    // calculate index of sample from global memory samples array
-    float stride = 1./2; // The number of filter taps is (1./stride) times the decimation rate
-    tsamp = stride*4*(blockIdx.x*blockDim.x) + 4*threadIdx.x;
-    // mix samples with nco, perform first reduction
-    assert(tsamp <= (4 * blockDim.x * gridDim.x));
-
     uint32_t decimationRate_rf2if = decimationRates[0];  
 
-    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);   // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
     uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
     uint32_t iSample_rf = iSampleIF * decimationRate_rf2if + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
-    uint32_t idxSample_rf = iSample_rf * 2 + iChannel * nSamples_rf *2 + iAntenna * nChannels * nSamples_rf *2; // index in memory (account for  I/Q, iChannel, iAntenna)
+    uint32_t idxSample_rf = iSample_rf * 2 + iAntenna *  nSamples_rf *2;                      // index in memory (account for  I/Q, iAntenna)
 
     itemp[iThread_lin] =
         filter[idxSample_filter  ] * samples[idxSample_rf  ] -
