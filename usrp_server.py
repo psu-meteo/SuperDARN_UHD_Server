@@ -61,10 +61,19 @@ class RadarHardwareManager:
     def run(self):
         def spawn_channel(conn):
             # start new radar channel handler
-            channel = RadarChannelHandler(conn)
+            channel = RadarChannelHandler(conn, self)
             self.channels.append(channel)
-            channel.run()
-            conn.close()
+            try:
+                channel.run()
+            except socket.error:
+                print("RadarChannelHandler: Socket error => Deleting channel... ")
+                self.deleteRadarChannel(channel)
+   #         else:
+   #             print("RadarChannelHandler: Other error => Deleting channel... ")
+   #             self.deleteRadarChannel(channel)
+   #             conn.close()
+   #             print("RadarChannelHandler: Unexpected error is:", sys.exc_info()[0])
+   #             raise
 
         # TODO: add lock support
         def radar_state_machine():
@@ -114,7 +123,7 @@ class RadarHardwareManager:
                     # (tuning the USRP, preparing combined rf samples on GPU)
                     for ch in self.channels:
                         if ch.state != STATE_PRETRIGGER:
-                            print('channel {} state is {}, remaining in PRETRIGGER'.format(ch.cnum, ch.state))
+                            print('STATE_MACHINE: remaining in PRETRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
                             self.next_state = STATE_PRETRIGGER
 
                     # if everyone is ready, prepare for data collection
@@ -128,7 +137,7 @@ class RadarHardwareManager:
                     # wait for all channels to be in TRIGGER state
                     for ch in self.channels:
                         if ch.state != STATE_TRIGGER:
-                            print('channel state is {}, remaining in TRIGGER'.format(ch.state))
+                            print('STATE_MACHINE: remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
                             self.next_state = STATE_TRIGGER
 
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
@@ -164,6 +173,11 @@ class RadarHardwareManager:
             ct = threading.Thread(target=spawn_channel, args=(client_conn,))
             client_threads.append(ct)
             ct.start()
+       
+            # remove threads that are not alive
+            client_threads = [iThread for iThread in client_threads if iThread.is_alive()]
+
+ 
 
         self.client_sock.close()
 
@@ -400,6 +414,20 @@ class RadarHardwareManager:
 
         channel.state = STATE_WAIT
 
+    def deleteRadarChannel(self, channelObject):
+        if channelObject in self.channels:
+            # don't delete channel in middle of trigger, pretrigger, or ....
+            channelObject._waitForState(STATE_WAIT) 
+            print('RHM:deleteRadarChannel removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
+            self.channels.remove(channelObject)
+            print('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
+        else:
+            print('RHM:deleteRadarChannel channel already deleted')
+
+       # if len(self.channels) == 0:
+       #     self.exit()
+
+        
 
     def exit(self):
         # clean up and exit
@@ -537,10 +565,11 @@ class RadarHardwareManager:
 
 
 class RadarChannelHandler:
-    def __init__(self, conn):
+    def __init__(self, conn, parent_RadarHardwareManager):
         self.active = False# TODO: eliminate
         self.ready = False # TODO: eliminate
         self.conn = conn
+        self.parent_RadarHardwareManager = parent_RadarHardwareManager
 
         self.state = STATE_WAIT
 
@@ -604,6 +633,9 @@ class RadarChannelHandler:
             else:
                 status = self.DefaultHandler(rmsg)
 
+            if status == 'exit': # output of QuitHandler
+                break
+ 
             rmsg.set_data('status', status)
             rmsg.set_data('type', rmsg.payload['type'])
             rmsg.transmit()
@@ -643,7 +675,11 @@ class RadarChannelHandler:
         rmsg.set_data('type', rmsg.payload['type'])
         rmsg.transmit()
         self.conn.close()
-        sys.exit() # TODO: set return value
+        self.parent_RadarHardwareManager.deleteRadarChannel(self)
+        del self # TODO close thread ?!?
+        print('Deleted channel')
+        # sys.exit() # TODO: set return value
+        return 'exit'
 
     def PingHandler(self, rmsg):
         return RMSG_SUCCESS
