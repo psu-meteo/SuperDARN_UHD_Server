@@ -80,10 +80,12 @@ class RadarHardwareManager:
             cprint('starting radar hardware state machine', 'blue')
             self.state = STATE_INIT
             self.next_state = STATE_INIT
+            statePriorityOrder = [ STATE_CLR_FREQ, STATE_PRETRIGGER, STATE_TRIGGER, STATE_GET_DATA]
 
             while True:
                 self.state = self.next_state
                 self.next_state = STATE_RESET
+
                 if self.state == STATE_INIT:
                     # TODO: write init code?
                     self.next_state = STATE_WAIT
@@ -91,21 +93,17 @@ class RadarHardwareManager:
                 if self.state == STATE_WAIT:
                     self.next_state = STATE_WAIT
 
-                    # TODO: think about radar state priority
-                    # e.g, CLR_FREQ > PRETRIGGER > TRIGGER > GET_DATA?
-                    for ch in self.channels:
-                        if ch.state == STATE_CLR_FREQ:
-                            self.next_state = STATE_CLR_FREQ
+
+                    # 1st priority is stateOrder, 2nd is channel number
+                    for iState in statePriorityOrder:
+                        if self.next_state == STATE_WAIT:      # if next state still not found
+                            for iChannel in self.channels:
+                                if iChannel.state == iState:
+                                    self.next_state = iState
+                                    break
+                        else:
                             break
-                        if ch.state == STATE_PRETRIGGER:
-                            self.next_state = STATE_PRETRIGGER
-                            break
-                        if ch.state == STATE_TRIGGER:
-                            self.next_state = STATE_TRIGGER
-                            break
-                        if ch.state == STATE_GET_DATA:
-                            self.next_state = STATE_GET_DATA
-                            break
+                        
 
                 if self.state == STATE_CLR_FREQ:
                     # do a clear frequency search for channel requesting one
