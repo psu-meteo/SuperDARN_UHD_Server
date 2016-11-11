@@ -24,7 +24,7 @@ def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate):
     b = scipy.special.i0(beta)
     for iChannel, channelFreq in enumerate(channelFreqVec):
         if channelFreq != None:
-           dbPrint('filter generation Channel {}: Freq : {} kHz'.format(iChannel, channelFreq/1e3))
+          # dbPrint('filter generation Channel {}: Freq : {} kHz'.format(iChannel, channelFreq/1e3))
            for iTap in range(nTaps):
                phi = 2 * np.pi * channelFreq * iTap / samplingRate # phase of downmixing frequency
                k = scipy.special.i0((2 * beta / m) * np.sqrt(iTap * (m - iTap)))

@@ -1,3 +1,11 @@
+/***********************************************************************
+ * recv_and_hold() function
+ * A function to be used to receive samples from the USRP and
+ * hold them in the network socket buffer. *rx_data_buffers points to
+ * the memory locations of each antenna's samples.   Meant to operate in its
+ * own thread context so that it does not block the execution in main()
+ * Also handles the former duties of the timing card...
+ **********************************************************************/
 #include <complex>
 #include <vector>
 #include <queue>
@@ -28,7 +36,7 @@
 #define TEST_RXWORKER 0
 
 
-#define RX_OFFSET 290e-6 // microseconds, alex had 450-e6 set here
+#define RX_OFFSET 0 // 290e-6 // microseconds, alex had 450-e6 set here
 
 struct GPIOCommand {
     uhd::time_spec_t cmd_time;
@@ -47,14 +55,6 @@ public:
 };
 
 
-/***********************************************************************
- * recv_and_hold() function
- * A function to be used to receive samples from the USRP and
- * hold them in the network socket buffer. *rx_data_buffers points to
- * the memory locations of each antenna's samples.   Meant to operate in its
- * own thread context so that it does not block the execution in main()
- * Also handles the former duties of the timing card...
- **********************************************************************/
 void recv_and_hold(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
