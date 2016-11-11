@@ -27,6 +27,8 @@ from socket_utils import *
 from drivermsg_library import *
 import dsp_filters
 from phasing_utils import *
+from profiling_tools import timeit
+
 # import pycuda stuff
 SWING0 = 0
 SWING1 = 1
@@ -94,6 +96,7 @@ class cuda_setup_handler(cudamsg_handler):
     
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_generate_pulse_handler(cudamsg_handler):
+    @timeit
     def process(self):
         print('enter cuda_generate_pulse_handler.process')
         cmd = cuda_generate_pulse_command([self.sock])
@@ -208,6 +211,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
          
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
+    @timeit
     def process(self):
         print('entering cuda_add_channel_handler, waiting for swing semaphores')
         semaphore_list[SIDEA][SWING0].acquire()
@@ -268,6 +272,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
 
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
+    @timeit
     def process(self):
         print('entering cuda_get_data handler')
         cmd = cuda_get_data_command([self.sock])
@@ -304,6 +309,7 @@ class cuda_exit_handler(cudamsg_handler):
 
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
+    @timeit
     def process(self):
         print('enter cuda_process_handler:process')
         cmd = cuda_process_command([self.sock], SWING0)

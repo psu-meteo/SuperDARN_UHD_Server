@@ -18,7 +18,7 @@
 #define DEBUG 1
 
 #ifdef DEBUG
-#define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); }  while( false )
+#define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); }  while( false )
 #else
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
@@ -56,10 +56,9 @@ void tx_worker(
         
         //Initialize the temporary pointers according to the argument passed to the function
         if (DEBUG) std::cout << "BURST_WORKER pulse " << i << std::endl;
-        if (DEBUG) std::cout << "BURST_WORKER num tx channels: " << tx_stream->get_num_channels() << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER sequence length : " << pulse_length << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER number of pulses : " << pulse_times.size() << std::endl;
-        if (DEBUG) std::cout << "BURST_WORKER pulse time : " << pulse_times[i].get_real_secs() << std::endl;
+        //if (DEBUG) std::cout << "BURST_WORKER pulse time : " << pulse_times[i].get_real_secs() << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER pulse timeout : " << timeout << std::endl;
         if (DEBUG) std::cout << "BURST_WORKER pulse duration (microseconds) : " << pulse_duration * 1e6 << std::endl;
 

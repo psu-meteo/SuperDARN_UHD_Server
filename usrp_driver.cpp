@@ -45,7 +45,7 @@
 
 #define DEBUG 1
 #ifdef DEBUG
-#define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
+#define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); } while( false )
 #else
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
@@ -442,8 +442,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
-   // init rxfe
+    // initialize rxfe gpio
     kodiak_init_rxfe(usrp);
+    // initialize other gpio on usrp
+    init_timing_signals(usrp);
+  
     
     signal(SIGINT, siginthandler);
     
@@ -521,7 +524,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             switch(command) {
                 case USRP_SETUP: {
                     DEBUG_PRINT("entering USRP_SETUP command\n");
-                    
+                   
+
                     txfreq_new = sock_get_float64(driverconn);
                     rxfreq_new = sock_get_float64(driverconn);
                     txrate_new = sock_get_float64(driverconn);
@@ -531,7 +535,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     num_requested_rx_samples = sock_get_uint64(driverconn);
                     num_tx_rf_samples = sock_get_uint64(driverconn);
-                    
+
                     DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) num_requested_rx_samples);
                     DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) num_tx_rf_samples);
                     DEBUG_PRINT("USRP_SETUP existing tx rate: : %f\n", txrate);
@@ -543,11 +547,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         pulse_offsets[i] = sock_get_float64(driverconn); 
                         DEBUG_PRINT("USRP_SETUP received %f pulse offset\n", pulse_offsets[i]);
                     }
- 
-                    rx_data_buffer.resize(num_requested_rx_samples);
+
+                    if(rx_data_buffer.size() != num_requested_samples) {
+                        rx_data_buffer.resize(num_requested_rx_samples);
+                    }
                    
                     DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_swingatx);
-                    // copy transmit samples from shared memory
                     for(uint32_t i = 0; i < npulses; i++) {
                         if(pulse_seq_ptrs[i] != NULL) {
                             free(pulse_seq_ptrs[i]);
@@ -564,7 +569,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         memcpy(pulse_seq_ptrs[i], shm_pulseaddr, pulse_bytes);
                     }
                     
-                    // TODO: only retune if necessary
+                    // only retune if necessary
                     if(rxrate != rxrate_new) {
                         usrp->set_rx_rate(rxrate_new);
                         rxrate = usrp->get_rx_rate();
@@ -633,8 +638,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga);
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
-                        init_timing_signals(usrp);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
-                        
+                         
+
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
                         double pulse_time_frac = sock_get_float64(driverconn);
@@ -646,8 +651,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_times[p_i].get_real_secs());
                         }
                         
-                       //  send_timing_for_sequence(usrp, start_time, pulse_times);
-                        double pulseLength = num_tx_rf_samples / usrp->get_tx_rate();
+                        //  send_timing_for_sequence(usrp, start_time, pulse_times);
+                        double pulseLength = num_tx_rf_samples / txrate;
+
+                        //float debugt = usrp->get_time_now().get_real_secs();
+                        //DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
+
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_times, pulseLength)); 
                         
  
