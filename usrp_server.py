@@ -62,7 +62,6 @@ class RadarHardwareManager:
         def spawn_channel(conn):
             # start new radar channel handler
             channel = RadarChannelHandler(conn, self)
-            self.channels.append(channel)
             try:
                 channel.run()
             except socket.error:
@@ -80,7 +79,10 @@ class RadarHardwareManager:
             cprint('starting radar hardware state machine', 'blue')
             self.state = STATE_INIT
             self.next_state = STATE_INIT
+            self.postTrigger = False    # no new channel should be added between TRIGGER and GET_DATA
             statePriorityOrder = [ STATE_CLR_FREQ, STATE_PRETRIGGER, STATE_TRIGGER, STATE_GET_DATA]
+          
+            sleepTime = 0.01 # used if state machine waits for one channel
 
             while True:
                 self.state = self.next_state
@@ -120,9 +122,14 @@ class RadarHardwareManager:
                     # TODO: add timeout?
                     # (tuning the USRP, preparing combined rf samples on GPU)
                     for ch in self.channels:
-                        if ch.state != STATE_PRETRIGGER:
-                            print('STATE_MACHINE: remaining in PRETRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
-                            self.next_state = STATE_PRETRIGGER
+                        if not ch.state in [ STATE_PRETRIGGER, STATE_TRIGGER]:
+                            if ch.state  == STATE_CLR_FREQ:
+                                print('STATE_MACHINE: setting state back to {} from {}'.format(ch.state, self.state))
+                                self.next_state = ch.state
+                            else:
+                                print('STATE_MACHINE: remaining in PRETRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
+                                time.sleep(sleepTime)
+                                self.next_state = STATE_PRETRIGGER
 
                     # if everyone is ready, prepare for data collection
                     if self.next_state == STATE_WAIT:
@@ -134,19 +141,30 @@ class RadarHardwareManager:
                     self.next_state = STATE_WAIT
                     # wait for all channels to be in TRIGGER state
                     for ch in self.channels:
-                        if ch.state != STATE_TRIGGER:
-                            print('STATE_MACHINE: remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
-                            self.next_state = STATE_TRIGGER
+                        if not ch.state in [ STATE_TRIGGER, STATE_GET_DATA]:
+                            if ch.state in [STATE_CLR_FREQ, STATE_PRETRIGGER]:
+                                print('STATE_MACHINE: setting state back to {} from {}'.format(ch.state, self.state))
+                                self.next_state = ch.state
+                            else:
+                                print('STATE_MACHINE: remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
+                                time.sleep(sleepTime)
+                                self.next_state = STATE_TRIGGER
 
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
                     if self.next_state == STATE_WAIT:
+                        self.postTrigger = True
                         self.trigger()
 
                 if self.state == STATE_GET_DATA:
                     self.next_state = STATE_WAIT
 
-                    for ch in self.channels:
+                    for ch in self.channels: 
                         self.get_data(ch)
+
+                    for ch in self.channels: 
+                        ch.state = STATE_WAIT
+
+                    self.postTrigger = False
 
 
                 if self.state == STATE_RESET:
@@ -410,7 +428,6 @@ class RadarHardwareManager:
         #channel.back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
 
 
-        channel.state = STATE_WAIT
 
     def deleteRadarChannel(self, channelObject):
         if channelObject in self.channels:
@@ -419,11 +436,12 @@ class RadarHardwareManager:
             print('RHM:deleteRadarChannel removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
             print('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
+            if (len(self.channels) == 0) and self.postTrigger:  # reset postTrigger if last channel has been deleted between TRIGGER and GET_DATA
+                self.postTrigger = False
+
         else:
             print('RHM:deleteRadarChannel channel already deleted')
 
-       # if len(self.channels) == 0:
-       #     self.exit()
 
         
 
@@ -557,7 +575,8 @@ class RadarHardwareManager:
         cmd.client_return()
 
         for ch in self.channels:
-            ch.state = STATE_WAIT
+            if ch.state == STATE_PRETRIGGER: # only reset PRETRIGGER , not TRIGGER
+                ch.state = STATE_WAIT
 
         cprint('end of RadarHardwareManager.pretrigger()', 'blue')
 
@@ -579,6 +598,7 @@ class RadarChannelHandler:
 
         self.clrfreq_start = 0
         self.clrfreq_stop = 0
+        self.cnum = 'unknown'
 
         # TODO: initialize ctlrprm_struct with site infomation
         #self.ctrlprm_struct.set_data('rbeamwidth', 3)
@@ -611,16 +631,22 @@ class RadarChannelHandler:
         #   WAIT_FOR_DATA: self.WaitForDataHandler,\
             GET_DATA: self.GetDataHandler}
 
+        while self.parent_RadarHardwareManager.postTrigger:
+            print("Waiting to finish GET_DATA before adding new channel")
+            time.sleep(RADAR_STATE_TIME)
+
+        # adding channel to HardwareManager
+        self.parent_RadarHardwareManager.channels.append(self)  
 
         while True:
             rmsg = rosmsg_command(self.conn)
             status = RMSG_FAILURE
 
-            print('waiting for command')
+            print('RadarChannelHandler (ch {}): waiting for command'.format(self.cnum))
             rmsg.receive(self.conn)
             command = chr(rmsg.payload['type'] & 0xFF) # for some reason, libtst is sending out 4 byte commands with junk..
             try:
-                cprint('received command (ROS=>USRP_Server): {}, {}'.format(command, RMSG_COMMAND_NAMES[command]), 'red')
+                cprint('RadarChannelHandler (ch {}): received command (ROS=>USRP_Server): {}, {}'.format(self.cnum, command, RMSG_COMMAND_NAMES[command]), 'red')
             except KeyError:
                 print('unrecognized command!')
                 print(rmsg.payload)
@@ -714,6 +740,7 @@ class RadarChannelHandler:
         self.state = STATE_TRIGGER
         # send trigger command
         self.ready = True
+        self._waitForState(STATE_WAIT)
         return RMSG_SUCCESS
 
     def RegisterSeqHandler(self, rmsg):
@@ -830,6 +857,7 @@ class RadarChannelHandler:
 
         self.state = STATE_PRETRIGGER
         cprint('channel {} going into PRETRIGGER state'.format(self.cnum), 'green')
+        self._waitForState(STATE_WAIT)
         # TODO for a SetParametersHandler, prepare transmit and receive sample buffers
         if (self.rnum < 0 or self.cnum < 0):
             return RMSG_FAILURE
