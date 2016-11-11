@@ -79,7 +79,7 @@ class RadarHardwareManager:
             cprint('starting radar hardware state machine', 'blue')
             self.state = STATE_INIT
             self.next_state = STATE_INIT
-            self.postTrigger = False    # no new channel should be added between TRIGGER and GET_DATA
+            self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
             statePriorityOrder = [ STATE_CLR_FREQ, STATE_PRETRIGGER, STATE_TRIGGER, STATE_GET_DATA]
           
             sleepTime = 0.01 # used if state machine waits for one channel
@@ -134,6 +134,7 @@ class RadarHardwareManager:
                     # if everyone is ready, prepare for data collection
                     if self.next_state == STATE_WAIT:
                         cprint('running pretrigger!', 'green')
+                        self.addingNewChannelsAllowed = False
                         self.pretrigger()
 
 
@@ -152,7 +153,6 @@ class RadarHardwareManager:
 
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
                     if self.next_state == STATE_WAIT:
-                        self.postTrigger = True
                         self.trigger()
 
                 if self.state == STATE_GET_DATA:
@@ -161,10 +161,10 @@ class RadarHardwareManager:
                     for ch in self.channels: 
                         self.get_data(ch)
 
-                    for ch in self.channels: 
-                        ch.state = STATE_WAIT
-
-                    self.postTrigger = False
+                    for ch in self.channels:
+                        if ch.state == STATE_GET_DATA: 
+                            ch.state = STATE_WAIT
+                    self.addingNewChannelsAllowed = True
 
 
                 if self.state == STATE_RESET:
@@ -436,8 +436,8 @@ class RadarHardwareManager:
             print('RHM:deleteRadarChannel removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
             print('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
-            if (len(self.channels) == 0) and self.postTrigger:  # reset postTrigger if last channel has been deleted between TRIGGER and GET_DATA
-                self.postTrigger = False
+            if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
+                self.addingNewChannelsAllowed = True
 
         else:
             print('RHM:deleteRadarChannel channel already deleted')
@@ -521,10 +521,10 @@ class RadarHardwareManager:
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
                 # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate
-                print('tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
-                print('rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
-                print('usrp tx cfreq: ' + str(self.usrp_tx_cfreq))
-                print('usrp rf tx rate: ' + str(self.usrp_rf_tx_rate))
+                print('RadarHardwareManager.pretrigger() tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
+                print('RadarHardwareManager.pretrigger() rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
+                print('RadarHardwareManager.pretrigger() usrp tx cfreq: ' + str(self.usrp_tx_cfreq))
+                print('RadarHardwareManager.pretrigger() usrp rf tx rate: ' + str(self.usrp_rf_tx_rate))
                 
                 assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
@@ -631,7 +631,7 @@ class RadarChannelHandler:
         #   WAIT_FOR_DATA: self.WaitForDataHandler,\
             GET_DATA: self.GetDataHandler}
 
-        while self.parent_RadarHardwareManager.postTrigger:
+        while not self.parent_RadarHardwareManager.addingNewChannelsAllowed:
             print("Waiting to finish GET_DATA before adding new channel")
             time.sleep(RADAR_STATE_TIME)
 
