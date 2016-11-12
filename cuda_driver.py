@@ -113,10 +113,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
        
         # generate base band signals incl. beamforming, phase_masks and pulse filtering 
         bb_signal    = [None for c in range(nChannels)] 
-        for currentSequence in self.gpu.sequences:
+        for chIndex, currentSequence in enumerate(self.gpu.sequences):
             if currentSequence != None:
-                cNum = currentSequence.ctrlprm['channel'] - 1 # sequence channel nummer starts with 1
-                bb_signal[cNum]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
+                bb_signal[chIndex]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
         self.gpu.synth_channels(bb_signal)
@@ -140,7 +139,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
-     ##   chnum = channel.ctrlprm['channel']
+
         ctrlprm = channel.ctrlprm
 
         tpulse = channel.pulse_lens[0] / 1e6 # read in array of pulse lengths in seconds 
@@ -227,22 +226,34 @@ class cuda_add_channel_handler(cudamsg_handler):
 
         print('received command')
         sequence = cmd.sequence
-        ctrlprm = sequence.ctrlprm
-        cnum = ctrlprm['channel'] - 1# sequence channel nummer starts with 1
-        self.gpu.sequences[cnum] = sequence
+#        ctrlprm = sequence.ctrlprm
+        channelNumber = sequence.ctrlprm['channel']
 
- 
+        if channelNumber in self.gpu.channelNumbers:
+            chIdx = self.gpu.channelNumbers.index(channelNumber)
+            print("Channel {} already added at idx {}. Reinitializing it ...".format(channelNumber, chIdx))
+        else:
+            if None in self.gpu.channelNumbers:
+                chIdx = self.gpu.channelNumbers.index(None)
+                self.gpu.channelNumbers[chIdx] = channelNumber
+            else:
+                print("all channles active, can not add channel")
+                return # TODO rerun error?
+
+        self.gpu.sequences[chIdx] = sequence
+
+
 
         if verbose:
            dbPrint("===> adding new channel:")
-           dbPrint("  num (cuda: {}, sequence: {})".format(cnum, cnum+1))
-           dbPrint("  tx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
-           dbPrint("  rx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['rfreq'] ))
-           dbPrint("  tx pulse offset (us)  "+ str(  self.gpu.sequences[cnum].pulse_offsets_vector) )
-#           print("  num {}".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
-        self.gpu._set_tx_mixerfreq(cnum)
-        self.gpu._set_tx_phasedelay(cnum)
-        self.gpu._set_rx_phaseIncrement(cnum)
+           dbPrint("  channel number {}  (cuda index: {})".format(channelNumber, chIdx))
+           dbPrint("  tx channel freq {} kHz".format(self.gpu.sequences[chIdx].ctrlprm['tfreq'] ))
+           dbPrint("  rx channel freq {} kHz".format(self.gpu.sequences[chIdx].ctrlprm['rfreq'] ))
+           dbPrint("  tx pulse offset (us)  "+ str(  self.gpu.sequences[chIdx].pulse_offsets_vector) )
+
+        self.gpu._set_tx_mixerfreq(chIdx)
+        self.gpu._set_tx_phasedelay(chIdx)
+        self.gpu._set_rx_phaseIncrement(chIdx)
  
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
@@ -271,9 +282,19 @@ class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_remove_channel_command([self.sock])
         cmd.receive(self.sock)
-        # This is not implemented..
-        # pdb.set_trace()
-        pass
+
+        sequence = cmd.sequence
+        channelNumber = sequence.ctrlprm['channel']
+
+        if channelNumber in self.gpu.channelNumbers:
+            chIdx = self.gpu.channelNumbers.index(channelNumber)
+            self.gpu.squences[chIdx] = None
+            self.gpu.channelNumbers[chIdx] = None
+            print("Delete Channel {}  at idx {}. ".format(channelNumber, chIdx))
+        else:
+            print("No channel {} in cuda. (channel numbers : {})".fomrat(channelNumber, self.gpu.channelNumbers))
+
+        
 
 
 
@@ -284,26 +305,32 @@ class cuda_get_data_handler(cudamsg_handler):
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
 
-        channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
-        dbPrint('received channel={}(cuda: {}))'.format(channel, channel-1))
-        dbPrint('pulling data...') 
+        dbPrint('pulling data from gpu memory...') 
         samples = self.gpu.pull_rxdata()
-        dbPrint('finished pullind data')
-        nants, nChannels, nsamps = samples.shape
-        dbPrint('data format: {}'.format(samples.shape))
-        dbPrint('transmitting nants {}'.format(nants)) 
-        transmit_dtype(self.sock, nants, np.uint32)
+        nAntennas, nChannels, nSamples = samples.shape
+        dbPrint('finished pulling date. format: {}'.format(samples.shape))
 
-        for aidx in range(nants):
-            transmit_dtype(self.sock, self.antennas[aidx], np.uint16)
-            dbPrint('transmitted antenna index')
-            # TODO: calculate size of transmit samples for channel/ant
-            transmit_dtype(self.sock, nsamps, np.uint32)
-            dbPrint('transmitted number of samples ({})'.format(nsamps))
-            self.sock.sendall(samples[aidx][channel-1].tobytes())
+        dbPrint('transmitting nAntennas {}'.format(nAntennas)) 
+        transmit_dtype(self.sock, nAntennas, np.uint32)
+
+        channel = recv_dtype(self.sock, np.int32) 
+
+        while (channel != -1):
+            channelIndex = self.gpu.channelNumbers.index(channel)
+            dbPrint('received channel number ={}(cuda index: {}))'.format(channel, channelIndex))
+
+            for iAntenna in range(nAntennas):
+                transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
+                dbPrint('transmitted antenna index')
+
+                transmit_dtype(self.sock, nSamples, np.uint32)
+                dbPrint('transmitted number of samples ({})'.format(nSamples))
+                self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
+
+            channel = recv_dtype(self.sock, np.int32) 
 
         # TODO: remove hardcoded swing/side
-        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING0].release() # TODO why is this here so lonely? (mgu)
 
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
@@ -418,9 +445,9 @@ class ProcessingGPU(object):
         # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nAntennas) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nAntennas) # table to account for constant phase offset, e.g 180 degree phase flip
-
-        # DEL because unused? self.baseband_samples = [[None for i in range(self.nChannels)] for p in maxpulses] # table to store baseband samples of pulse for each frequency
-        self.sequences = [None for i in range(self.nChannels)] # table to store sequence infomation
+ 
+        self.sequences      = [None for iCh in range(self.nChannels)] # table to store sequence infomation
+        self.channelNumbers = [None for iCh in range(self.nChannels)] # cuda sequence index to channel number (cnum)
 
         # host side copy of channel transmit frequency array
         self.tx_mixer_freqs = np.zeros(self.nChannels, dtype=np.float64)

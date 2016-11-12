@@ -158,8 +158,7 @@ class RadarHardwareManager:
                 if self.state == STATE_GET_DATA:
                     self.next_state = STATE_WAIT
 
-                    for ch in self.channels: 
-                        self.get_data(ch)
+                    self.get_data(self.channels)
 
                     for ch in self.channels:
                         if ch.state == STATE_GET_DATA: 
@@ -324,28 +323,27 @@ class RadarHardwareManager:
         chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth) 
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
 
-    def get_data(self, channel):
-        ctrlprm = channel.ctrlprm_struct.payload
-
+    def get_data(self, allChannels):
+        nMainAntennas = 16 # TODO: get this information from usrp_config.ini
+        nBackAntennas = 4
         cprint('running get_data', 'blue')
-        # stall until all channels are ready
-        nbb_samples = ctrlprm['number_of_samples']
 
+        nChannels = len(allChannels)
+
+        # stall until all USRPs are ready
         cprint('sending USRP_READY_DATA command ', 'blue')
         cmd = usrp_ready_data_command(self.usrpsocks)
         cmd.transmit()
         cprint('sending USRP_READY_DATA command sent, waiting on READY_DATA status', 'blue')
 
-        # TODO: seperate tracking of number of antennas in main and back array from nants
-        # the following line will fail once we start testing with the back array or test with spare arrays
-        main_samples = np.complex64(np.zeros((len(self.usrpsocks), nbb_samples))) # TODO: support sparse array.., this assumes no missing elements
-        main_beamformed = np.uint32(np.zeros(nbb_samples)) # samples for control program are packed 16 bit i/q pairs in a 32 bit array..
-        back_samples = np.complex64(np.zeros((MAXANTENNAS_BACK, nbb_samples))) # TODO: don't hardcode back array size, support missing elements
-        main_beamformed = np.uint32(np.zeros(nbb_samples))
-
+        # alloc memory
+        nSamples_bb  = allChannels[0].ctrlprm_struct.payload['number_of_samples'] # TODO: later use  self.commonParameter_rx_bb_nSamples
+        main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
+        back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
+        
         # check status of usrp drivers
         for usrpsock in self.usrpsocks:
-            transmit_dtype(usrpsock, channel.cnum, np.int32) # WHY DO THIS?
+            transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
@@ -366,48 +364,35 @@ class RadarHardwareManager:
         cprint('GET_DATA: finished CUDA_PROCESS', 'blue')
 
         # RECEIVER RX BB SAMPLES 
+        # recv metadata from cuda drivers about antenna numbers and whatnot
+        # fill up provided main and back baseband sample buffers
         cmd = cuda_get_data_command(self.cudasocks)
         cmd.transmit()
 
-        # recv metadata from cuda drivers about antenna numbers and whatnot
-        # fill up provided main and back baseband sample buffers
         for cudasock in self.cudasocks:
-            transmit_dtype(cudasock, channel.cnum, np.int32)
-            nants = recv_dtype(cudasock, np.uint32)
+            nAntennas = recv_dtype(cudasock, np.uint32)
+            for iChannel,channel in enumerate(allChannels):
+                transmit_dtype(cudasock, channel.cnum, np.int32)
 
-            for ant in range(nants):
-                ant = recv_dtype(cudasock, np.uint16)
-                num_samples = recv_dtype(cudasock, np.uint32)
-                samples = recv_dtype(cudasock, np.float32, num_samples)
-                samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
-                
-                if ant < MAX_MAIN_ARRAY_TODO:
-                    main_samples[ant] = samples[:]
+                for iAntenna in range(nAntennas):
+                    antIdx = recv_dtype(cudasock, np.uint16)
+                    num_samples = recv_dtype(cudasock, np.uint32)
+                    samples = recv_dtype(cudasock, np.float32, num_samples)
+                    samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+                    
+                    if antIdx < nMainAntennas:
+                        main_samples[iChannel][antIdx] = samples[:]
 
-                else:
-                    back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples[:]
-                            
-            # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
-        
-        # TODO: currently assuming samples is main samples, no back array!
+                    else:
+                        back_samples[iChannel][antIdx - nMainAntennas] = samples[:]
+                                
+      
+            transmit_dtype(cudasock, -1, np.int32) # to end transfer process
+            
         cmd.client_return()
+        cprint('get_data() tranfering data complete', 'blue')
         
         # BEAMFORMING
-        # calculate beam azimuth from transmit beam number 
-        bmazm = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)
-
-        # calculate antenna-to-antenna phase shift for steering at a frequency
-        pshift = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)
-
-        # TODO: HARDCODED TO ONE ANTENNA
-        antennas_list = [0]
-
-        # calculate a complex number representing the phase shift for each antenna
-        beamform_main = np.array([rad_to_rect(a * pshift) for a in antennas_list])
-        #beamform_back = np.ones(len(MAIN_ANTENNAS))
-
-        cprint('get_data complete!', 'blue')
-
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
             beamformed_samples = np.ones(n_samples)
 
@@ -424,8 +409,26 @@ class RadarHardwareManager:
 
             return beamformed_samples
 
-        channel.main_beamformed = _beamform_uhd_samples(main_samples, beamform_main, nbb_samples, antennas_list)
-        #channel.back_beamformed = _beamform_uhd_samples(back_samples, beamform_back, nbb_samples, antennas)
+        for iChannel, channel in enumerate(allChannels):
+            ctrlprm = channel.ctrlprm_struct.payload
+            # TODO: where are RADAR_NBEAMS and RADAR_BEAMWIDTH is comming from?
+            bmazm         = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)    # calculate beam azimuth from transmit beam number
+            # TODO: use data from config file
+         #   beam_sep  = float(self.array_info['beam_sep']) # degrees
+         #   nbeams    = int(self.array_info['nbeams'])
+         #   x_spacing = float(self.array_info['x_spacing']) # meters TODO: why unsued? delete it...
+         #   beamnum   = ctrlprm['tbeam']
+         #   bmazm         = calc_beam_azm_rad(nbeams, ctrlprm['tbeam'], beam_sep)    # calculate beam azimuth from transmit beam number 
+            pshift        = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+            antennas_list = [0]   # TODO: HARDCODED TO ONE ANTENNA
+            phasingMatrix_main = np.array([rad_to_rect(a * pshift) for a in antennas_list])  # calculate a complex number representing the phase shift for each antenna
+           #phasingMatrix_back = np.ones(len(MAIN_ANTENNAS))
+
+
+            channel.main_beamformed = _beamform_uhd_samples(main_samples[iChannel], phasingMatrix_main, nSamples_bb, antennas_list)
+           #channel.back_beamformed = _beamform_uhd_samples(back_samples, phasingMatrix_back, nSamples_bb, antennas)
+        
+        cprint('get_data complete!', 'blue')
 
 
 
