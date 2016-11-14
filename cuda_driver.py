@@ -178,14 +178,14 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         beam_sep  = float(self.array_info['beam_sep']) # degrees
         nbeams    = int(self.array_info['nbeams'])
-        x_spacing = float(self.array_info['x_spacing']) # meters TODO: why unsued? delete it...
+        x_spacing = float(self.array_info['x_spacing']) # meters
         beamnum   = ctrlprm['tbeam']
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
 
         # calculate antenna-to-antenna phase shift for steering at a frequency
-        pshift = calc_phase_increment(bmazm, tx_center_freq)
+        pshift = calc_phase_increment(bmazm, tx_center_freq, x_spacing)
 
         # calculate a complex number representing the phase shift for each antenna
         beamforming_shift = [rad_to_rect(a * pshift) for a in self.antennas]

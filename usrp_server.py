@@ -199,18 +199,29 @@ class RadarHardwareManager:
 
     # read in ini config files..
     def ini_file_init(self):
+        # READ driver_config.ini
         driver_config = configparser.ConfigParser()
         driver_config.read('driver_config.ini')
         self.ini_shm_settings = driver_config['shm_settings']
         self.ini_cuda_settings = driver_config['cuda_settings']
         self.ini_network_settings = driver_config['network_settings']
 
+        # READ usrp_config.ini
         usrp_config = configparser.ConfigParser()
         usrp_config.read('usrp_config.ini')
         usrp_configs = []
         for usrp in usrp_config.sections():
             usrp_configs.append(usrp_config[usrp])
         self.ini_usrp_configs = usrp_configs
+
+
+        # READ array_config.ini
+        array_config = configparser.ConfigParser()
+        array_config.read('array_config.ini')
+        self.ini_array_settings  = array_config['array_info']
+      #  self.ini_hardware_limits = array_config['hardware_limits']
+
+
 
     def usrp_init(self):
         usrp_drivers = [] # hostname of usrp drivers
@@ -324,8 +335,8 @@ class RadarHardwareManager:
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
 
     def get_data(self, allChannels):
-        nMainAntennas = 16 # TODO: get this information from usrp_config.ini
-        nBackAntennas = 4
+        nMainAntennas = int(self.ini_array_settings['main_ants'])
+        nBackAntennas = int(self.ini_array_settings['back_ants'])
         cprint('running get_data', 'blue')
 
         nChannels = len(allChannels)
@@ -412,14 +423,15 @@ class RadarHardwareManager:
         for iChannel, channel in enumerate(allChannels):
             ctrlprm = channel.ctrlprm_struct.payload
             # TODO: where are RADAR_NBEAMS and RADAR_BEAMWIDTH is comming from?
-            bmazm         = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)    # calculate beam azimuth from transmit beam number
+#            bmazm         = calc_beam_azm_rad(RADAR_NBEAMS, ctrlprm['tbeam'], RADAR_BEAMWIDTH)    # calculate beam azimuth from transmit beam number
             # TODO: use data from config file
-         #   beam_sep  = float(self.array_info['beam_sep']) # degrees
-         #   nbeams    = int(self.array_info['nbeams'])
-         #   x_spacing = float(self.array_info['x_spacing']) # meters TODO: why unsued? delete it...
-         #   beamnum   = ctrlprm['tbeam']
-         #   bmazm         = calc_beam_azm_rad(nbeams, ctrlprm['tbeam'], beam_sep)    # calculate beam azimuth from transmit beam number 
-            pshift        = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000.)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+            beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
+            nbeams    = int(  self.ini_array_settings['nbeams'] )
+            x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
+            beamnum   = ctrlprm['tbeam']
+
+            bmazm         = calc_beam_azm_rad(nbeams, beamnum, beam_sep)    # calculate beam azimuth from transmit beam number          
+            pshift        = calc_phase_increment(bmazm, ctrlprm['tfreq'] * 1000., x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
             antennas_list = [0]   # TODO: HARDCODED TO ONE ANTENNA
             phasingMatrix_main = np.array([rad_to_rect(a * pshift) for a in antennas_list])  # calculate a complex number representing the phase shift for each antenna
            #phasingMatrix_back = np.ones(len(MAIN_ANTENNAS))

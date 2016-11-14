@@ -5,7 +5,6 @@ import numpy as np
 
 C = 3e8
 
-X_SPACING = 15.4 # TODO: set this from a config file
 
 # returns a complex number from a phase in radians
 def rad_to_rect(rad):
@@ -27,7 +26,7 @@ def calc_beam_azm_rad(nbeams, beamnum, beam_sep):
 # calculates the phase increment between antennas
 # to produce a mainlobe steering of bmazm at tfreq 
 # tfreq in hz, bmazm in radians
-def calc_phase_increment(bmazm, tfreq, x_spacing = X_SPACING):
+def calc_phase_increment(bmazm, tfreq, x_spacing):
     # translate to phase increment
  
     wavelength = C / tfreq
