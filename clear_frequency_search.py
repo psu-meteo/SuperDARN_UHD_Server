@@ -43,7 +43,7 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg):
+def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg, nBeams):
     # unpack clear frequency search parameters
     fstart = clrfreq_struct.payload['start'] * 1000 # convert kHz in struct to Hz
     fstop = clrfreq_struct.payload['end'] * 1000  # convert kHz in struct to Hz
@@ -86,7 +86,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     clrfreq_samples = np.zeros(num_clrfreq_samples, dtype=np.complex64)
     
     # calculate phasing
-    bmazm = calc_beam_azm_rad(RADAR_NBEAMS, tbeam_number, tbeam_width_deg)
+    bmazm = calc_beam_azm_rad(nBeams, tbeam_number, tbeam_width_deg)
     pshift_per_antenna = calc_phase_increment(bmazm, center_freq) # calculate phase shift between neighboring antennas for phasing of received samples
     # gather samples from usrps
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)

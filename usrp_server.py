@@ -57,6 +57,7 @@ class RadarHardwareManager:
         self.cuda_init()
 
         self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
+        self.nRegisteredChannels = 0
 
     def run(self):
         def spawn_channel(conn):
@@ -331,7 +332,7 @@ class RadarHardwareManager:
         cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
         tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
         tbeamwidth = 3.24 # TODO: why is it zero, this should be chan.ctrlprm_struct.get_data('tbeamwidth')
-        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth) 
+        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, self.ini_array_settings['nbeams']) 
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
 
     def get_data(self, allChannels):
@@ -348,7 +349,7 @@ class RadarHardwareManager:
         cprint('sending USRP_READY_DATA command sent, waiting on READY_DATA status', 'blue')
 
         # alloc memory
-        nSamples_bb  = allChannels[0].ctrlprm_struct.payload['number_of_samples'] # TODO: later use  self.commonParameter_rx_bb_nSamples
+        nSamples_bb  = self.commonChannelParameter['number_of_samples'] 
         main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
         back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
         
@@ -453,6 +454,10 @@ class RadarHardwareManager:
             print('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
                 self.addingNewChannelsAllowed = True
+
+            self.nRegisteredChannels -= 1
+            if self.nRegisteredChannels == 0:  
+                self.commonChannelParameter = {}
 
         else:
             print('RHM:deleteRadarChannel channel already deleted')
@@ -576,12 +581,11 @@ class RadarHardwareManager:
         # rfrate = np.int32(self.cuda_config['FSampTX'])
         # extract sampling info from cuda driver
         # print('rf rate parsed from ini: ' + str(rfrate))
-        pulse_offsets_vector = self.channels[0].pulse_offsets_vector # TODO: merge pulses from multiple channels (or check that pulses occur at the same times)
-        npulses = self.channels[0].npulses # TODO: merge..
-        ctrlprm = self.channels[0].ctrlprm_struct.payload
+        pulse_offsets_vector = self.commonChannelParameter['pulse_offsets_vector'] 
+        npulses              = self.commonChannelParameter['npulses']
+        tx_time              = self.commonChannelParameter['tx_time']
         # calculate the number of RF transmit and receive samples 
-        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
-        tx_time = self.channels[0].tx_time
+        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (self.commonChannelParameter['number_of_samples'] / self.commonChannelParameter['baseband_samplerate'])))  # TODO: might be not the exact number, compare with cuda!
         num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
 
         cprint('sending USRP_SETUP', 'blue')
@@ -870,6 +874,14 @@ class RadarChannelHandler:
         print('usrp_server RadarChannelHandler.SetParametersHandler: tfreq: ' + str(self.ctrlprm_struct.payload['tfreq']))
         print('usrp_server RadarChannelHandler.SetParametersHandler: rfreq: ' + str(self.ctrlprm_struct.payload['rfreq']))
 
+        tmp = self.CheckChannelCompatibility()
+        print(tmp)
+        if not tmp:
+#        if not self.CheckChannelCompatibility():
+            print("new channel not compatible")
+            return RMSG_FAILURE
+
+
         self.state = STATE_PRETRIGGER
         cprint('channel {} going into PRETRIGGER state'.format(self.cnum), 'green')
         self._waitForState(STATE_WAIT)
@@ -877,6 +889,43 @@ class RadarChannelHandler:
         if (self.rnum < 0 or self.cnum < 0):
             return RMSG_FAILURE
         return RMSG_SUCCESS
+
+    def CheckChannelCompatibility(self):
+        hardwareManager = self.parent_RadarHardwareManager
+        commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
+        commonParList_seq = [ 'npulses', 'pulse_offsets_vector', 'tx_time' ]
+
+        if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
+            hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
+            hardwareManager.commonChannelParameter.update( {key: self.ctrlprm_struct.payload[key] for key in commonParList_ctrl})
+
+            hardwareManager.nRegisteredChannels = 1
+            return True
+
+        else:   # not first channel => check if new parameters are compatible
+            parCompatibleList_seq = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
+            parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
+            idxOffsetVec = commonParList_seq.index('pulse_offsets_vector')  # convert vector of bool to scalar
+            parCompatibleList_seq[idxOffsetVec] = parCompatibleList_seq[idxOffsetVec].all()
+ 
+         #   pdb.set_trace()
+            if (not all(parCompatibleList_seq)) or (not  all(parCompatibleList_ctrl)):
+                print('Unable to add new channel. Parameters not compatible with active channels.')
+                for iPar,isCompatible in enumerate(parCompatibleList_seq):
+                     if not all(isCompatible):
+                        print(" Not compatible sequence parameter: {}   old channel(s): {} , new channel: {}".format(commonParameterList_seq[iPar], hardwareManager.commonChannelParameter[commonParameterList_seq[iPar]] , getattr(self, commonParameterList_seq[iPar])))
+                for iPar,isCompatible in enumerate(parCompatibleList_ctrl):
+                     if not isCompatible:
+                        print(" Not compatible ctrlprm: {}   old channel(s): {} , new channel: {}".format(commonParameterList_ctrl[iPar], hardwareManager.commonChannelParameter[commonParameterList_ctrl[iPar]] , self.ctrlprm_struct.payload[commonParameterList_ctrl[iPar]]))
+                return False
+            else:
+                hardwareManager.nRegisteredChannels += 1
+                return True
+                    
+
+        
+     
+
 
     # send ctrlprm struct
     def GetParametersHandler(self, rmsg):
