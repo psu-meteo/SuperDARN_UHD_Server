@@ -575,21 +575,19 @@ class RadarHardwareManager:
             cmd.client_return()
             cprint('finished CUDA_GENERATE_PULSE', 'blue')
 
-        # TODO: handle channels with different pulse infomation..
         # TODO: parse tx sample rate dynamocially
         # TODO: handle pretrigger with no channels
-        # rfrate = np.int32(self.cuda_config['FSampTX'])
-        # extract sampling info from cuda driver
-        # print('rf rate parsed from ini: ' + str(rfrate))
         pulse_offsets_vector = self.commonChannelParameter['pulse_offsets_vector'] 
         npulses              = self.commonChannelParameter['npulses']
-        tx_time              = self.commonChannelParameter['tx_time']
-        # calculate the number of RF transmit and receive samples 
-        num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (self.commonChannelParameter['number_of_samples'] / self.commonChannelParameter['baseband_samplerate'])))  # TODO: might be not the exact number, compare with cuda!
-        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
 
+        # calculate exact number of RF samples for RX and TX (equal to cuda_driver)
+        tx_rf_nSamples = np.uint64(int(self.ini_cuda_settings['TXUpsampleRate']) *  ( np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['pulseLength']/1e6 ) + 2 * np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['tr_to_pulse_delay']/1e6 )))
+        rx_if_nSamples = np.floor((self.commonChannelParameter['number_of_samples'] -1) * int(self.ini_cuda_settings['IFBBRATE']) + int(self.ini_cuda_settings['NTapsRX_ifbb']))
+        rx_rf_nSamples = np.uint64(np.floor((rx_if_nSamples -1) * int(self.ini_cuda_settings['RFIFRATE']) + int(self.ini_cuda_settings['NTapsRX_rfif'])))
+
+        print("nSamples rx: {}\nnSamples tx: {}".format(rx_rf_nSamples, tx_rf_nSamples))
         cprint('sending USRP_SETUP', 'blue')
-        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector)
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, rx_rf_nSamples, tx_rf_nSamples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
 
@@ -853,10 +851,9 @@ class RadarChannelHandler:
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
         # self.ready = True # TODO: what is ready flag for?
-        self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
-
+        
         if debug:
-           print("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay, self.tx_time))
+           print("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
         if npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
         if nbb_samples == 0:
@@ -893,11 +890,17 @@ class RadarChannelHandler:
     def CheckChannelCompatibility(self):
         hardwareManager = self.parent_RadarHardwareManager
         commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
-        commonParList_seq = [ 'npulses', 'pulse_offsets_vector', 'tx_time' ]
+        commonParList_seq = [ 'npulses', 'pulse_offsets_vector',  'tr_to_pulse_delay' ]
+        if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
+            pulseLength = self.pulse_lens[0]
+        else:
+            print("Pulse lengths has the be the same! ") # TODO raise error?
+            return 0
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
             hardwareManager.commonChannelParameter.update( {key: self.ctrlprm_struct.payload[key] for key in commonParList_ctrl})
+            hardwareManager.commonChannelParameter.update({'pulseLength':pulseLength})
 
             hardwareManager.nRegisteredChannels = 1
             return True
@@ -909,7 +912,7 @@ class RadarChannelHandler:
             parCompatibleList_seq[idxOffsetVec] = parCompatibleList_seq[idxOffsetVec].all()
  
          #   pdb.set_trace()
-            if (not all(parCompatibleList_seq)) or (not  all(parCompatibleList_ctrl)):
+            if (not all(parCompatibleList_seq)) or (not  all(parCompatibleList_ctrl)) or (pulseLength != hardwareManager.commonChannelParameter['pulseLength']):
                 print('Unable to add new channel. Parameters not compatible with active channels.')
                 for iPar,isCompatible in enumerate(parCompatibleList_seq):
                      if not all(isCompatible):
@@ -917,6 +920,8 @@ class RadarChannelHandler:
                 for iPar,isCompatible in enumerate(parCompatibleList_ctrl):
                      if not isCompatible:
                         print(" Not compatible ctrlprm: {}   old channel(s): {} , new channel: {}".format(commonParameterList_ctrl[iPar], hardwareManager.commonChannelParameter[commonParameterList_ctrl[iPar]] , self.ctrlprm_struct.payload[commonParameterList_ctrl[iPar]]))
+                if pulseLength != hardwareManager.commonChannelParameter['pulseLength']:
+                    print(" Pulse length of new channel ({}) is not compatible to old channel(s) ({})".format(pulseLength, hardwareManager.commonChannelParameter['pulseLength'])) 
                 return False
             else:
                 hardwareManager.nRegisteredChannels += 1
