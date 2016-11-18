@@ -11,13 +11,13 @@ import socket
 import time
 import configparser
 
-from termcolor import cprint
 from phasing_utils import *
 from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
 from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, clrfreq_search
+import logging_usrp
 
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1
@@ -49,7 +49,8 @@ class RadarHardwareManager:
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
-        cprint('listening on port ' + str(port) + ' for control programs', 'blue')
+        self.logger = logging.getLogger('HwManager')
+        self.logger.info('listening on port ' + str(port) + ' for control programs')
         
         self.ini_file_init()
         self.usrp_init()
@@ -66,18 +67,19 @@ class RadarHardwareManager:
             try:
                 channel.run()
             except socket.error:
-                print("RadarChannelHandler: Socket error => Deleting channel... ")
+                self.logger.error("RadarChannelHandler: Socket error => Deleting channel... ")
                 self.deleteRadarChannel(channel)
    #         else:
-   #             print("RadarChannelHandler: Other error => Deleting channel... ")
+   #             self.logger.error("RadarChannelHandler: Other error => Deleting channel... ")
    #             self.deleteRadarChannel(channel)
    #             conn.close()
-   #             print("RadarChannelHandler: Unexpected error is:", sys.exc_info()[0])
+   #             self.logger.error("RadarChannelHandler: Unexpected error is:", sys.exc_info()[0])
    #             raise
 
         # TODO: add lock support
         def radar_state_machine():
-            cprint('starting radar hardware state machine', 'blue')
+            sm_logger = logging.getLogger('StateMachine')
+            sm_logger.info('starting radar hardware state machine')
             self.state = STATE_INIT
             self.next_state = STATE_INIT
             self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
@@ -96,7 +98,6 @@ class RadarHardwareManager:
                 if self.state == STATE_WAIT:
                     self.next_state = STATE_WAIT
 
-
                     # 1st priority is stateOrder, 2nd is channel number
                     for iState in statePriorityOrder:
                         if self.next_state == STATE_WAIT:      # if next state still not found
@@ -109,12 +110,14 @@ class RadarHardwareManager:
                         
 
                 if self.state == STATE_CLR_FREQ:
+                    sm_logger.debug('start clearFreqSearch()')
                     # do a clear frequency search for channel requesting one
                     for ch in self.channels:
                         if ch.state == STATE_CLR_FREQ:
                             self.clrfreq(ch)
                             ch.state = STATE_WAIT
                     self.next_state = STATE_WAIT
+                    sm_logger.debug('start clearFreqSearch()')
 
                 if self.state == STATE_PRETRIGGER:
                     self.next_state = STATE_WAIT
@@ -125,18 +128,19 @@ class RadarHardwareManager:
                     for ch in self.channels:
                         if not ch.state in [ STATE_PRETRIGGER, STATE_TRIGGER]:
                             if ch.state  == STATE_CLR_FREQ:
-                                print('STATE_MACHINE: setting state back to {} from {}'.format(ch.state, self.state))
+                                sm_logger.info('setting state back to {} from {}'.format(ch.state, self.state))
                                 self.next_state = ch.state
                             else:
-                                print('STATE_MACHINE: remaining in PRETRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
+                                sm_logger.debug('remaining in PRETRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
                                 time.sleep(sleepTime)
                                 self.next_state = STATE_PRETRIGGER
 
                     # if everyone is ready, prepare for data collection
                     if self.next_state == STATE_WAIT:
-                        cprint('running pretrigger!', 'green')
+                        sm_logger.debug('start pretrigger()')
                         self.addingNewChannelsAllowed = False
                         self.pretrigger()
+                        sm_logger.debug('end pretrigger()')
 
 
                 if self.state == STATE_TRIGGER:
@@ -145,18 +149,21 @@ class RadarHardwareManager:
                     for ch in self.channels:
                         if not ch.state in [ STATE_TRIGGER, STATE_GET_DATA]:
                             if ch.state in [STATE_CLR_FREQ, STATE_PRETRIGGER]:
-                                print('STATE_MACHINE: setting state back to {} from {}'.format(ch.state, self.state))
+                                sm_logger.info('setting state back to {} from {}'.format(ch.state, self.state))
                                 self.next_state = ch.state
                             else:
-                                print('STATE_MACHINE: remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
+                                sm_logger.debug('remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.state))
                                 time.sleep(sleepTime)
                                 self.next_state = STATE_TRIGGER
 
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
                     if self.next_state == STATE_WAIT:
+                        sm_logger.debug('start trigger()')
                         self.trigger()
+                        sm_logger.debug('end trigger()')
 
                 if self.state == STATE_GET_DATA:
+                    sm_logger.debug('start get_data()')
                     self.next_state = STATE_WAIT
 
                     self.get_data(self.channels)
@@ -165,10 +172,11 @@ class RadarHardwareManager:
                         if ch.state == STATE_GET_DATA: 
                             ch.state = STATE_WAIT
                     self.addingNewChannelsAllowed = True
+                    sm_logger.debug('end get_data()')
 
 
                 if self.state == STATE_RESET:
-                    cprint('stuck in STATE_RESET?!', 'yellow')
+                    sm_logger.error('stuck in STATE_RESET?!')
                     pdb.set_trace()
                     self.next_state = STATE_INIT
 
@@ -177,15 +185,16 @@ class RadarHardwareManager:
         self.client_sock.listen(MAX_CHANNELS)
         client_threads = []
         self.channels = []
+        usrp_server_logger = logging.getLogger('usrp_server')
 
         ct = threading.Thread(target=radar_state_machine)
         ct.start()
         while True:
 
-            cprint('waiting for control program', 'green')
+            usrp_server_logger.info('waiting for control program')
             client_conn, addr = self.client_sock.accept()
 
-            cprint('connection from control program, spawning channel handler thread', 'green')
+            usrp_server_logger.info('connection from control program, spawning channel handler thread')
             ct = threading.Thread(target=spawn_channel, args=(client_conn,))
             client_threads.append(ct)
             ct.start()
@@ -245,12 +254,12 @@ class RadarHardwareManager:
         # open each 
         try:
             for usrp in usrp_drivers:
-                cprint('connecting to usrp driver on port {}'.format(usrp[1]), 'blue')
+                self.logger.debug('connecting to usrp driver on port {}'.format(usrp[1]))
                 usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 usrpsock.connect(usrp)
                 usrp_driver_socks.append(usrpsock)
         except ConnectionRefusedError:
-            cprint('USRP server connection failed', 'blue')
+            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
             sys.exit(1)
 
         self.usrpsocks = usrp_driver_socks
@@ -280,7 +289,7 @@ class RadarHardwareManager:
                 usrps_synced = True
             else:
                 # TODO: why does USRP synchronization fail?
-                print('USRP syncronization failed, trying again..')
+                self.logger.warning('_resync_USRP USRP syncronization failed, trying again..')
                 time.sleep(1)
 
 
@@ -305,7 +314,7 @@ class RadarHardwareManager:
     def cuda_init(self):
         #time.sleep(.05)
 
-        self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate'])
+        self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate']) # TODO: delete because unused
 
         # connect cuda_driver servers
         cuda_driver_socks = []
@@ -315,11 +324,12 @@ class RadarHardwareManager:
 
         try:
             for c in cuda_driver_hostnames:
+                self.logger.debug('connecting to cuda driver on {}'.format(c))
                 cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 cudasock.connect((c, cuda_driver_port))
                 cuda_driver_socks.append(cudasock)
         except ConnectionRefusedError:
-            logging.warnings.warn("cuda server connection failed")
+            self.logger.error("cuda server connection failed on {}".format(c))
             sys.exit(1)
 
         self.cudasocks = cuda_driver_socks
@@ -329,24 +339,25 @@ class RadarHardwareManager:
         pass
 
     def clrfreq(self, chan):
-        cprint('running clrfreq for channel {}'.format(chan.cnum), 'blue')
+        self.logger.debug('running clrfreq for channel {}'.format(chan.cnum))
         tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
         tbeamwidth = 3.24 # TODO: why is it zero, this should be chan.ctrlprm_struct.get_data('tbeamwidth')
         chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, self.ini_array_settings['nbeams']) 
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
+        self.logger.debug('clrfreq for channel {} found {} kHz'.format(chan.cnum, chan.tfreq))
 
     def get_data(self, allChannels):
         nMainAntennas = int(self.ini_array_settings['main_ants'])
         nBackAntennas = int(self.ini_array_settings['back_ants'])
-        cprint('running get_data', 'blue')
+        self.logger.debug('running get_data()')
 
         nChannels = len(allChannels)
 
         # stall until all USRPs are ready
-        cprint('sending USRP_READY_DATA command ', 'blue')
+        self.logger.debug('sending USRP_READY_DATA command ')
         cmd = usrp_ready_data_command(self.usrpsocks)
         cmd.transmit()
-        cprint('sending USRP_READY_DATA command sent, waiting on READY_DATA status', 'blue')
+        self.logger.debug('sending USRP_READY_DATA command sent, waiting on READY_DATA status')
 
         # alloc memory
         nSamples_bb  = self.commonChannelParameter['number_of_samples'] 
@@ -354,30 +365,37 @@ class RadarHardwareManager:
         back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
         
         # check status of usrp drivers
+
         for usrpsock in self.usrpsocks:
+            self.logger.debug('start receiving one USRP status')
             transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
 
-            cprint('GET_DATA rx status {}'.format(rx_status), 'blue')
+            self.logger.debug('GET_DATA rx status {}'.format(rx_status))
             if rx_status != 2:
-                cprint('USRP driver status {} in GET_DATA'.format(rx_status), 'blue')
+                self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
                 #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
+            self.logger.debug('end receiving one USRP status')
 
+        self.logger.debug('start waiting for USRP_DATA return')
         cmd.client_return()
-        cprint('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status), 'blue')
+        self.logger.debug('end waiting for USRP_DATA return')
+
+        self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
 
         # DOWNSAMPLING
-        cprint('GET_DATA: send CUDA_PROCESS', 'blue')
+        self.logger.debug('start get_data(): CUDA_PROCESS')
         cmd = cuda_process_command(self.cudasocks)
         cmd.transmit()
         cmd.client_return()
-        cprint('GET_DATA: finished CUDA_PROCESS', 'blue')
+        self.logger.debug('end get_data(): CUDA_PROCESS')
 
         # RECEIVER RX BB SAMPLES 
         # recv metadata from cuda drivers about antenna numbers and whatnot
         # fill up provided main and back baseband sample buffers
+        self.logger.debug('start get_data() transfering rx data via socket')
         cmd = cuda_get_data_command(self.cudasocks)
         cmd.transmit()
 
@@ -402,7 +420,8 @@ class RadarHardwareManager:
             transmit_dtype(cudasock, -1, np.int32) # to end transfer process
             
         cmd.client_return()
-        cprint('get_data() tranfering data complete', 'blue')
+        self.logger.debug('end get_data() transfering rx data via socket')
+
         
         # BEAMFORMING
         def _beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
@@ -441,7 +460,7 @@ class RadarHardwareManager:
             channel.main_beamformed = _beamform_uhd_samples(main_samples[iChannel], phasingMatrix_main, nSamples_bb, antennas_list)
            #channel.back_beamformed = _beamform_uhd_samples(back_samples, phasingMatrix_back, nSamples_bb, antennas)
         
-        cprint('get_data complete!', 'blue')
+        self.logger.debug('get_data complete!')
 
 
 
@@ -449,9 +468,9 @@ class RadarHardwareManager:
         if channelObject in self.channels:
             # don't delete channel in middle of trigger, pretrigger, or ....
             channelObject._waitForState(STATE_WAIT) 
-            print('RHM:deleteRadarChannel removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
+            self.logger.info('deleteRadarChannel() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
-            print('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
+            self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
                 self.addingNewChannelsAllowed = True
 
@@ -460,7 +479,7 @@ class RadarHardwareManager:
                 self.commonChannelParameter = {}
 
         else:
-            print('RHM:deleteRadarChannel channel already deleted')
+            self.logger.warning('deleteRadarChannel() channel already deleted')
 
 
         
@@ -479,12 +498,12 @@ class RadarHardwareManager:
         for sock in self.cudasocks:
             sock.close()
 
-        cprint('received exit command, cleaning up..', 'red')
+        self.logger.info('received exit command, cleaning up..')
 
         sys.exit(0)
 
     def trigger(self):
-        cprint('running trigger, triggering usrp drivers', 'yellow')
+        self.logger.debug('running trigger, triggering usrp drivers')
 
         if len(self.channels):
         
@@ -495,85 +514,78 @@ class RadarHardwareManager:
             cmd.client_return()
             trigger_time = usrp_time + USRP_TRIGGER_START_DELAY
             cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time)
-            cprint('sending trigger pulse command', 'yellow')
+            self.logger.debug('sending trigger pulse command')
             cmd.transmit()
             # TODO: handle multiple usrps with trigger..
-            cprint('waiting for trigger return', 'yellow')
+            self.logger.debug('waiting for trigger return')
             returns = cmd.client_return()
 
             if TRIGGER_BUSY in returns:
-                cprint('could not trigger, usrp driver is busy', 'yellow')
+                self.logger.error('could not trigger, usrp driver is busy')
                 pdb.set_trace()
 
-            cprint('trigger return!', 'yellow')
+            self.logger.debug('trigger return!')
 
         else:
-            cprint('no channels loaded, trigger failed!', 'green')
+            self.logger.error('no channels loaded, trigger failed!')
             pdb.set_trace()
 
         for ch in self.channels:
             ch.state = STATE_WAIT
 
-        cprint('trigger complete', 'yellow')
+        self.logger.debug('trigger complete')
 
     # TODO: Merge channel infomation here!
     # TODO: pretrigger cuda client return fails
     # key error: 0?
     def pretrigger(self):
-        cprint('running RadarHardwareManager.pretrigger()', 'blue')
+        self.logger.debug('start RadarHardwareManager.pretrigger()')
         
 
-       #  cprint('running cuda_pulse_init command', 'blue')
+       #  self.logger.debug('running cuda_pulse_init command')
         # TODO: untangle cuda pulse init handler
         #        pdb.set_trace()
         #        cmd = cuda_pulse_init_command(self.cudasocks)
         #        cmd.transmit()
-        #        cprint('waiting for cuda driver return', 'blue')
+        #        self.logger.debug('waiting for cuda driver return')
         #        cmd.client_return()
-        #        cprint('cuda return received', 'blue')
+        #        self.logger.debug('cuda return received')
 
-        
-        
+       
         synth_pulse = False
-        print('self.channels len : ' + str(len(self.channels)))
         
         for ch in self.channels:
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
-                # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate
-                print('RadarHardwareManager.pretrigger() tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
-                print('RadarHardwareManager.pretrigger() rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
-                print('RadarHardwareManager.pretrigger() usrp tx cfreq: ' + str(self.usrp_tx_cfreq))
-                print('RadarHardwareManager.pretrigger() usrp rf tx rate: ' + str(self.usrp_rf_tx_rate))
+                # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate TODO
+                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
                 
                 assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
                 #time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
-                #print('after 50 ms of delay..')
-                #print('tfreq: ' + str(ch.ctrlprm_struct.payload['tfreq']))
-                #print('rfreq: ' + str(ch.ctrlprm_struct.payload['rfreq']))
+                #self.logger.debug('after 50 ms of delay..')
 
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
-                    cprint('tfreq != rfreq!', 'yellow')
+                    self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
                     #pdb.set_trace()
                 cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
                 # TODO: separate loading sequences from generating baseband samples..
 
-                cprint('sending CUDA_ADD_CHANNEL', 'blue')
+                self.logger.debug('send CUDA_ADD_CHANNEL')
                 cmd.transmit()
 
-                cprint('waiting for CUDA_ADD_CHANNEL to return', 'blue')
                 cmd.client_return()
+                self.logger.debug('receiver response CUDA_ADD_CHANNEL')
                 synth_pulse = True
 
 
         if synth_pulse:
-            cprint('sending CUDA_GENERATE_PULSE', 'blue')
+            self.logger.debug('send CUDA_GENERATE_PULSE')
             cmd = cuda_generate_pulse_command(self.cudasocks)
             cmd.transmit()
             cmd.client_return()
-            cprint('finished CUDA_GENERATE_PULSE', 'blue')
+            self.logger.debug('received respinse CUDA_GENERATE_PULSE')
 
         # TODO: parse tx sample rate dynamocially
         # TODO: handle pretrigger with no channels
@@ -585,17 +597,18 @@ class RadarHardwareManager:
         rx_if_nSamples = np.floor((self.commonChannelParameter['number_of_samples'] -1) * int(self.ini_cuda_settings['IFBBRATE']) + int(self.ini_cuda_settings['NTapsRX_ifbb']))
         rx_rf_nSamples = np.uint64(np.floor((rx_if_nSamples -1) * int(self.ini_cuda_settings['RFIFRATE']) + int(self.ini_cuda_settings['NTapsRX_rfif'])))
 
-        print("nSamples rx: {}\nnSamples tx: {}".format(rx_rf_nSamples, tx_rf_nSamples))
-        cprint('sending USRP_SETUP', 'blue')
+        self.logger.debug("nSamples rx: {}   nSamples tx: {}".format(rx_rf_nSamples, tx_rf_nSamples))
+        self.logger.debug('send USRP_SETUP')
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, rx_rf_nSamples, tx_rf_nSamples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
+        self.logger.debug('received response USRP_SETUP')
 
         for ch in self.channels:
             if ch.state == STATE_PRETRIGGER: # only reset PRETRIGGER , not TRIGGER
                 ch.state = STATE_WAIT
 
-        cprint('end of RadarHardwareManager.pretrigger()', 'blue')
+        self.logger.debug('end RadarHardwareManager.pretrigger()')
 
 
 class RadarChannelHandler:
@@ -604,7 +617,7 @@ class RadarChannelHandler:
         self.ready = False # TODO: eliminate
         self.conn = conn
         self.parent_RadarHardwareManager = parent_RadarHardwareManager
-
+        self.logger = logging.getLogger("ChManager")
         self.state = STATE_WAIT
 
         self.ctrlprm_struct = ctrlprm_struct(self.conn)
@@ -649,7 +662,7 @@ class RadarChannelHandler:
             GET_DATA: self.GetDataHandler}
 
         while not self.parent_RadarHardwareManager.addingNewChannelsAllowed:
-            print("Waiting to finish GET_DATA before adding new channel")
+            self.logger.info("Waiting to finish GET_DATA before adding new channel")
             time.sleep(RADAR_STATE_TIME)
 
         # adding channel to HardwareManager
@@ -659,14 +672,13 @@ class RadarChannelHandler:
             rmsg = rosmsg_command(self.conn)
             status = RMSG_FAILURE
 
-            print('RadarChannelHandler (ch {}): waiting for command'.format(self.cnum))
+            self.logger.debug('ch {}: waiting for command'.format(self.cnum))
             rmsg.receive(self.conn)
             command = chr(rmsg.payload['type'] & 0xFF) # for some reason, libtst is sending out 4 byte commands with junk..
             try:
-                cprint('RadarChannelHandler (ch {}): received command (ROS=>USRP_Server): {}, {}'.format(self.cnum, command, RMSG_COMMAND_NAMES[command]), 'red')
+                self.logger.debug('ch {}: received command (ROS=>USRP_Server): {}, {}'.format(self.cnum, command, RMSG_COMMAND_NAMES[command]))
             except KeyError:
-                print('unrecognized command!')
-                print(rmsg.payload)
+                self.logger.error('unrecognized command! {}'.format(rmsg.payload))
                 pdb.set_trace()
 
             if command in rmsg_handlers:
@@ -683,7 +695,7 @@ class RadarChannelHandler:
 
 
     def close(self):
-        print('todo: write close..:')
+        self.logger.error('todo: write close function...')
         pdb.set_trace()
         # TODO write this..
 
@@ -694,10 +706,9 @@ class RadarChannelHandler:
         wait_start = time.time()
 
         while self.state != state:
-            #cprint('channel {} waiting for {}, current state:'.format(self.cnum, self.state, state), 'green')
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
-                print('CHANNEL STATE TIMEOUT')
+                self.logger.error('CHANNEL STATE TIMEOUT')
                 pdb.set_trace()
                 break
 
@@ -706,7 +717,7 @@ class RadarChannelHandler:
         return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.ctrlprm_struct.payload)
 
     def DefaultHandler(self, rmsg):
-        print("Unexpected command: {}".format(chr(rmsg.payload['type'])))
+        self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))
         pdb.set_trace()
         return RMSG_FAILURE
 
@@ -716,10 +727,12 @@ class RadarChannelHandler:
         rmsg.set_data('type', rmsg.payload['type'])
         rmsg.transmit()
         self.conn.close()
-        self.parent_RadarHardwareManager.deleteRadarChannel(self)
+        self.logger.debug('Deleting channel...')
+        hardwareManager = self.parent_RadarHardwareManager
+        hardwareManager.deleteRadarChannel(self)
         del self # TODO close thread ?!?
-        print('Deleted channel')
         # sys.exit() # TODO: set return value
+        hardwareManager.logger.info('Deleted channel.')
         return 'exit'
 
     def PingHandler(self, rmsg):
@@ -733,7 +746,7 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, self.noise, np.float32)
 
         self.clrfreq_stop = time.time()
-        cprint('clr frequency search time: {}'.format(self.clrfreq_stop - self.clrfreq_start), 'yellow')
+        self.logger.info('clr frequency search time: {}'.format(self.clrfreq_stop - self.clrfreq_start))
         return RMSG_SUCCESS
 
     def RequestClearFreqSearchHandler(self, rmsg):
@@ -852,8 +865,8 @@ class RadarChannelHandler:
         self.tr_to_pulse_delay = tr_to_pulse_delay
         # self.ready = True # TODO: what is ready flag for?
         
-        if debug:
-           print("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
+        
+        self.logger.debug("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
         if npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
         if nbb_samples == 0:
@@ -866,21 +879,17 @@ class RadarChannelHandler:
     # receive a ctrlprm struct
     def SetParametersHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
-        cprint('channel {} starting PRETRIGGER'.format(self.cnum), 'green')
+        self.logger.debug('channel {} starting PRETRIGGER'.format(self.cnum))
         self.ctrlprm_struct.receive(self.conn)
-        print('usrp_server RadarChannelHandler.SetParametersHandler: tfreq: ' + str(self.ctrlprm_struct.payload['tfreq']))
-        print('usrp_server RadarChannelHandler.SetParametersHandler: rfreq: ' + str(self.ctrlprm_struct.payload['rfreq']))
+        self.logger.debug('tfreq: {}, rfreq: {}'.format(self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
 
-        tmp = self.CheckChannelCompatibility()
-        print(tmp)
-        if not tmp:
-#        if not self.CheckChannelCompatibility():
-            print("new channel not compatible")
+        if not self.CheckChannelCompatibility():   # TODO: move this to point where sequence is received?
+            self.logger.error("new channel is not compatible")
             return RMSG_FAILURE
 
 
         self.state = STATE_PRETRIGGER
-        cprint('channel {} going into PRETRIGGER state'.format(self.cnum), 'green')
+        self.logger.debug('channel {} going into PRETRIGGER state'.format(self.cnum))
         self._waitForState(STATE_WAIT)
         # TODO for a SetParametersHandler, prepare transmit and receive sample buffers
         if (self.rnum < 0 or self.cnum < 0):
@@ -890,12 +899,12 @@ class RadarChannelHandler:
     def CheckChannelCompatibility(self):
         hardwareManager = self.parent_RadarHardwareManager
         commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
-        commonParList_seq = [ 'npulses', 'pulse_offsets_vector',  'tr_to_pulse_delay' ]
+        commonParList_seq  = [ 'npulses', 'pulse_offsets_vector',  'tr_to_pulse_delay' ]
         if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
             pulseLength = self.pulse_lens[0]
         else:
-            print("Pulse lengths has the be the same! ") # TODO raise error?
-            return 0
+            self.logger.error("Pulse lengths has the be the same! ") # TODO raise error?
+            return False
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
@@ -913,15 +922,15 @@ class RadarChannelHandler:
  
          #   pdb.set_trace()
             if (not all(parCompatibleList_seq)) or (not  all(parCompatibleList_ctrl)) or (pulseLength != hardwareManager.commonChannelParameter['pulseLength']):
-                print('Unable to add new channel. Parameters not compatible with active channels.')
+                self.logger.error('Unable to add new channel. Parameters not compatible with active channels.')
                 for iPar,isCompatible in enumerate(parCompatibleList_seq):
                      if not all(isCompatible):
-                        print(" Not compatible sequence parameter: {}   old channel(s): {} , new channel: {}".format(commonParameterList_seq[iPar], hardwareManager.commonChannelParameter[commonParameterList_seq[iPar]] , getattr(self, commonParameterList_seq[iPar])))
+                        self.logger.error(" Not compatible sequence parameter: {}   old channel(s): {} , new channel: {}".format(commonParameterList_seq[iPar], hardwareManager.commonChannelParameter[commonParameterList_seq[iPar]] , getattr(self, commonParameterList_seq[iPar])))
                 for iPar,isCompatible in enumerate(parCompatibleList_ctrl):
                      if not isCompatible:
-                        print(" Not compatible ctrlprm: {}   old channel(s): {} , new channel: {}".format(commonParameterList_ctrl[iPar], hardwareManager.commonChannelParameter[commonParameterList_ctrl[iPar]] , self.ctrlprm_struct.payload[commonParameterList_ctrl[iPar]]))
+                        self.logger.error(" Not compatible ctrlprm: {}   old channel(s): {} , new channel: {}".format(commonParameterList_ctrl[iPar], hardwareManager.commonChannelParameter[commonParameterList_ctrl[iPar]] , self.ctrlprm_struct.payload[commonParameterList_ctrl[iPar]]))
                 if pulseLength != hardwareManager.commonChannelParameter['pulseLength']:
-                    print(" Pulse length of new channel ({}) is not compatible to old channel(s) ({})".format(pulseLength, hardwareManager.commonChannelParameter['pulseLength'])) 
+                    self.logger.error(" Pulse length of new channel ({}) is not compatible to old channel(s) ({})".format(pulseLength, hardwareManager.commonChannelParameter['pulseLength'])) 
                 return False
             else:
                 hardwareManager.nRegisteredChannels += 1
@@ -939,25 +948,25 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def GetDataHandler(self, rmsg):
-        cprint('entering hardware manager get data handler', 'blue')
+        self.logger.debug('entering hardware manager get data handler')
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
         self.dataprm_struct.transmit()
-        cprint('sending dprm struct', 'green')
+        self.logger.debug('sending dprm struct')
 
         if not self.active or self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
             return RMSG_FAILURE
 
         # TODO investigate possible race conditions
-        cprint('waiting for channel to idle before GET_DATA', 'blue')
+        self.logger.debug('waiting for channel to idle before GET_DATA')
         self._waitForState(STATE_WAIT)
 
-        cprint('entering GET_DATA state', 'blue')
+        self.logger.debug('entering GET_DATA state')
         self.state = STATE_GET_DATA
-        cprint('waiting to return to WAIT before returning samples', 'blue')
+        self.logger.debug('waiting to return to WAIT before returning samples')
         self._waitForState(STATE_WAIT)
-        cprint('GET_DATA complete, returning samples', 'blue')
+        self.logger.debug('GET_DATA complete, returning samples')
 
 
         # TODO: get data handler waits for control_program to set active flag in controlprg struct
@@ -994,8 +1003,7 @@ class RadarChannelHandler:
         self.ctrlprm_struct.set_data('radar',  self.rnum)
 
         # TODO: how to handle channel contention?
-        if(debug):
-            print('radar num: {}, radar chan: {}'.format(self.rnum, self.cnum))
+        self.logger.debug('radar num: {}, radar chan: {}'.format(self.rnum, self.cnum))
 
         # TODO: set RMSG_FAILURE if radar channel is unavailable
         # rmsg.set_data('status', RMSG_FAILURE)
@@ -1004,7 +1012,7 @@ class RadarChannelHandler:
     def LinkRadarChanHandler(self, rmsg):
         rnum = recv_dtype(self.conn, np.int32)
         cnum = recv_dtype(self.conn, np.int32)
-        print('link radar chan is unimplemented!')
+        self.logger.error('link radar chan is unimplemented!')
         pdb.set_trace()
         return RMSG_SUCCESS
 
@@ -1047,10 +1055,12 @@ class RadarChannelHandler:
 
 def main():
     # maybe switch to multiprocessing with manager process
-    print('main!')
-    logging.basicConfig(filename='client_server.log', level=logging.DEBUG, format='[%(levelname)s] (%(threadName)-10s) %(asctime)s %(message)s',)
+    
+    logging_usrp.initLogging('server.log')
 
-    logging.debug('main()')
+    # Now, we can log to the root logger, or any other logger. First the root...
+    logging.info('Strating main() of usrp_server')
+
     rmsg_port = 45000
 
     radar = RadarHardwareManager(rmsg_port)
