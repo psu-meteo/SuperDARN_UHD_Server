@@ -54,7 +54,7 @@ class RadarHardwareManager:
         
         self.ini_file_init()
         self.usrp_init()
-        #self.rxfe_init()
+        self.rxfe_init()
         self.cuda_init()
 
         self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
@@ -228,8 +228,8 @@ class RadarHardwareManager:
         # READ array_config.ini
         array_config = configparser.ConfigParser()
         array_config.read('array_config.ini')
-        self.ini_array_settings  = array_config['array_info']
-      #  self.ini_hardware_limits = array_config['hardware_limits']
+        self.ini_array_settings = array_config['array_info']
+        self.ini_rxfe_settings  = array_config['rxfe']
 
 
 
@@ -294,19 +294,21 @@ class RadarHardwareManager:
 
 
     def rxfe_init(self):
-        # TODO: fix this function
-        pdb.set_trace()
-        '''
-        # TODO: read in rf_setting struct?
-        amp0 = rf_settings[1] # amp1 in RXFESettings struct
-        amp1 = rf_settings[2] # amp2 in RXFESettings struct
-        att_p5dB = np.uint8((rf_settings[4] > 0))
-        att_1dB = np.uint8((rf_settings[5] > 0))
-        att_2dB = np.uint8((rf_settings[6] > 0))
-        att_4dB = np.uint8((rf_settings[7] > 0))
-        att = (att_p5dB) | (att_1dB << 1) | (att_2dB << 2) | (att_4dB << 3)
-        '''
-        cmd = usrp_rxfe_setup_command(self.usrpsocks, 0, 0, 0) #amp0, amp1, att)
+        
+        activeStrings = ['true', '1', 'on']
+        amp1 = self.ini_rxfe_settings['enable_amp1'].lower() in activeStrings
+        amp2 = self.ini_rxfe_settings['enable_amp2'].lower() in activeStrings
+        att = float(self.ini_rxfe_settings['attenuation'])
+        if att > 0:
+           self.logger.warning('attenuation for rxfe in array.ini is not negative. correcting that...')
+           att *= -1
+
+        if att < -31.5:
+           self.logger.warning('attenuation for rxfe in array.ini is < -31.5 dB. using maximum aatenuation of -31.5 dB')
+           att = -31.5
+
+        self.logger.debug("Setting RXFR: Amp1={}, Amp2={}, Attenuation={}".format(amp1, amp2, att)) 
+        cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
         cmd.client_return()
 
