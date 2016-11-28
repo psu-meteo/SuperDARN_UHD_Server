@@ -4,10 +4,10 @@
 import cuda_driver
 import numpy as np
 import sys
-import posix_ipc
+
 import pdb
 import time
-import subprocess
+
 import pycuda.driver as cuda
 import myPlotTools as mpt
 
@@ -34,9 +34,6 @@ def tearDown(serversock):
     serversock.close()
     rx_shm_list[0][0].close()
     rx_shm_list[0] = []
-   # tx_shm_list[0].close()
-   # tx_shm_list = []
-
 def dbPrint(msg):
     print(' {}: {}'.format(__file__, msg))
 
@@ -63,8 +60,8 @@ cprint('testing cuda get data (downsampling)', 'red')
 # get test sequence and adjust ...
 seq = create_testsequence_uafscan()
 
-seq.ctrlprm['rfreq'] = 16e6 / 1000
-seq.ctrlprm['tfreq'] = 16e6 / 1000
+seq.ctrlprm['rfreq'] = 10e6 / 1000
+seq.ctrlprm['tfreq'] = 10e6 / 1000
 
 temp = seq.phase_masks
 temp = [np.zeros(1,dtype=np.uint8) for idx in range(len(temp))]
@@ -73,13 +70,24 @@ seq.phase_masks = temp
 nSamplesBB = seq.ctrlprm['number_of_samples']
 bbrate_rx  = seq.ctrlprm['baseband_samplerate']
 seq.ctrlprm['tbeam'] = 0 
-seq.ctrlprm['rbeam'] = 0 
-
+seq.ctrlprm['rbeam'] =  0
 print("tbeam {} rbeam: {}".format(seq.ctrlprm['tbeam'], seq.ctrlprm['rbeam']))
 
+
+# second channel 
+seq2 = create_testsequence_uafscan()
+seq2.ctrlprm['channel'] = 1
+seq2.ctrlprm['rfreq'] = 10.02e6 / 1000
+seq2.ctrlprm['tfreq'] = 10.02e6 / 1000
+seq2.phase_masks = temp
+seq2.ctrlprm['tbeam'] = 6 
+seq2.ctrlprm['rbeam'] = 6
+
+
+
 # values from ini file
-fsamprx = 10e6
-usrp_mix_freq = 13e6
+fsamprx = 16e6
+
 rx_shm_size = 160000000 # from driver confi.ini
 
 nSamples_rx_rf = int(np.round(nSamplesBB / bbrate_rx * fsamprx))
@@ -98,17 +106,14 @@ cmd = cuda_add_channel_command([serversock], seq)
 cmd.transmit()
 cmd.client_return()
 
+cmd = cuda_add_channel_command([serversock], seq2) 
+cmd.transmit()
+cmd.client_return()
 
 cmd = cuda_generate_pulse_command(serversock)
 cmd.transmit()
 cmd.client_return()
 
-
-nAnts = 1
-rx_rf_data = np.zeros((nAnts, 1, 2 * nSamples_rx_rf), dtype=np.int16)
- 
-timeVector = np.array(range(nSamples_rx_rf)) / fsamprx
-maxAmp = 2**15 * 0.9
 
 
 stop_cudaserver(serversock)

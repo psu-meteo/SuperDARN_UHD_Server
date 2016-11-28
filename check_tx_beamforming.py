@@ -6,7 +6,7 @@ Created on Tue Nov 15 14:23:52 2016
 @author: mguski
 """
 # %%
-import PySPT
+import pyspt
 import numpy as np
 import matplotlib.pyplot as plt
 import configparser
@@ -28,10 +28,14 @@ else:
 
 
 
+plotTimeVsAngle = False
+plotFreqVsAngle = False
+
 # %%
 #fileName = '../PySPT/cuda_dump_tx_2016-11-15_141617.pkl'
 nPulses = 8
 tx_rf_samplingRate = 10e6
+usrp_mixing_freq = 13e6
 # %%
 #del sys.modules['PySPT'] 
 #import PySPT
@@ -71,18 +75,21 @@ with open(fileName, 'rb') as fh:
     
 nAntennas, nSamplesRF = tx_rf_outdata.shape
 
-tx_sig = PySPT.giSignal(tx_rf_outdata,tx_rf_samplingRate, iqInterleaved=True)
+tx_sig = pyspt.Signal(tx_rf_outdata,tx_rf_samplingRate, iqInterleaved=True)
 tx_sig.length /= nPulses # take only first pulse
 
 
 # %% up-mixing
 
-usrp_mixing_freq = 13e6
-
-tmp = PySPT.resample(tx_sig, tx_sig.samplingRate + usrp_mixing_freq*2)
-tx_sig = PySPT.frequencyMixer(tmp, usrp_mixing_freq)
+tmp = pyspt.dsp.resample(tx_sig, tx_sig.samplingRate + usrp_mixing_freq*2)
+tx_sig = pyspt.dsp.frequency_mixer(tmp, usrp_mixing_freq)
 
 
+
+# %% check phase in time signals
+tData = tx_sig.timeData
+iSample = 2000
+print("angles in deg in time data: {}".format(np.angle(tData[1:,iSample] / tData[0,iSample]) /np.pi*180))
 
 
 
@@ -93,9 +100,9 @@ tx_sig = PySPT.frequencyMixer(tmp, usrp_mixing_freq)
 # simulate field in distace r and at nSimulationPoints on half circle
 
 r_simulation = 3e3
-nSimulationPoints = 100
+nSimulationPoints = 180
 freq = 10e6
-c = 3e8
+c = 3e8 # 299792458.0
 
 simulation_points_phi = np.linspace(-np.pi/2, np.pi/2, num=nSimulationPoints)
 #simulation_points_phi = np.linspace(0, np.pi*2, num=nSimulationPoints)
@@ -106,6 +113,9 @@ simulation_points_y  = r_simulation * np.cos(simulation_points_phi)
 
 antenna_pos_x = np.array(usrp_xPos)
 antenna_pos_y = np.zeros_like(antenna_pos_x)
+
+# set antenna in center of coordinate system
+antenna_pos_x -=  np.mean(antenna_pos_x)
 
 if len(usrp_xPos) != nAntennas:
     print("just {} usrp entries found for {} antennas".format(len(usrp_xPos), nAntennas))
@@ -129,6 +139,7 @@ plt.colorbar()
 freqVec = tx_sig.freqVector
 receivedSig_list = []
 for iSimulationPoint in range(nSimulationPoints):
+    print('   simulation point {} / {} : {}'.format(iSimulationPoint, nSimulationPoints, ("[{:=>"+str(int(iSimulationPoint/nSimulationPoints*20))+ "}{:>"+str(int((1-iSimulationPoint/nSimulationPoints)*20))+ "}").format(">", "]") ))
     dist_vector = np.array([np.sqrt((antenna_pos_x[iAntenna] - simulation_points_x[iSimulationPoint])**2 + (0 - simulation_points_y[iSimulationPoint])**2) for iAntenna in range(nAntennas)])
     timeDiff_vector = dist_vector / c
     
@@ -137,53 +148,56 @@ for iSimulationPoint in range(nSimulationPoints):
     freqDataRef = sigAtPoint.freqData_reference
     for iAntenna in range(nAntennas):
         freqDataRef[iAntenna] = np.multiply(sigAtPoint.freqData[iAntenna], np.exp(-1j*2*np.pi*freqVec*timeDiff_vector[iAntenna]))
-    
     sigAtPoint.sum()
     receivedSig_list.append(sigAtPoint.copy)
 
 # %%
-t = PySPT.merge(receivedSig_list)
+t = pyspt.other_functions.merge(receivedSig_list)
 t.comment = "beamforming simulation"
 t.channelNames = ["Sim point {}".format(iSimulationPoint) for iSimulationPoint in range(nSimulationPoints)]
 
-
+print("Plotting, this might take a long time.....")
 # %%
-iBeam = 2
+iBeam = 'nan'
 plt.figure()
 plt.subplot(111)
 plt.title("tx beamformin beam {}".format(iBeam))
-ax = plt.subplot(221,projection='polar')
+ax = plt.subplot(121,projection='polar')
 
 rmsVec = t.rms()
 idxMax= np.argmax(rmsVec)
 ax.plot(simulation_points_phi, rmsVec)
 ax.plot([0, simulation_points_phi[idxMax]], [0, rmsVec[idxMax]], color='r', lineWidth=2)
-
+print(simulation_points_phi[idxMax-1:idxMax+2]*180/np.pi)
 plt.title('linear (max at {} degree)'.format(simulation_points_phi[idxMax]/np.pi*180))
 
 
 
-ax = plt.subplot(222,projection='polar')
-ax.plot(simulation_points_phi, 20*np.log10(t.rms()))
+ax = plt.subplot(122,projection='polar')
+ax.plot(simulation_points_phi, 20*np.log10(rmsVec/max(rmsVec)))
+ax.set_yticks([-50, -40, -30, -20, -10, -3, 0, 3])
+ax.plot([simulation_points_phi[idxMax], simulation_points_phi[idxMax]], [-30, 0], color='r', lineWidth=2)
 plt.title('dB')
 
 
 #- %% plot time vs angle 
-#plt.figure()
-plt.subplot(212)
-plt.pcolor(t.timeVector*1e6, simulation_points_phi*180/np.pi, np.array(np.absolute(t.timeData)))
-#plt.pcolor(t.timeVector*1e6, simulation_points_phi*180/np.pi, 20*np.log10(np.array(np.absolute(t.timeData))))
-plt.xlabel('time in us')
-plt.ylabel('azimuth in degree')
-plt.axis([0, t.timeVector[-1]*1e6, simulation_points_phi[0]*180/np.pi, simulation_points_phi[-1]*180/np.pi ])
-plt.colorbar()
-plt.title(fileName)
+if plotTimeVsAngle:
+    plt.figure()
+#    plt.subplot(212)
+    nSamples2plot = int(t.nSamples /4)
+    plt.pcolor(t.timeVector[:nSamples2plot]*1e6, simulation_points_phi*180/np.pi, np.array(np.absolute(t.timeData[:,:nSamples2plot])))
+    #plt.pcolor(t.timeVector*1e6, simulation_points_phi*180/np.pi, 20*np.log10(np.array(np.absolute(t.timeData))))
+    plt.xlabel('time in us')
+    plt.ylabel('azimuth in degree')
+    plt.axis([0, t.timeVector[nSamples2plot]*1e6, simulation_points_phi[0]*180/np.pi, simulation_points_phi[-1]*180/np.pi ])
+    plt.colorbar()
+    plt.title(fileName)
 
 # %% plot freq vs angle
-if False: 
+if plotFreqVsAngle: 
     plt.figure()
     nSamples_short = 1000
-    t_part = PySPT.sample_shift(t, int(t.nSamples/2-nSamples_short/2))
+    t_part = pyspt.dsp.sample_shift(t, int(t.nSamples/2-nSamples_short/2))
     t_part.nSamples = nSamples_short
     t_part = t
 
