@@ -105,8 +105,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         self.logger.debug('enter cuda_generate_pulse_handler.process')
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
-
-        self.logger.debug('entering generate_pulse_handler')
+ 
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
@@ -786,16 +785,16 @@ class ProcessingGPU(object):
     # update pahse increment of NCO with current channel sequence, then refresh array on GPU
     def _set_rx_phaseIncrement(self, channel):
         fc = self.sequences[channel].ctrlprm['rfreq'] * 1000
-        self.rx_phaseIncrement_rad[channel] = - np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq ) / self.rx_rf_samplingRate)
-        self.logger.debug('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
+        self.rx_phaseIncrement_rad[channel] = np.float64(2 * np.pi * (  self.usrp_mixing_freq - fc ) / self.rx_rf_samplingRate)
+        self.logger.debug('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, ( self.usrp_mixing_freq - fc)/1e6)  )
         cuda.memcpy_htod(self.cu_rx_phaseIncrement_rad, self.rx_phaseIncrement_rad)
 
     # update host-side phase delay table with current channel sequence, then refresh array on GPU
     def _set_tx_phasedelay(self, channel):
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         
-        for ant in range(self.nAntennas):
-            self.phase_delays[channel][ant] = np.float32(np.mod(2 * np.pi * 1e-9 * self.tdelays[ant] * fc, 2 * np.pi)) 
+        for iAntenna in range(self.nAntennas):
+            self.phase_delays[channel][iAntenna] = np.float32(np.mod(2 * np.pi  * self.tdelays[iAntenna] * fc +self.phase_offset[iAntenna]/180*np.pi , 2 * np.pi)) 
 
         cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
    
