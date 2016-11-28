@@ -90,7 +90,7 @@ class driver_command(object):
             for item in self.dataqueue:
                 item.transmit(clientsock)
 
-                cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+               # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
 
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
@@ -274,7 +274,7 @@ class usrp_rxfe_setup_command(driver_command):
         driver_command.__init__(self, usrps, UHD_RXFE_SET)
         self.queue(amp0, np.uint8, 'amp0')
         self.queue(amp1, np.uint8, 'amp1')
-        self.queue(att, np.uint8, 'amp2')
+        self.queue(att, np.uint8, 'att')
 
 # start usrp trigger
 class usrp_trigger_pulse_command(driver_command):
@@ -369,8 +369,8 @@ def create_testsequence():
 
     ctrlprm = {\
     '' : np.zeros(120, dtype=np.uint8), \
-    'radar' : 0, \
-    'channel' : 0, \
+    'radar' : 1, \
+    'channel' : 1, \
     'local' : 0, \
     'priority' : 1, \
     'current_pulseseq_idx': 0, \
@@ -378,14 +378,14 @@ def create_testsequence():
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0.0, \
-    'tfreq': 2000, \
+    'tfreq': 11000, \
     'trise': 5000, \
     'number_of_samples' : 305, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 3333.3333, \
     'filter_bandwidth' : 3333, \
     'match_filter' : 0, \
-    'rfreq' : 2000, \
+    'rfreq' : 11000, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \
