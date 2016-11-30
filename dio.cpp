@@ -28,55 +28,64 @@
 
 #include "dio.h"
 #include "usrp_utils.h"
+ 
+// dio pin names to binary
+#define IO_PIN_00 0x0001
+#define IO_PIN_01 0x0002
+#define IO_PIN_02 0x0004
+#define IO_PIN_03 0x0008
+#define IO_PIN_04 0x0010
+#define IO_PIN_05 0x0020 
+#define IO_PIN_06 0x0040
+#define IO_PIN_07 0x0080
+
+#define IO_PIN_08 0x0100
+#define IO_PIN_09 0x0200
+#define IO_PIN_10 0x0400
+#define IO_PIN_11 0x0800
+#define IO_PIN_12 0x1000
+#define IO_PIN_13 0x2000
+#define IO_PIN_14 0x4000
+#define IO_PIN_15 0x8000 
+
+
 
 #define MANUAL_CONTROL 0x00
+#define FAULT 0x0001
 
-// timing signals
-#define SYNC_PINS 0x02 // 0000 0010 => io_tx[1]
-#define TR_PINS   0x18 // 0001 1000 => io_tx[3,4]
-#define TR_TX     0x08 // 0000 1000 => io_tx[3]
-#define TR_RX     0x10 // 0001 0000 => io_tx[4] 
 
-#define FAULT 0x0001 
+// TIMING (LFTX) 
+// mapping timing signals pins
+#define SYNC_PINS IO_PIN_01 
+#define TR_TX     IO_PIN_03
+#define TR_RX     IO_PIN_04
+#define TR_PINS   (TR_TX +TR_RX) 
 
 #define RX_OFFSET           290e-6  // microseconds, alex had 450-e6 set here
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
 #define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
 
 
-
-// MIMIC
-#define USEMIMIC    1
-#define MIMIC_PINS  0x1800 // io_tx[11,12]
-#define MIMIC_TX    0x0800 // io_tx[11]
-#define MIMIC_RX    0x1000 // io_tx[12]
-#define MIMIC_RANGE 6600e-6   // seconds
+//  MIMIC (LFTX)
+// mapping mimic pins 
+#define MIMIC_TX    IO_PIN_11
+#define MIMIC_RX    IO_PIN_12
+#define MIMIC_PINS  (MIMIC_TX + MIMIC_RX)
 
 
-// RXFE pins
+// RXFE CONTROL (LFRX)
 
-// dio pins on USRP RX board
-#define IO_RX_00 1
-#define IO_RX_01 2
-#define IO_RX_02 4
-#define IO_RX_03 8
-#define IO_RX_04 16
-#define IO_RX_05 32
-#define IO_RX_06 64
-#define IO_RX_07 128
+// map rxfe pins to USRP dio pins
+#define AMP_1  IO_PIN_07   // + 15 dB
+#define AMP_2  IO_PIN_06   // + 15 dB
+#define ATT_D0 IO_PIN_05   // -0.5 dB
+#define ATT_D1 IO_PIN_04   // - 1  dB
+#define ATT_D2 IO_PIN_03   // - 2  dB
+#define ATT_D3 IO_PIN_02   // - 4  dB
+#define ATT_D4 IO_PIN_01   // - 8  dB
+#define ATT_D5 IO_PIN_00   // -16  dB
 
-
-// map RXFE pins to USRP dio pins
-#define AMP_1  IO_RX_07   // + 15 dB
-#define AMP_2  IO_RX_06   // + 15 dB
-#define ATT_D0 IO_RX_05   // -0.5 dB
-#define ATT_D1 IO_RX_04   // - 1  dB
-#define ATT_D2 IO_RX_03   // - 2  dB
-#define ATT_D3 IO_RX_02   // - 4  dB
-#define ATT_D4 IO_RX_01   // - 8  dB
-#define ATT_D5 IO_RX_00   // -16  dB
-
-// define rx masks
+// define rxfe masks
 #define RXFE_AMP_MASK  (AMP_1 + AMP_2)
 #define RXFE_ATT_MASK  (ATT_D0 + ATT_D1 + ATT_D2 + ATT_D3 + ATT_D4 + ATT_D5)
 #define RXFE_MASK      (RXFE_ATT_MASK + RXFE_AMP_MASK)
@@ -99,7 +108,8 @@
 
 
 void init_timing_signals(
-    uhd::usrp::multi_usrp::sptr usrp
+    uhd::usrp::multi_usrp::sptr usrp,
+    bool mimic_active
 ) {
 
     double debugt = usrp->get_time_now().get_real_secs();
@@ -111,9 +121,10 @@ void init_timing_signals(
     usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS,  SYNC_PINS);
     usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,  TR_PINS);
 
-   if (USEMIMIC) {
+   if (mimic_active) {
        usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
        usrp->set_gpio_attr("TXA","DDR" ,MIMIC_PINS, MIMIC_PINS);
+       DEBUG_PRINT("DIO.cpp: init MIMIC target\n");
    }
 
 
@@ -147,7 +158,9 @@ void send_timing_for_sequence(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::time_spec_t start_time,
     std::vector<uhd::time_spec_t> pulse_times,
-    double pulseLength
+    double pulseLength,
+    bool mimic_active,
+    float mimic_delay
 ) {
 
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
@@ -189,16 +202,17 @@ void send_timing_for_sequence(
         c.cmd_time = offset_time_spec(pulse_times[iPulse], pulseLength);
         cmdq.push(c);
 
-        if (USEMIMIC) {
+        if (mimic_active) {
+            DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
             // set mimic TX high, mimic RX low    
             c.mask     = MIMIC_PINS;
             c.value    = MIMIC_TX;   
-            c.cmd_time = offset_time_spec(pulse_times[iPulse], MIMIC_RANGE);
+            c.cmd_time = offset_time_spec(pulse_times[iPulse], mimic_delay);
             cmdq.push(c);
 
             // set mimic RX high and mimic TX low
             c.value    = MIMIC_RX;
-            c.cmd_time = offset_time_spec(pulse_times[iPulse], MIMIC_RANGE + pulseLength);
+            c.cmd_time = offset_time_spec(pulse_times[iPulse], mimic_delay + pulseLength);
             cmdq.push(c);
 
         }

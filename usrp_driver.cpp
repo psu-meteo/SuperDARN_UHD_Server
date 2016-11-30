@@ -346,6 +346,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     size_t rxshm_size;
     size_t txshm_size;
 
+    bool mimic_active;
+    float mimic_delay;
+
     int32_t verbose = 1; 
     int32_t rx_worker_status;
 
@@ -383,6 +386,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     rxshm_size = std::stoi(pt.get<std::string>("shm_settings.rxshm_size"));
     txshm_size = std::stoi(pt.get<std::string>("shm_settings.txshm_size"));
     usrp_driver_base_port = std::stoi(pt.get<std::string>("network_settings.USRPDriverPort"));
+    
+    boost::property_tree::ptree pt_array;
+    boost::property_tree::ini_parser::read_ini("array_config.ini", pt_array);
+    mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
+    mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
+    fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
 
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
@@ -636,7 +645,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga);
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
-                        init_timing_signals(usrp);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
+                        init_timing_signals(usrp, mimic_active);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
                         
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
@@ -651,7 +660,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         
                        //  send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = num_tx_rf_samples / usrp->get_tx_rate();
-                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_times, pulseLength)); 
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_times, pulseLength, mimic_active, mimic_delay)); 
                         
  
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
