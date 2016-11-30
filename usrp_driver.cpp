@@ -608,11 +608,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     RXFESettings rf_settings;
                     rf_settings.amp1 = sock_get_uint8(driverconn);
                     rf_settings.amp2 = sock_get_uint8(driverconn);
-                    uint8_t att = sock_get_uint8(driverconn);
-                    rf_settings.att1 = (att >> 0) & 0x01;
-                    rf_settings.att2 = (att >> 1) & 0x01;
-                    rf_settings.att3 = (att >> 2) & 0x01;
-                    rf_settings.att4 = (att >> 3) & 0x01;
+                    uint8_t attTimes2 = sock_get_uint8(driverconn);
+                    rf_settings.att_05_dB = ( attTimes2 & 0x01 ) != 0;
+                    rf_settings.att_1_dB  = ( attTimes2 & 0x02 ) != 0;
+                    rf_settings.att_2_dB  = ( attTimes2 & 0x04 ) != 0;
+                    rf_settings.att_4_dB  = ( attTimes2 & 0x08 ) != 0;
+                    rf_settings.att_8_dB  = ( attTimes2 & 0x10 ) != 0;
+                    rf_settings.att_16_dB = ( attTimes2 & 0x20 ) != 0;
+                   
                     kodiak_set_rxfe(usrp, rf_settings);
                     sock_send_uint8(driverconn, RXFE_SET);
                     break;

@@ -8,7 +8,6 @@ verbose = True
 
 # returns a complex number from a phase in radians
 def rad_to_rect(rad):
-    print("added minus here. don''t know if this is right!!!!!!!!!!!!!!!!!!! (mgu)")
     return np.exp(-1j * rad)
 
 # nbeams - total number of beams

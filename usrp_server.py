@@ -55,6 +55,7 @@ class RadarHardwareManager:
         self.ini_file_init()
         self.usrp_init()
         self.rxfe_init()
+     #   self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
 
         self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
@@ -299,19 +300,39 @@ class RadarHardwareManager:
         amp1 = self.ini_rxfe_settings['enable_amp1'].lower() in activeStrings
         amp2 = self.ini_rxfe_settings['enable_amp2'].lower() in activeStrings
         att = float(self.ini_rxfe_settings['attenuation'])
-        if att > 0:
-           self.logger.warning('attenuation for rxfe in array.ini is not negative. correcting that...')
+        if att < 0:
+           self.logger.warning('attenuation for rxfe in array.ini is defnined positive, but given value is negative ({} dB). correcting that to {} dB...'.format(att, att*(-1)))
            att *= -1
 
-        if att < -31.5:
-           self.logger.warning('attenuation for rxfe in array.ini is < -31.5 dB. using maximum aatenuation of -31.5 dB')
-           att = -31.5
+        if att > 31.5:
+           self.logger.warning('attenuation ({}) for rxfe in array.ini is > 31.5 dB. using maximum atenuation of 31.5 dB'.format(att))
+           att = 31.5
 
-        self.logger.debug("Setting RXFR: Amp1={}, Amp2={}, Attenuation={}".format(amp1, amp2, att)) 
+        self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
         cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
         cmd.client_return()
 
+
+    def test_rxfe_control(self):
+
+        self.logger.warning("Starting RXFE test: walk through all bits:") 
+
+        testParSet = [[False, False, 0], [True, False, 0], [True, True, 0], [False, True, 0], [True, True, 31.5]] + [[False, False, 2**i/2] for i in range(6) ]
+        
+        nSets = len(testParSet)
+        for iSet in range(nSets):
+            amp1 = testParSet[iSet][0]
+            amp2 = testParSet[iSet][1]
+            att  = testParSet[iSet][2]
+
+            cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
+            cmd.transmit()
+            cmd.client_return()
+            self.logger.warning("Current settings: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
+            input("  Press Enter for next chage...")
+
+        print("Finished testing RXFE!")
 
     def cuda_init(self):
         #time.sleep(.05)

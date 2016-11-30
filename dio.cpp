@@ -54,21 +54,32 @@
 
 
 // RXFE pins
-#define RXFE_PINS 0xFF 
 
-#define RXFE_AMP_SHIFT 0
-#define RXFE_ATT_SHIFT 2
+// dio pins on USRP RX board
+#define IO_RX_00 1
+#define IO_RX_01 2
+#define IO_RX_02 4
+#define IO_RX_03 8
+#define IO_RX_04 16
+#define IO_RX_05 32
+#define IO_RX_06 64
+#define IO_RX_07 128
 
-#define RXFE_MASK     0xFF  // 1111 1111
-#define RXFE_AMP_MASK 0xD0  // 1101 0000
-#define RXFE_ATT_MASK 0x3F  // 0011 1111
-#define ATT_D1 4
-#define ATT_D2 3
-#define ATT_D3 2
-#define ATT_D4 1
-#define ATT_D5 0
-#define AMP_1  7
-#define AMP_2  6
+
+// map RXFE pins to USRP dio pins
+#define AMP_1  IO_RX_07   // + 15 dB
+#define AMP_2  IO_RX_06   // + 15 dB
+#define ATT_D0 IO_RX_05   // -0.5 dB
+#define ATT_D1 IO_RX_04   // - 1  dB
+#define ATT_D2 IO_RX_03   // - 2  dB
+#define ATT_D3 IO_RX_02   // - 4  dB
+#define ATT_D4 IO_RX_01   // - 8  dB
+#define ATT_D5 IO_RX_00   // -16  dB
+
+// define rx masks
+#define RXFE_AMP_MASK  (AMP_1 + AMP_2)
+#define RXFE_ATT_MASK  (ATT_D0 + ATT_D1 + ATT_D2 + ATT_D3 + ATT_D4 + ATT_D5)
+#define RXFE_MASK      (RXFE_ATT_MASK + RXFE_AMP_MASK)
 
 
 #define DEBUG 1
@@ -264,14 +275,21 @@ void kodiak_set_rxfe(
     struct RXFESettings rf_settings
 ) {
     // load up rxfe_dio with rf_setting struct
-    uint16_t rxfe_dio = 0;
-    rxfe_dio |= AMP_1 * (rf_settings.amp1 != 0);
-    rxfe_dio |= AMP_2 * (rf_settings.amp2 != 0); 
-    rxfe_dio |= (rf_settings.att1 != 0) * ATT_D1;
-    rxfe_dio |= (rf_settings.att2 != 0) * ATT_D2;
-    rxfe_dio |= (rf_settings.att3 != 0) * ATT_D3;
-    rxfe_dio |= (rf_settings.att4 != 0) * ATT_D4;
-    //rxfe_dio |= (rf_settings.att5 != 0) * ATT_5;
+    uint16_t rxfe_dio = 0; 
+    rxfe_dio |= AMP_1  * (rf_settings.amp1      != 0);
+    rxfe_dio |= AMP_2  * (rf_settings.amp2      != 0); 
+    rxfe_dio |= ATT_D0 * (rf_settings.att_05_dB != 0);
+    rxfe_dio |= ATT_D1 * (rf_settings.att_1_dB  != 0);
+    rxfe_dio |= ATT_D2 * (rf_settings.att_2_dB  != 0);
+    rxfe_dio |= ATT_D3 * (rf_settings.att_4_dB  != 0);
+    rxfe_dio |= ATT_D4 * (rf_settings.att_8_dB  != 0);
+    rxfe_dio |= ATT_D5 * (rf_settings.att_16_dB != 0);
+
+    rxfe_dio = (~rxfe_dio) & 0xFF; // invert all, since high means amp  and att off
+
+
+    DEBUG_PRINT("DIO.cpp: received rf_settings: \n   amp1: %d\n   amp2: %d\n   att 0.5 dB: %d\n   att 1 dB  : %d\n   att 2 dB  : %d\n   att 4 dB  : %d\n   att 8 dB  : %d\n   att 16 dB : %d\n", rf_settings.amp1, rf_settings.amp2, rf_settings.att_05_dB, rf_settings.att_1_dB, rf_settings.att_2_dB, rf_settings.att_4_dB, rf_settings.att_8_dB, rf_settings.att_16_dB );
+    DEBUG_PRINT("DIO.cpp: sending rxfe_dio:  %d\n", rxfe_dio);
 
     usrp->set_gpio_attr("RXA", "OUT", rxfe_dio, RXFE_MASK);
 }
@@ -283,12 +301,11 @@ void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp)
     usrp->set_gpio_attr("RXA", "DDR", RXFE_MASK, RXFE_MASK); // set everybody as outputs
 
     // start up with rxfe disabled, rx mode
-    usrp->set_gpio_attr("RXA", "OUT", 0x00, RXFE_AMP_MASK);
+    usrp->set_gpio_attr("RXA", "OUT", 0xFF, RXFE_AMP_MASK);
     usrp->set_gpio_attr("RXA", "OUT", 0xFF, RXFE_ATT_MASK);
 
     // set to 1/2 full attenuation, both amps online 
-    usrp->set_gpio_attr("RXA", "OUT", 63, RXFE_ATT_MASK);
-    usrp->set_gpio_attr("RXA", "OUT", 3 << 6, RXFE_AMP_MASK);
+    usrp->set_gpio_attr("RXA", "OUT", (255 - (AMP_1 + AMP_2 + ATT_D5)), RXFE_MASK);
 
 
 }
