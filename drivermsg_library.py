@@ -294,6 +294,7 @@ class usrp_ready_data_command(driver_command):
         payload['status'] = recv_dtype(sock, np.int32)
         payload['antenna'] = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
+        payload['fault']    = recv_dtype(sock, np.bool_)
         return payload
 
     def recv_samples(self, sock, sock_samples = False):

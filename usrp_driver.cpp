@@ -226,6 +226,15 @@ ssize_t sock_send_cshort(int32_t sock, std::complex<short int> d)
    return status;
 }
 
+ssize_t sock_send_bool(int32_t sock, bool d)
+{
+   ssize_t status = send(sock, &d, sizeof(bool), 0);
+   if(status != sizeof(bool)) {
+        fprintf(stderr, "error sending bool\n");
+   }
+   return status;
+}
+
 ssize_t sock_send_int16(int32_t sock, int16_t d)
 {
    ssize_t status = send(sock, &d, sizeof(int16_t), 0);
@@ -451,9 +460,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
-   // init rxfe
+    // init rxfe
     kodiak_init_rxfe(usrp);
-    
+
     signal(SIGINT, siginthandler);
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
@@ -526,6 +535,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 sleep(1);
                 break;
             }
+
             connect_retrys = MAX_SOCKET_RETRYS;
             switch(command) {
                 case USRP_SETUP: {
@@ -696,6 +706,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_int32(driverconn, state);  // send status
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, num_requested_rx_samples);     // nsamples;  send send number of samples
+                   
+                    // read FAULT status    
+                    bool fault = read_FAULT_status_from_control_board(usrp);
+                    sock_send_bool(driverconn, fault);     // FAULT status from conrol board
+                
+
+ 
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);

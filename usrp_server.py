@@ -244,6 +244,8 @@ class RadarHardwareManager:
             usrp_drivers.append((usrp_driver_hostname, usrp_driver_port))
 	
         usrp_driver_socks = []
+        self.nUSRPs = len(usrp_drivers)
+        self.fault_status = np.ones(self.nUSRPs)
         
         # TODO: read these from ini config file
         # currently pulled from radar_config_constants.py
@@ -389,12 +391,13 @@ class RadarHardwareManager:
         
         # check status of usrp drivers
 
-        for usrpsock in self.usrpsocks:
+        for iUSRP, usrpsock in enumerate(self.usrpsocks):
             self.logger.debug('start receiving one USRP status')
             transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
+            self.fault_status[iUSRP] = ready_return["fault"]
 
             self.logger.debug('GET_DATA rx status {}'.format(rx_status))
             if rx_status != 2:
@@ -1008,9 +1011,13 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, self.pulse_lens, np.uint32) # length badtrdat_len
 
         # stuff these with junk, they don't seem to be used..
-        num_transmitters = 16 
-        txstatus_agc = np.zeros(num_transmitters)
+        num_transmitters = self.parent_RadarHardwareManager.nUSRPs # TODO update for polarization?
+        txstatus_agc = self.parent_RadarHardwareManager.fault_status # TODO: is this the right way to return fault status????
+#        txstatus_agc = np.zeros(num_transmitters)
         txstatus_lowpwr = np.zeros(num_transmitters)
+        if txstatus_agc.any():
+            self.logger.warning('Following USRPs report Fault:  {} (usrp index)'.format([k for k in range(txstatus_agc.size) if txstatus_agc[k] != 0]))
+
 
         transmit_dtype(self.conn, num_transmitters, np.int32)
         transmit_dtype(self.conn, txstatus_agc, np.int32) # length num_transmitters

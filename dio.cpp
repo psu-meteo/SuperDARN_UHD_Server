@@ -51,30 +51,28 @@
 
 
 #define MANUAL_CONTROL 0x00
-#define FAULT 0x0001
 
 
-// TIMING (LFTX) 
-// mapping timing signals pins
-#define SYNC_PINS IO_PIN_01 
+// TIMING: LFTX to control board (agc) 
+// mapping timing TX RX signals pins
 #define TR_TX     IO_PIN_03
 #define TR_RX     IO_PIN_04
 #define TR_PINS   (TR_TX +TR_RX) 
 
-#define RX_OFFSET           290e-6  // microseconds, alex had 450-e6 set here
+#define NOT_FAULT_PIN  IO_PIN_01
+
+// SYNC
+#define SYNC_PINS IO_PIN_08 
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
 #define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
 
-
 //  MIMIC (LFTX)
-// mapping mimic pins 
 #define MIMIC_TX    IO_PIN_11
 #define MIMIC_RX    IO_PIN_12
 #define MIMIC_PINS  (MIMIC_TX + MIMIC_RX)
 
 
-// RXFE CONTROL (LFRX)
-
+// RXFE CONTROL: LFRX to rxfe board
 // map rxfe pins to USRP dio pins
 #define AMP_1  IO_PIN_07   // + 15 dB
 #define AMP_2  IO_PIN_06   // + 15 dB
@@ -105,6 +103,7 @@
 //#define RXFE_CONTROL 0x00 // manual control
 //#include <complex>
 
+// #define RX_OFFSET          0 //  290e-6  // microseconds, alex had 450-e6 set here
 
 
 void init_timing_signals(
@@ -118,8 +117,13 @@ void init_timing_signals(
     // setup gpio to manual control and direction (output)
     usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, SYNC_PINS);
     usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, TR_PINS);
-    usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS,  SYNC_PINS);
-    usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,  TR_PINS);
+    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
+    // TODO: set in one step
+//    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + noFAULT));
+
+    usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS, SYNC_PINS);
+    usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,   TR_PINS);
+    usrp->set_gpio_attr("TXA","DDR" ,      0,   NOT_FAULT_PIN); // NOT_FAULT as input
 
    if (mimic_active) {
        usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
@@ -130,6 +134,20 @@ void init_timing_signals(
 
     debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO: set gpio attrs at usrp_time %2.4f\n", debugt);
+
+}
+
+bool read_FAULT_status_from_control_board(
+    uhd::usrp::multi_usrp::sptr usrp
+) {
+    uint32_t input = usrp->get_gpio_attr("TXA", "READBACK");
+    DEBUG_PRINT("Readback from control board: %d\n", input);
+    bool notFAULT = (input & NOT_FAULT_PIN) != 0;
+    DEBUG_PRINT("Returning FAULT = %d\n", !notFAULT);
+    return !notFAULT;
+
+
+
 
 }
 

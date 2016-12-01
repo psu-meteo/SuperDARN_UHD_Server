@@ -4,7 +4,7 @@
 import numpy as np
 
 C = 3e8
-verbose = True
+verbose = False
 
 # returns a complex number from a phase in radians
 def rad_to_rect(rad):
