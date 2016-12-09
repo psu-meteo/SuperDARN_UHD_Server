@@ -231,18 +231,23 @@ class cuda_add_channel_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-# clear all channels from gpu..
+# clear one channels from gpu
+# TODO: just transmit channel number to save time?
 class cuda_remove_channel_command(driver_command):
-    def __init__(self, cudas, swing = 0):
-        driver_command.__init__(self, cudas, CUDA_REMOVE_SEQUENCE)
+    def __init__(self, cudas, sequence = None, swing = 0):
+        driver_command.__init__(self, cudas, CUDA_REMOVE_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
-        pdb.set_trace()
+        self.sequence = sequence 
+       # pdb.set_trace()
 
     def receive(self, sock):
         super().receive(sock)
         self.sequence = pickle_recv(sock)
 
     def transmit(self):
+        if self.sequence == None:
+            print('cannot send undefined sequence to channel')
+            pdb.set_trace()
         super().transmit()
         for sock in self.clients:
             pickle_send(sock, self.sequence)
@@ -338,7 +343,7 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
@@ -348,6 +353,7 @@ class sequence(object):
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+        self.channelScalingFactor = channelScalingFactor # correct frequency dependency and superpositioning of channels
          
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:

@@ -118,8 +118,9 @@ antenna_pos_y = np.zeros_like(antenna_pos_x)
 antenna_pos_x -=  np.mean(antenna_pos_x)
 
 if len(usrp_xPos) != nAntennas:
-    print("just {} usrp entries found for {} antennas".format(len(usrp_xPos), nAntennas))
-    raise VauleError("error")
+    raise ValueError("just {} usrp entries found for {} antennas".format(len(usrp_xPos), nAntennas))
+
+
 """
 # plot to check
 plt.figure()

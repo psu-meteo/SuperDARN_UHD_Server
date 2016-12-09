@@ -43,7 +43,7 @@ SIDEB = 1
 RXDIR = 'rx'
 TXDIR = 'tx'
 
-DEBUG = False
+DEBUG = True
 verbose = 1
 C = 3e8
 
@@ -196,6 +196,11 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # construct baseband tx sample array
         bb_signal = np.complex128(np.zeros((nAntennas, nPulses, len(pulsesamps))))
 
+        self.logger.debug("ChannelScalingFactor is {} for channel {} (tfreq={} MHz). ".format(channel.channelScalingFactor, channel.ctrlprm['channel'],channel.ctrlprm['tfreq']/1000 ))
+
+        if channel.channelScalingFactor == 0:
+            self.logger.warning("ChannelScalingFactor is zero for channel {} (tfreq={} MHz). Channel is muted! ".format(channel.ctrlprm['channel'],channel.ctrlprm['tfreq'] / 1000 ))
+
         for iAntenna in range(nAntennas):
             for iPulse in range(nPulses):
                 # compute pulse compression 
@@ -211,6 +216,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 
                 # apply beamforming
                 psamp *= beamforming_shift[iAntenna]
+
+                # apply gain control
+                psamp *= channel.channelScalingFactor
 
                 # update baseband pulse sample array for antenna
                 bb_signal[iAntenna][iPulse] = psamp
@@ -291,7 +299,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
 
         if channelNumber in self.gpu.channelNumbers:
             chIdx = self.gpu.channelNumbers.index(channelNumber)
-            self.gpu.squences[chIdx] = None
+            self.gpu.sequences[chIdx] = None
             self.gpu.channelNumbers[chIdx] = None
             self.logger.debug("Delete Channel {}  at idx {}. ".format(channelNumber, chIdx))
         else:

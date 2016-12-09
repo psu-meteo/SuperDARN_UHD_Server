@@ -231,7 +231,7 @@ class RadarHardwareManager:
         array_config.read('array_config.ini')
         self.ini_array_settings = array_config['array_info']
         self.ini_rxfe_settings  = array_config['rxfe']
-
+        self.totalScalingFactor = float(array_config['gain_control']['total_scaling_factor'])
 
 
     def usrp_init(self):
@@ -496,6 +496,12 @@ class RadarHardwareManager:
             channelObject._waitForState(STATE_WAIT) 
             self.logger.info('deleteRadarChannel() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
+            # remove channel from cuda
+            self.logger.debug('send CUDA_ADD_CHANNEL')
+            cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
+            cmd.transmit()
+            cmd.client_return()
+             
             self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
                 self.addingNewChannelsAllowed = True
@@ -561,6 +567,13 @@ class RadarHardwareManager:
 
         self.logger.debug('trigger complete')
 
+
+    def gain_control_divide_by_nChannels(self):
+        nChannels = len(self.channels)
+        for ch in self.channels:
+            ch.channelScalingFactor = 1 / nChannels * self.totalScalingFactor 
+
+
     # TODO: Merge channel infomation here!
     # TODO: pretrigger cuda client return fails
     # key error: 0?
@@ -577,7 +590,10 @@ class RadarHardwareManager:
         #        cmd.client_return()
         #        self.logger.debug('cuda return received')
 
-       
+        # gain control: calculate scaling factor for each channel
+        self.gain_control_divide_by_nChannels()
+
+ 
         synth_pulse = False
         
         for ch in self.channels:
@@ -654,6 +670,7 @@ class RadarChannelHandler:
 
         self.clrfreq_start = 0
         self.clrfreq_stop = 0
+        self.channelScalingFactor = 0
         self.cnum = 'unknown'
 
         # TODO: initialize ctlrprm_struct with site infomation
@@ -740,7 +757,7 @@ class RadarChannelHandler:
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
-        return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.ctrlprm_struct.payload)
+        return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
 
     def DefaultHandler(self, rmsg):
         self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))
