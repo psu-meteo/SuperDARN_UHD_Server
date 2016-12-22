@@ -16,6 +16,7 @@ import argparse
 import signal
 import functools 
 import configparser
+import logging
 
 import posix_ipc
 import pycuda.driver as cuda
@@ -25,12 +26,12 @@ import pycuda.autoinit
 import pickle # for cuda dump
 from datetime import datetime
 
-from termcolor import cprint
 from socket_utils import *
 from drivermsg_library import *
 import dsp_filters
 from phasing_utils import *
 from profiling_tools import timeit
+import logging_usrp
 
 # import pycuda stuff
 SWING0 = 0
@@ -63,7 +64,7 @@ swing = SWING0
 
 # python3 or greater is needed for direct transfers between shm and gpu memory
 if sys.hexversion < 0x030300F0:
-    print('this code requires python 3.3 or greater')
+    loggin.error('this code requires python 3.3 or greater')
     sys.exit(0)
 
 
@@ -76,6 +77,7 @@ class cudamsg_handler(object):
         self.gpu = gpu
         self.array_info = array_info
         self.hardware_limits = hardware_limits
+        self.logger = logging.getLogger('msg_handler')
 
     def respond(self):
         transmit_dtype(self.sock, self.command, np.uint8)
@@ -89,7 +91,7 @@ class cuda_setup_handler(cudamsg_handler):
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
 
-        print('entering cuda_setup_handler (currently blank!)')
+        self.logger.debug('entering cuda_setup_handler (currently blank!)')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         
@@ -101,11 +103,10 @@ class cuda_setup_handler(cudamsg_handler):
 class cuda_generate_pulse_handler(cudamsg_handler):
     @timeit
     def process(self):
-        print('enter cuda_generate_pulse_handler.process')
+        self.logger.debug('enter cuda_generate_pulse_handler.process')
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
-
-        print('entering generate_pulse_handler')
+ 
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
 
@@ -116,10 +117,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
        
         # generate base band signals incl. beamforming, phase_masks and pulse filtering 
         bb_signal    = [None for c in range(nChannels)] 
-        for currentSequence in self.gpu.sequences:
+        for chIndex, currentSequence in enumerate(self.gpu.sequences):
             if currentSequence != None:
-                cNum = currentSequence.ctrlprm['channel'] - 1 # sequence channel nummer starts with 1
-                bb_signal[cNum]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
+                bb_signal[chIndex]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
         self.gpu.synth_channels(bb_signal)
@@ -127,23 +127,24 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         # copy rf waveform to shared memory from GPU memory 
         self.gpu.txsamples_host_to_shm()
 
-        if os.path.isfile('cuda.dump.tx'):
+        if os.path.isfile('./cuda.dump.tx'):
              name = datetime.now().strftime('%Y-%m-%d_%H%M%S')
              with open('/data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl', 'wb') as f:
                   pickle.dump(self.gpu.tx_rf_outdata, f, pickle.HIGHEST_PROTOCOL)
              os.remove('cuda.dump.tx') # only save tx samples once
+             self.logger.info('Wrote raw tx samples to /data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl')
 
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
 
     # generate baseband sample vectors for a transmit pulse from sequence information
     def generate_bb_signal(self, channel, shapefilter = None):
-        print('entering generate_bb_signal')
+        self.logger.debug('entering generate_bb_signal')
         # tpulse is the pulse time in seconds
         # bbrate is the transmit baseband sample rate 
         # tfreq is transmit freq in hz
         # tbuffer is guard time between tr gate and rf pulse in seconds
-     ##   chnum = channel.ctrlprm['channel']
+
         ctrlprm = channel.ctrlprm
 
         tpulse = channel.pulse_lens[0] / 1e6 # read in array of pulse lengths in seconds 
@@ -158,11 +159,11 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         assert tpulse < int(self.hardware_limits['max_tpulse']) / 1e6, 'pulse length is too long for hardware'
 
         if not (tx_center_freq >= int(self.hardware_limits['minimum_tfreq'])):
-            print('transmit center frequency too low for hardware')
+            self.logger.error('transmit center frequency too low for hardware')
             #pdb.set_trace()
 
         if tx_center_freq > int(self.hardware_limits['maximum_tfreq']):
-            print('transmit center frequency too high for hardware')
+            self.logger.error('transmit center frequency too high for hardware')
             #pdb.set_trace()
 
         #assert tfreq < int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
@@ -177,25 +178,29 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         pulse      = np.ones( int(np.round(tpulse  * self.gpu.tx_bb_samplingRate)))
         pulsesamps = np.complex64(np.concatenate([padding, pulse, padding]))
 
-        if verbose:
-           print('create BB pulses: tbuffer: {} us, tpulse: {} us, nSamples: {} '.format(tbuffer*1e6, tpulse*1e6, pulsesamps.shape[0]))
+        self.logger.debug('create BB pulses: tbuffer: {} us, tpulse: {} us, nSamples: {} '.format(tbuffer*1e6, tpulse*1e6, pulsesamps.shape[0]))
 
         beam_sep  = float(self.array_info['beam_sep']) # degrees
         nbeams    = int(self.array_info['nbeams'])
-        x_spacing = float(self.array_info['x_spacing']) # meters TODO: why unsued? delete it...
+        x_spacing = float(self.array_info['x_spacing']) # meters
         beamnum   = ctrlprm['tbeam']
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
 
         # calculate antenna-to-antenna phase shift for steering at a frequency
-        pshift = calc_phase_increment(bmazm, tx_center_freq)
+        pshift = calc_phase_increment(bmazm, tx_center_freq, x_spacing)
 
         # calculate a complex number representing the phase shift for each antenna
         beamforming_shift = [rad_to_rect(a * pshift) for a in self.antennas]
         
         # construct baseband tx sample array
         bb_signal = np.complex128(np.zeros((nAntennas, nPulses, len(pulsesamps))))
+
+        self.logger.debug("ChannelScalingFactor is {} for channel {} (tfreq={} MHz). ".format(channel.channelScalingFactor, channel.ctrlprm['channel'],channel.ctrlprm['tfreq']/1000 ))
+
+        if channel.channelScalingFactor == 0:
+            self.logger.warning("ChannelScalingFactor is zero for channel {} (tfreq={} MHz). Channel is muted! ".format(channel.ctrlprm['channel'],channel.ctrlprm['tfreq'] / 1000 ))
 
         for iAntenna in range(nAntennas):
             for iPulse in range(nPulses):
@@ -213,6 +218,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # apply beamforming
                 psamp *= beamforming_shift[iAntenna]
 
+                # apply gain control
+                psamp *= channel.channelScalingFactor
+
                 # update baseband pulse sample array for antenna
                 bb_signal[iAntenna][iPulse] = psamp
 
@@ -222,37 +230,49 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 class cuda_add_channel_handler(cudamsg_handler):
     @timeit
     def process(self):
-        print('entering cuda_add_channel_handler, waiting for swing semaphores')
+        self.logger.debug('entering cuda_add_channel_handler, waiting for swing semaphores')
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
         # get picked sequence information dict from usrp_server
         cmd = cuda_add_channel_command([self.sock])
         cmd.receive(self.sock)
 
-        print('received command')
+        self.logger.debug('received sequence')
         sequence = cmd.sequence
-        ctrlprm = sequence.ctrlprm
-        cnum = ctrlprm['channel'] - 1# sequence channel nummer starts with 1
-        self.gpu.sequences[cnum] = sequence
+#        ctrlprm = sequence.ctrlprm
+        channelNumber = sequence.ctrlprm['channel']
 
- 
+        if channelNumber in self.gpu.channelNumbers:
+            chIdx = self.gpu.channelNumbers.index(channelNumber)
+            self.logger.warning("Channel {} already added at idx {}. Reinitializing it ...".format(channelNumber, chIdx))
+        else:
+            if None in self.gpu.channelNumbers:
+                chIdx = self.gpu.channelNumbers.index(None)
+                self.gpu.channelNumbers[chIdx] = channelNumber
+            else:
+                self.logger.error("all channles active, can not add channel")
+                return # TODO rerun error?
+
+        self.gpu.sequences[chIdx] = sequence
+
+
 
         if verbose:
-           dbPrint("===> adding new channel:")
-           dbPrint("  num (cuda: {}, sequence: {})".format(cnum, cnum+1))
-           dbPrint("  tx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
-           dbPrint("  rx channel freq {} kHz".format(self.gpu.sequences[cnum].ctrlprm['rfreq'] ))
-           dbPrint("  tx pulse offset (us)  "+ str(  self.gpu.sequences[cnum].pulse_offsets_vector) )
-#           print("  num {}".format(self.gpu.sequences[cnum].ctrlprm['tfreq'] ))
-        self.gpu._set_tx_mixerfreq(cnum)
-        self.gpu._set_tx_phasedelay(cnum)
-        self.gpu._set_rx_phaseIncrement(cnum)
+           self.logger.debug("===> adding new channel:")
+           self.logger.debug("  channel number {}  (cuda index: {})".format(channelNumber, chIdx))
+           self.logger.debug("  tx channel freq {} kHz".format(self.gpu.sequences[chIdx].ctrlprm['tfreq'] ))
+           self.logger.debug("  rx channel freq {} kHz".format(self.gpu.sequences[chIdx].ctrlprm['rfreq'] ))
+           self.logger.debug("  tx pulse offset (us)  "+ str(  self.gpu.sequences[chIdx].pulse_offsets_vector) )
+
+        self.gpu._set_tx_mixerfreq(chIdx)
+        self.gpu._set_tx_phasedelay(chIdx)
+        self.gpu._set_rx_phaseIncrement(chIdx)
  
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
         #pdb.set_trace()
-        print('semaphores released in cuda add channel handler')
+        self.logger.debug('semaphores released in cuda add channel handler')
 
 # prepare for a refresh of sequences 
 class cuda_pulse_init_handler(cudamsg_handler):
@@ -260,7 +280,7 @@ class cuda_pulse_init_handler(cudamsg_handler):
         cmd = cuda_pulse_init_command([self.sock])
         cmd.receive(self.sock)
           
-        print('entering cuda_pulse_init_handler')
+        self.logger.debug('entering cuda_pulse_init_handler')
 
         semaphore_list[SIDEA][SWING0].acquire()
         semaphore_list[SIDEA][SWING1].acquire()
@@ -275,9 +295,19 @@ class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_remove_channel_command([self.sock])
         cmd.receive(self.sock)
-        # This is not implemented..
-        # pdb.set_trace()
-        pass
+
+        sequence = cmd.sequence
+        channelNumber = sequence.ctrlprm['channel']
+
+        if channelNumber in self.gpu.channelNumbers:
+            chIdx = self.gpu.channelNumbers.index(channelNumber)
+            self.gpu.sequences[chIdx] = None
+            self.gpu.channelNumbers[chIdx] = None
+            self.logger.debug("Delete Channel {}  at idx {}. ".format(channelNumber, chIdx))
+        else:
+            self.logger.warning("cuda remove channel: No channel {} in cuda. (channel numbers : {})".format(channelNumber, self.gpu.channelNumbers))
+
+        
 
 
 
@@ -285,30 +315,36 @@ class cuda_remove_channel_handler(cudamsg_handler):
 class cuda_get_data_handler(cudamsg_handler):
     @timeit
     def process(self):
-        print('entering cuda_get_data handler')
+        self.logger.debug('entering cuda_get_data handler')
         cmd = cuda_get_data_command([self.sock])
         cmd.receive(self.sock)
 
-        channel = recv_dtype(self.sock, np.int32) # TODO: use this infomation..
-        dbPrint('received channel={}(cuda: {}))'.format(channel, channel-1))
-        dbPrint('pulling data...') 
+        self.logger.debug('pulling data from gpu memory...') 
         samples = self.gpu.pull_rxdata()
-        dbPrint('finished pullind data')
-        nants, nChannels, nsamps = samples.shape
-        dbPrint('data format: {}'.format(samples.shape))
-        dbPrint('transmitting nants {}'.format(nants)) 
-        transmit_dtype(self.sock, nants, np.uint32)
+        nAntennas, nChannels, nSamples = samples.shape
+        self.logger.debug('finished pulling date. format: {}'.format(samples.shape))
 
-        for aidx in range(nants):
-            transmit_dtype(self.sock, self.antennas[aidx], np.uint16)
-            dbPrint('transmitted antenna index')
-            # TODO: calculate size of transmit samples for channel/ant
-            transmit_dtype(self.sock, nsamps, np.uint32)
-            dbPrint('transmitted number of samples ({})'.format(nsamps))
-            self.sock.sendall(samples[aidx][channel-1].tobytes())
+        self.logger.debug('transmitting nAntennas {}'.format(nAntennas)) 
+        transmit_dtype(self.sock, nAntennas, np.uint32)
+
+        channel = recv_dtype(self.sock, np.int32) 
+
+        while (channel != -1):
+            channelIndex = self.gpu.channelNumbers.index(channel)
+            self.logger.debug('received channel number ={}(cuda index: {}))'.format(channel, channelIndex))
+
+            for iAntenna in range(nAntennas):
+                transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
+                self.logger.debug('transmitted antenna index')
+
+                transmit_dtype(self.sock, nSamples, np.uint32)
+                self.logger.debug('transmitted number of samples ({})'.format(nSamples))
+                self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
+
+            channel = recv_dtype(self.sock, np.int32) 
 
         # TODO: remove hardcoded swing/side
-        semaphore_list[SIDEA][SWING0].release()
+        semaphore_list[SIDEA][SWING0].release() # TODO why is this here so lonely? (mgu)
 
 # cleanly exit.
 class cuda_exit_handler(cudamsg_handler):
@@ -322,7 +358,7 @@ class cuda_exit_handler(cudamsg_handler):
 class cuda_process_handler(cudamsg_handler):
     @timeit
     def process(self):
-        print('enter cuda_process_handler:process')
+        self.logger.debug('enter cuda_process_handler:process')
         cmd = cuda_process_command([self.sock], SWING0)
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
@@ -395,6 +431,8 @@ def sigint_handler(signum, frame):
 class ProcessingGPU(object):
     def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx, txupsamplerate):
 
+        self.logger = logging.getLogger("cuda_gpu")
+        self.logger.info('initializing cuda gpu')
         self.antennas = np.int16(antennas)
         # maximum supported channels
         self.nChannels = int(maxchannels)
@@ -424,9 +462,9 @@ class ProcessingGPU(object):
         # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nAntennas) # table to account for constant time delay to antenna, e.g cable length difference
         self.phase_offsets = np.zeros(self.nAntennas) # table to account for constant phase offset, e.g 180 degree phase flip
-
-        # DEL because unused? self.baseband_samples = [[None for i in range(self.nChannels)] for p in maxpulses] # table to store baseband samples of pulse for each frequency
-        self.sequences = [None for i in range(self.nChannels)] # table to store sequence infomation
+ 
+        self.sequences      = [None for iCh in range(self.nChannels)] # table to store sequence infomation
+        self.channelNumbers = [None for iCh in range(self.nChannels)] # cuda sequence index to channel number (cnum)
 
         # host side copy of channel transmit frequency array
         self.tx_mixer_freqs = np.zeros(self.nChannels, dtype=np.float64)
@@ -475,7 +513,7 @@ class ProcessingGPU(object):
                            bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
                            bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
                        except:
-                           print('error while merging baseband tx vectors..')
+                           self.logger.error('error while merging baseband tx vectors..')
                            pdb.set_trace()
                        self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
         
@@ -490,8 +528,7 @@ class ProcessingGPU(object):
         tx_rf_nSamples_per_pulse = int( tx_bb_nSamples_per_pulse * self.tx_upsamplingRate) # number of rf samples for all pulses
         tx_rf_nSamples_total = tx_rf_nSamples_per_pulse * self.nPulses
 
-        print('tx_init: tx_rf_nSamples_total: ' + str(tx_rf_nSamples_total))
-        print('tx_init: nAntennas     : ' + str(self.nAntennas))
+        self.logger.debug('tx_init: tx_rf_nSamples_total: {}, nAntennas: {} '.format(tx_rf_nSamples_total, self.nAntennas))
  
         # allocate page-locked memory on host for rf samples to decrease transfer time
         # TODO: benchmark this, see if I should move this to init function..
@@ -509,60 +546,38 @@ class ProcessingGPU(object):
         self.tx_block = self._intify((self.tx_upsamplingRate, self.nChannels, 1))
         self.tx_grid  = self._intify((tx_bb_nSamples_per_pulse, self.nAntennas, self.nPulses))
         
-        if verbose:
-           sepLine = '  ========================================================='
-           startOfLine = '   | '
-       #    print(sepLine)
-           print("{}\n  = PARAMETER\n{}".format(sepLine, sepLine))
-           print("     nChannels       : {} ".format( self.nChannels ))
-           print("     nAntennas       : {} ".format( self.nAntennas ))
-           print("     nPulse          : {} ".format( self.nPulses))
-           print("\n  TX :")
-           print("{} upsampling rate : {}x".format(startOfLine, self.tx_upsamplingRate ))
-           print("{} ".format(startOfLine ))
+        if self.logger.isEnabledFor(logging.DEBUG): # save time 
+           self.logger.debug("= PARAMETER: ")
+           self.logger.debug("     nChannels       : {} ".format( self.nChannels ))
+           self.logger.debug("     nAntennas       : {} ".format( self.nAntennas ))
+           self.logger.debug("     nPulse          : {} ".format( self.nPulses))
+           self.logger.debug(" TX :")
+           self.logger.debug("   upsampling rate : {}x".format( self.tx_upsamplingRate ))
 
-           print("{}BB".format(startOfLine))
-           print("{}  Sampling Rate    :  {} kHz".format(startOfLine,self.tx_bb_samplingRate / 1000 ))
-           print("{}  nSamples per Puse:  {}".format(startOfLine, tx_bb_nSamples_per_pulse))
-           print(startOfLine)
-
-           print("{}RF".format(startOfLine))
-           print("{}  Sampling Rate    :  {} kHz".format(startOfLine,self.tx_rf_samplingRate / 1000 ))
-           print("{}  nSamples per Puse:  {}".format(startOfLine, tx_rf_nSamples_per_pulse))
-           print(startOfLine)
-
-           print('{}  TX Block: {}'.format(startOfLine, str(self.tx_block)))
-           print('{}  TX Grid:  {}'.format(startOfLine, str(self.tx_grid )))
+           self.logger.debug(" BB  Sampling Rate    :  {} kHz".format(self.tx_bb_samplingRate / 1000 ))
+           self.logger.debug(" BB  nSamples per Puse:  {}".format( tx_bb_nSamples_per_pulse))
 
 
-           print("\n\n  RX :")
-           print("{}RF".format(startOfLine))
-           print("{}  Sampling Rate    :  {} kHz".format(startOfLine,self.rx_rf_samplingRate / 1000 ))
-      #     print("{}  nSamples per Puse:  {}".format(startOfLine, tx_rf_nSamples_per_pulse))
-           print(startOfLine)
+           self.logger.debug(" RF  Sampling Rate    :  {} kHz".format(self.tx_rf_samplingRate / 1000 ))
+           self.logger.debug(" RF  nSamples per Puse:  {}".format( tx_rf_nSamples_per_pulse))
+
+
+           self.logger.debug('  TX Block: {}'.format( str(self.tx_block)))
+           self.logger.debug('  TX Grid:  {}'.format( str(self.tx_grid )))
+
+           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
   
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
+           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
+           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
 
-           print("{}RF => IF".format(startOfLine))
-           print("{} downsampling rf => if : {}x ".format(startOfLine, self.rx_rf2if_downsamplingRate))
-           print('{}  RX Block rf => if : {}'.format(startOfLine, str(self.rx_if_block)))
-           print('{}  RX Grid  rf => if : {}'.format(startOfLine, str(self.rx_if_grid )))
-           print("{} ".format(startOfLine ))
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
+           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
+           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
 
-           print("{}RF => IF".format(startOfLine))
-           print("{} downsampling if => bb : {}x ".format(startOfLine, self.rx_if2bb_downsamplingRate ))
-           print('{}  RX Block if => bb : {}'.format(startOfLine, str(self.rx_bb_block)))
-           print('{}  RX Grid  if => bb : {}'.format(startOfLine, str(self.rx_bb_grid )))
-           print("{} ".format(startOfLine ))
-
-           print("{}BB".format(startOfLine))
-           print("{}  Sampling Rate    :  {} kHz".format(startOfLine,self.rx_bb_samplingRate / 1000 ))
-      #     print("{}  nSamples per Puse:  {}".format(startOfLine, rx_bb_nSamples_per_pulse))
-           print(startOfLine)
-
-
-
-           print("\n")
-           print('{}\n{}'.format(sepLine,sepLine))
+           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
@@ -601,7 +616,7 @@ class ProcessingGPU(object):
         for iChannel in range(self.nChannels):
             if self.sequences[iChannel] != None:
                channelFreqVec[iChannel] = -( self.sequences[iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq) # use negative frequency here since filter is not time inverted for convolution
-               dbPrint('generatin rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[iChannel].ctrlprm['rfreq'],  self.sequences[iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq /1000 ))
+               self.logger.debug('generatin rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[iChannel].ctrlprm['rfreq'],  self.sequences[iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq /1000 ))
  
 
         self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
@@ -666,7 +681,7 @@ class ProcessingGPU(object):
          #   plt.plot(txpulse[0:5000:2])
          #   plt.plot(txpulse[1:5000:2])
            # plt.show()
-        #    print('finished pulse generation, breakpoint..')
+        #    self.logger.debug('finished pulse generation, breakpoint..')
             import myPlotTools as mpt
             plt.figure()
             mpt.plot_freq(bb_signal[0][0][0], self.tx_bb_samplingRate, show=False)
@@ -699,10 +714,10 @@ class ProcessingGPU(object):
                
     # kick off async data processing
     def rxsamples_process(self):
-        dbPrint('processing rf -> if')
+        self.logger.debug('processing rf -> if')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif, block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
  
-        dbPrint('processing if -> bb')
+        self.logger.debug('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
         
@@ -767,7 +782,7 @@ class ProcessingGPU(object):
         # TODO: assumes single polarization
         for aidx in range(self.nAntennas):
             tx_shm_list[aidx].seek(0)
-            dbPrint('copy tx sampes to shm (ant {}): {}'.format( aidx, tx_shm_list[aidx]))
+            self.logger.debug('copy tx sampes to shm (ant {}): {}'.format( aidx, tx_shm_list[aidx]))
             tx_shm_list[aidx].write(self.tx_rf_outdata[aidx].tobytes())
             tx_shm_list[aidx].flush()
 
@@ -776,22 +791,22 @@ class ProcessingGPU(object):
         # TODO: determine fc from channel
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         self.tx_mixer_freqs[channel] = np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq ) / self.tx_rf_samplingRate)
-        dbPrint('setting tx mixer freq for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
+        self.logger.debug('setting tx mixer freq for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
         cuda.memcpy_htod(self.cu_tx_mixer_freq_rads, self.tx_mixer_freqs)
     
     # update pahse increment of NCO with current channel sequence, then refresh array on GPU
     def _set_rx_phaseIncrement(self, channel):
         fc = self.sequences[channel].ctrlprm['rfreq'] * 1000
-        self.rx_phaseIncrement_rad[channel] = - np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq ) / self.rx_rf_samplingRate)
-        dbPrint('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, (fc - self.usrp_mixing_freq)/1e6)  )
+        self.rx_phaseIncrement_rad[channel] = np.float64(2 * np.pi * (  self.usrp_mixing_freq - fc ) / self.rx_rf_samplingRate)
+        self.logger.debug('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) '.format(channel, fc/1e6, ( self.usrp_mixing_freq - fc)/1e6)  )
         cuda.memcpy_htod(self.cu_rx_phaseIncrement_rad, self.rx_phaseIncrement_rad)
 
     # update host-side phase delay table with current channel sequence, then refresh array on GPU
     def _set_tx_phasedelay(self, channel):
         fc = self.sequences[channel].ctrlprm['tfreq'] * 1000
         
-        for ant in range(self.nAntennas):
-            self.phase_delays[channel][ant] = np.float32(np.mod(2 * np.pi * 1e-9 * self.tdelays[ant] * fc, 2 * np.pi)) 
+        for iAntenna in range(self.nAntennas):
+            self.phase_delays[channel][iAntenna] = np.float32(np.mod(2 * np.pi  * self.tdelays[iAntenna] * fc +self.phase_offsets[iAntenna]/180*np.pi , 2 * np.pi)) 
 
         cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
    
@@ -826,17 +841,17 @@ def parse_usrpconfig_antennas(usrpconfig):
     main_antenna_list = []
     back_antenna_list = []
     for usrp in usrpconfig.sections():
-        if eval(usrpconfig[usrp]['mainarray']) == True: # probably a bad idea
+        if usrpconfig[usrp]['mainarray'].lower() in ['true', '1']:
             main_antenna_list.append(int(usrpconfig[usrp]['array_idx']))
         else:
             back_antenna_list.append(int(usrpconfig[usrp]['array_idx']))
     return main_antenna_list, back_antenna_list
 
-def dbPrint(msg):
-    print(' {}: {} '.format(__file__, msg) )
-
 
 def main():
+    logging_usrp.initLogging('cuda.log')
+    logger = logging.getLogger('cuda_driver')
+
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('usrp_config.ini')
@@ -885,29 +900,26 @@ def main():
     # create sigin_handler for graceful-ish cleanup on exit
     #signal.signal(signal.SIGINT, sigint_handler)
 
-    if(verbose):
-        print('cuda_driver waiting for socket connection at {}:{}'.format(network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
+    logger.debug('cuda_driver waiting for socket connection at {}:{}'.format(network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
 
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()
- 
-    if(verbose):
-        print('cuda_driver waiting for command')
+    logger.debug('cuda_driver waiting for command')
    
     # wait for commands from usrp_server,  
     while(True):
         cmd = recv_dtype(server_conn, np.uint8)
         cmdname = cudamsg_handler_names[cmd]
-        cprint('received {} command'.format(cmdname), 'green')
+        logger.debug('received {} command'.format(cmdname))
 
         handler = cudamsg_handlers[cmd](server_conn, cmd, gpu, antennas, array_info, hardware_limits)
         handler.process()
 
-        cprint('finished processing {} command, responding'.format(cmdname), 'green')
+        logger.debug('finished processing {} command, responding'.format(cmdname))
         handler.respond()
 
-        cprint('responded to {},  waiting for next command'.format(cmdname), 'green')
+        logger.debug('responded to {},  waiting for next command'.format(cmdname))
     
 
 if __name__ == '__main__':

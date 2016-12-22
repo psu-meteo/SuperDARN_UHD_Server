@@ -90,7 +90,7 @@ class driver_command(object):
             for item in self.dataqueue:
                 item.transmit(clientsock)
 
-                cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+               # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
 
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
@@ -231,18 +231,23 @@ class cuda_add_channel_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
-# clear all channels from gpu..
+# clear one channels from gpu
+# TODO: just transmit channel number to save time?
 class cuda_remove_channel_command(driver_command):
-    def __init__(self, cudas, swing = 0):
-        driver_command.__init__(self, cudas, CUDA_REMOVE_SEQUENCE)
+    def __init__(self, cudas, sequence = None, swing = 0):
+        driver_command.__init__(self, cudas, CUDA_REMOVE_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
-        pdb.set_trace()
+        self.sequence = sequence 
+       # pdb.set_trace()
 
     def receive(self, sock):
         super().receive(sock)
         self.sequence = pickle_recv(sock)
 
     def transmit(self):
+        if self.sequence == None:
+            print('cannot send undefined sequence to channel')
+            pdb.set_trace()
         super().transmit()
         for sock in self.clients:
             pickle_send(sock, self.sequence)
@@ -274,7 +279,7 @@ class usrp_rxfe_setup_command(driver_command):
         driver_command.__init__(self, usrps, UHD_RXFE_SET)
         self.queue(amp0, np.uint8, 'amp0')
         self.queue(amp1, np.uint8, 'amp1')
-        self.queue(att, np.uint8, 'amp2')
+        self.queue(att, np.uint8, 'att')
 
 # trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
@@ -297,6 +302,7 @@ class usrp_ready_data_command(driver_command):
         payload['status'] = recv_dtype(sock, np.int32)
         payload['antenna'] = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
+        payload['fault']    = recv_dtype(sock, np.bool_)
         return payload
 
     def recv_samples(self, sock, sock_samples = False):
@@ -340,7 +346,7 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
@@ -350,6 +356,7 @@ class sequence(object):
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+        self.channelScalingFactor = channelScalingFactor # correct frequency dependency and superpositioning of channels
          
         # validate input sequence
         if self.ctrlprm['rfreq'] and self.ctrlprm['rfreq'] != self.ctrlprm['tfreq']:
@@ -372,8 +379,8 @@ def create_testsequence():
 
     ctrlprm = {\
     '' : np.zeros(120, dtype=np.uint8), \
-    'radar' : 0, \
-    'channel' : 0, \
+    'radar' : 1, \
+    'channel' : 1, \
     'local' : 0, \
     'priority' : 1, \
     'current_pulseseq_idx': 0, \
@@ -381,14 +388,14 @@ def create_testsequence():
     'tbeamcode' : 0, \
     'tbeamazm': 0, \
     'tbeamwidth': 0.0, \
-    'tfreq': 2000, \
+    'tfreq': 11000, \
     'trise': 5000, \
     'number_of_samples' : 305, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 3333.3333, \
     'filter_bandwidth' : 3333, \
     'match_filter' : 0, \
-    'rfreq' : 2000, \
+    'rfreq' : 11000, \
     'rbeam' : 0, \
     'rbeamcode' : 0, \
     'rbeamazm' : 0, \

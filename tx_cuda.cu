@@ -27,6 +27,8 @@ TODO:
 #define I_OFFSET 0
 #define Q_OFFSET 1
 
+#define CHECK_FOR_CLIPPING 1
+
 __device__ __constant__ double txfreq_rads[MAXCHANNELS];
 __device__ __constant__ float  txphasedelay_rads[MAXANTS * MAXCHANNELS];
 
@@ -99,10 +101,19 @@ __global__ void interpolate_and_multiply(
             irf_samples[iUpsample] += irf_samples[iUpsample + iChan2sum * upSampleRate];
             qrf_samples[iUpsample] += qrf_samples[iUpsample + iChan2sum * upSampleRate];
         }
+        
+        if (CHECK_FOR_CLIPPING){
+            if (irf_samples[iUpsample] > 1 || irf_samples[iUpsample] < -1) {
+               printf("tx_cuda.cu ERROR: abs amplitude (real value) > 1! gain control is not correct\n");
+             }
+            if (qrf_samples[iUpsample] > 1 || qrf_samples[iUpsample] < -1) {
+               printf("tx_cuda.cu ERROR: abs amplitude (imag value) > 1! gain control is not correct\n");
+             }
+        } 
 
         // write data
-        outData[idxOutput+I_OFFSET] = (int16_t) (0.95 * 32768 * irf_samples[iUpsample] / nChannels);
-        outData[idxOutput+Q_OFFSET] = (int16_t) (0.95 * 32768 * qrf_samples[iUpsample] / nChannels);
+        outData[idxOutput+I_OFFSET] = (int16_t) ( 32768 * irf_samples[iUpsample]);
+        outData[idxOutput+Q_OFFSET] = (int16_t) ( 32768 * qrf_samples[iUpsample]);
     }
 
 }

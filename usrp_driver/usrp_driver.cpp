@@ -226,6 +226,15 @@ ssize_t sock_send_cshort(int32_t sock, std::complex<short int> d)
    return status;
 }
 
+ssize_t sock_send_bool(int32_t sock, bool d)
+{
+   ssize_t status = send(sock, &d, sizeof(bool), 0);
+   if(status != sizeof(bool)) {
+        fprintf(stderr, "error sending bool\n");
+   }
+   return status;
+}
+
 ssize_t sock_send_int16(int32_t sock, int16_t d)
 {
    ssize_t status = send(sock, &d, sizeof(int16_t), 0);
@@ -346,6 +355,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     size_t rxshm_size;
     size_t txshm_size;
 
+    bool mimic_active;
+    float mimic_delay;
+
     int32_t verbose = 1; 
     int32_t rx_worker_status;
 
@@ -387,6 +399,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     rxshm_size = std::stoi(pt.get<std::string>("shm_settings.rxshm_size"));
     txshm_size = std::stoi(pt.get<std::string>("shm_settings.txshm_size"));
     usrp_driver_base_port = std::stoi(pt.get<std::string>("network_settings.USRPDriverPort"));
+    
+    boost::property_tree::ptree pt_array;
+    boost::property_tree::ini_parser::read_ini("array_config.ini", pt_array);
+    mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
+    mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
+    fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
 
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
@@ -446,12 +464,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
+<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
     // initialize rxfe gpio
     kodiak_init_rxfe(usrp);
     // initialize other gpio on usrp
     init_timing_signals(usrp);
   
     
+=======
+    // init rxfe
+    kodiak_init_rxfe(usrp);
+
+>>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
     signal(SIGINT, siginthandler);
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
@@ -524,6 +548,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 sleep(1);
                 break;
             }
+
             connect_retrys = MAX_SOCKET_RETRYS;
             switch(command) {
                 case USRP_SETUP: {
@@ -609,11 +634,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     RXFESettings rf_settings;
                     rf_settings.amp1 = sock_get_uint8(driverconn);
                     rf_settings.amp2 = sock_get_uint8(driverconn);
-                    uint8_t att = sock_get_uint8(driverconn);
-                    rf_settings.att1 = (att >> 0) & 0x01;
-                    rf_settings.att2 = (att >> 1) & 0x01;
-                    rf_settings.att3 = (att >> 2) & 0x01;
-                    rf_settings.att4 = (att >> 3) & 0x01;
+                    uint8_t attTimes2 = sock_get_uint8(driverconn);
+                    rf_settings.att_05_dB = ( attTimes2 & 0x01 ) != 0;
+                    rf_settings.att_1_dB  = ( attTimes2 & 0x02 ) != 0;
+                    rf_settings.att_2_dB  = ( attTimes2 & 0x04 ) != 0;
+                    rf_settings.att_4_dB  = ( attTimes2 & 0x08 ) != 0;
+                    rf_settings.att_8_dB  = ( attTimes2 & 0x10 ) != 0;
+                    rf_settings.att_16_dB = ( attTimes2 & 0x20 ) != 0;
+                   
                     kodiak_set_rxfe(usrp, rf_settings);
                     sock_send_uint8(driverconn, RXFE_SET);
                     break;
@@ -635,6 +663,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga); // TODO: add back in swing
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
+<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
 
                         // create local copy of transmit pulse data from shared memory
                         pulse_samples.resize(pulse_length_rf_samples);
@@ -649,6 +678,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         memcpy(&pulse_samples[0], shm_pulseaddr, pulse_bytes);
 
 
+=======
+                        init_timing_signals(usrp, mimic_active);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
+                        
+>>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
                         double pulse_time_frac = sock_get_float64(driverconn);
@@ -662,8 +695,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
                         
+<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = pulse_length_rf_samples / txrate;
+=======
+                       //  send_timing_for_sequence(usrp, start_time, pulse_times);
+                        double pulseLength = num_tx_rf_samples / usrp->get_tx_rate();
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_times, pulseLength, mimic_active, mimic_delay)); 
+>>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
                         
                         // float debugt = usrp->get_time_now().get_real_secs();
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
@@ -700,6 +739,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_int32(driverconn, state);  // send status
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, num_requested_rx_samples);     // nsamples;  send send number of samples
+                   
+                    // read FAULT status    
+                    bool fault = read_FAULT_status_from_control_board(usrp);
+                    sock_send_bool(driverconn, fault);     // FAULT status from conrol board
+                
+
+ 
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
