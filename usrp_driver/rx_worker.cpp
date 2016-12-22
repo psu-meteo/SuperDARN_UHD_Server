@@ -21,7 +21,7 @@
 #include <uhd/exception.hpp>
 #include <boost/thread.hpp>
 
-#include "recv_and_hold.h"
+#include "rx_worker.h"
 #include "usrp_utils.h"
 #include "dio.h"
 
@@ -32,30 +32,9 @@
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
 
-
-#define TEST_RXWORKER 0
-
-
 #define RX_OFFSET 0 // 290e-6 // microseconds, alex had 450-e6 set here
 
-struct GPIOCommand {
-    uhd::time_spec_t cmd_time;
-    std::string port;
-    std::string gpiocmd;
-    uint32_t value;
-    uint32_t mask;
-};
-
-class CompareTime {
-public:
-    bool operator()(GPIOCommand& t1, GPIOCommand& t2)
-    {
-       return (t1.cmd_time > t2.cmd_time);
-    }
-};
-
-
-void recv_and_hold(
+void usrp_rx_worker(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
     std::vector<std::complex<int16_t>> *rx_data_buffer,
@@ -64,13 +43,13 @@ void recv_and_hold(
     int32_t *return_status
 ){
 
-    DEBUG_PRINT("entering RECV_AND_HOLD\n");
+    DEBUG_PRINT("entering RX_WORKER\n");
 
     //setup streaming
     uhd::rx_metadata_t md;
     md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
 
-    double timeout = 1.0;
+    double timeout = 5.0;
     
     uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
     stream_cmd.num_samps = num_requested_samps;
@@ -102,8 +81,8 @@ void recv_and_hold(
         num_acc_samps += num_rx_samps;
     }
 
-    DEBUG_PRINT("RECV_AND_HOLD fetched samples!\n");
-    if(DEBUG) std::cout << boost::format("RECV_AND_HOLD: %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+    DEBUG_PRINT("RX_WORKER fetched samples!\n");
+    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
 	if (num_acc_samps != num_requested_samps){
         *return_status=-1;
@@ -137,7 +116,7 @@ void recv_and_hold(
         std::cerr << "Packets out of order " << " encountered at " << rx_error_time.get_real_secs() << std::endl;
         *return_status=-1;
     }
-    DEBUG_PRINT("RECV_AND_HOLD finished\n");
+    DEBUG_PRINT("RX_WORKER finished\n");
     return;
 }
 

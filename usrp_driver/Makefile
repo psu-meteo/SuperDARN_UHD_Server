@@ -2,14 +2,14 @@ OS:=$(shell uname -s)
 
 CCpp=g++
 CFLAGS=-c -Wall -pthread -std=c++0x -g3
-LFLAGS  = -L"../iniparser" -L"${HOME}/repos/uhd/host/build/lib"
+LFLAGS  = -L"../../iniparser" -L"${HOME}/repos/uhd/host/build/lib"
 common_libs=-lm -liniparser -lrt -luhd -lfftw3
 linux_libs=-lboost_thread -lboost_system -pthread -l argtable2
 INCLUDES=-I"../include/" -I"include/" -I"../tsg/include" -I"../iniparser3.0b/src/" \
 	 -I"${HOME}/uhd/host/include" -I"${HOME}/uhd/host/include/uhd/types" -I"${HOME}/uhd/host/include/uhd/usrp" \
 	 -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/base" -I"${HOME}/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/include/superdarn"
 
-CPP_SOURCES=usrp_driver.cpp dio.cpp burst_worker.cpp  recv_and_hold.cpp usrp_utils.cpp
+CPP_SOURCES=usrp_driver.cpp dio.cpp tx_worker.cpp  rx_worker.cpp usrp_utils.cpp
 
 CPP_OBJECTS=$(CPP_SOURCES:.cpp=.o)
 

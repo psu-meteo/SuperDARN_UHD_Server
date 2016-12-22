@@ -1,5 +1,3 @@
 #!/bin/bash
 #pycallgraph graphviz -- 
-./usrp_server.py
-echo "press enter to continue: "
-read
+python3 -m cProfile -o cprofile_usrp_server usrp_server.py

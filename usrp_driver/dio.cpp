@@ -195,8 +195,6 @@ void send_timing_for_sequence(
     }
 
 
-
-
     float debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO: pushed gpio commands at usrp_time %2.4f\n", debugt);
     // issue gpio commands in time sorted order 

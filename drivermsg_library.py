@@ -266,7 +266,7 @@ class usrp_setup_command(driver_command):
         self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
-        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector')
+        self.queue(pulse_offsets_vector, np.uint64, 'pulse_offsets_vector')
 
 # set rxfe (amplifier and attenuator) settings 
 class usrp_rxfe_setup_command(driver_command):
@@ -276,12 +276,15 @@ class usrp_rxfe_setup_command(driver_command):
         self.queue(amp1, np.uint8, 'amp1')
         self.queue(att, np.uint8, 'amp2')
 
-# start usrp trigger
+# trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
     def __init__(self, usrps, trigger_time):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
         self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'clrfreq_uhd_time_int')
         self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'clrfreq_uhd_time_frac')
+
+
+
 
 
 # command usrp drivers to ready rx sample data into shared memory
