@@ -661,6 +661,16 @@ class ProcessingGPU(object):
         self.synth_tx_rf_pulses(bb_signal, tx_bb_nSamples_per_pulse)
     
         # Debug plotting for TX
+        debugAmpCompare = False # compare the ampitude of input and output of usrp (out connected to in)
+        if debugAmpCompare:
+            import matplotlib.pyplot as plt
+            plt.plot(self.tx_rf_outdata[0][0::2])
+            maxOutValue = np.max(np.absolute(self.tx_rf_outdata[0][0::2]))
+            maxOutValue = np.max(np.absolute(self.tx_rf_outdata[0][1::2]))
+            plt.title("tx max value {}".format(maxOutValue))
+            plt.show()
+            
+
         if False:
         #  transmit pulse for debugging...
             import matplotlib
@@ -716,6 +726,14 @@ class ProcessingGPU(object):
         self.logger.debug('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
+        debugAmpCompare = False
+        if debugAmpCompare:
+            import matplotlib.pyplot as plt
+            plt.plot(self.rx_rf_samples[0][0::2])
+            maxInValue = np.max(np.absolute(self.rx_rf_samples[0][0::2]))
+            maxInValue = np.max(np.absolute(self.rx_rf_samples[0][1::2]))
+            plt.title("rx max value {}".format(maxInValue))
+            plt.show()
         
 
         # for testing RX: plot RF, IF and BB

@@ -5,4 +5,4 @@ sleep 1
 sleep 13
 ./run_usrp_server.sh & # usrp server connects to cuda and usrp drivers
 sleep 2 
-gdb -ex run --args uafscan --stid mcm --c 1 --debug # control program connects to usrp server
+gdb -ex run --args uafscan --stid mcm -c 1 --debug # control program connects to usrp server
