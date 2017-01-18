@@ -635,7 +635,7 @@ class RadarHardwareManager:
         npulses              = self.commonChannelParameter['npulses']
 
         # calculate exact number of RF samples for RX and TX (equal to cuda_driver)
-        tx_rf_nSamples = np.uint64(int(self.ini_cuda_settings['TXUpsampleRate']) *  ( np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['pulseLength']/1e6 ) + 2 * np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['tr_to_pulse_delay']/1e6 )))
+        tx_rf_nSamples = np.uint64( ( np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['pulseLength']/1e6 ) + 2 * np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['tr_to_pulse_delay']/1e6 )))
         rx_if_nSamples = np.floor((self.commonChannelParameter['number_of_samples'] -1) * int(self.ini_cuda_settings['IFBBRATE']) + int(self.ini_cuda_settings['NTapsRX_ifbb']))
         rx_rf_nSamples = np.uint64(np.floor((rx_if_nSamples -1) * int(self.ini_cuda_settings['RFIFRATE']) + int(self.ini_cuda_settings['NTapsRX_rfif'])))
 
