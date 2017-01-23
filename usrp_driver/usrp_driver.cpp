@@ -82,6 +82,8 @@
 #define SUPRESS_UHD_PRINTS 0
 #define INIT_SHM 1
 
+#define CAPTURE_ERRORS 0
+
 enum driver_states
 {
     ST_INIT,
@@ -332,7 +334,6 @@ ssize_t sock_send_uint8(int8_t sock, uint8_t d)
    return status;
 }
 
-
 void siginthandler(int sigint)
 {
     // probably unsafe to munmap and sem_close in signal handler..
@@ -394,13 +395,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     boost::thread_group uhd_threads;
 
     // process config file for port and SHM sizes
+    DEBUG_PRINT("USRP_DRIVER starting to read driver_config.ini\n");
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini("driver_config.ini", pt);
+
+    DEBUG_PRINT("USRP_DRIVER reading rxshm_size\n");
+    std::cout << pt.get<std::string>("shm_settings.rxshm_size") << '\n';
     rxshm_size = std::stoi(pt.get<std::string>("shm_settings.rxshm_size"));
+
+    DEBUG_PRINT("USRP_DRIVER reading txshm_size\n");
     txshm_size = std::stoi(pt.get<std::string>("shm_settings.txshm_size"));
     usrp_driver_base_port = std::stoi(pt.get<std::string>("network_settings.USRPDriverPort"));
     
     boost::property_tree::ptree pt_array;
+    DEBUG_PRINT("USRP_DRIVER starting to read array_config.ini\n");
     boost::property_tree::ini_parser::read_ini("array_config.ini", pt_array);
     mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
@@ -417,7 +425,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
 
-    std::vector<std::complex<int16_t> *> pulse_samples(MAX_PULSE_LENGTH);
+    std::vector<std::complex<int16_t>> pulse_samples(MAX_PULSE_LENGTH);
     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
 
@@ -464,19 +472,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
-<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
     // initialize rxfe gpio
     kodiak_init_rxfe(usrp);
     // initialize other gpio on usrp
-    init_timing_signals(usrp);
-  
+    init_timing_signals(usrp, mimic_active);
     
-=======
-    // init rxfe
-    kodiak_init_rxfe(usrp);
-
->>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
-    signal(SIGINT, siginthandler);
+    //if(CAPTURE_ERRORS) {
+    //    signal(SIGINT, siginthandler);
+    //}
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
     shm_swingarx = open_sample_shm(ant, RXDIR, SIDEA, SWING0, rxshm_size);
@@ -663,7 +666,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         lock_semaphore(swing, sem_swinga); // TODO: add back in swing
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
-<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
 
                         // create local copy of transmit pulse data from shared memory
                         pulse_samples.resize(pulse_length_rf_samples);
@@ -678,10 +680,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         memcpy(&pulse_samples[0], shm_pulseaddr, pulse_bytes);
 
 
-=======
-                        init_timing_signals(usrp, mimic_active);  // TODO: move this later. maybe to USRP_SETUP? (mgu)
-                        
->>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
                         double pulse_time_frac = sock_get_float64(driverconn);
@@ -695,14 +693,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
                         
-<<<<<<< HEAD:usrp_driver/usrp_driver.cpp
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = pulse_length_rf_samples / txrate;
-=======
-                       //  send_timing_for_sequence(usrp, start_time, pulse_times);
-                        double pulseLength = num_tx_rf_samples / usrp->get_tx_rate();
-                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_times, pulseLength, mimic_active, mimic_delay)); 
->>>>>>> 0fd6cbd8e16b582bc18a0fee836201495ed6fa62:usrp_driver.cpp
                         
                         // float debugt = usrp->get_time_now().get_real_secs();
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
@@ -710,7 +702,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, pulse_samples, start_time, pulse_sample_idx_offsets)); 
-                        //uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength)); 
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay)); 
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
                         //swing = toggle_swing(swing); 
