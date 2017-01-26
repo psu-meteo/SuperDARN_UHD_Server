@@ -2,5 +2,4 @@
 *.o
 *.log
 *.*int16
-usrp_driver
 tags

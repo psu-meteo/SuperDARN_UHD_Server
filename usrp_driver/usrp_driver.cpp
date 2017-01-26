@@ -397,7 +397,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // process config file for port and SHM sizes
     DEBUG_PRINT("USRP_DRIVER starting to read driver_config.ini\n");
     boost::property_tree::ptree pt;
-    boost::property_tree::ini_parser::read_ini("driver_config.ini", pt);
+    boost::property_tree::ini_parser::read_ini("../driver_config.ini", pt);
 
     DEBUG_PRINT("USRP_DRIVER reading rxshm_size\n");
     std::cout << pt.get<std::string>("shm_settings.rxshm_size") << '\n';
@@ -409,7 +409,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     
     boost::property_tree::ptree pt_array;
     DEBUG_PRINT("USRP_DRIVER starting to read array_config.ini\n");
-    boost::property_tree::ini_parser::read_ini("array_config.ini", pt_array);
+    boost::property_tree::ini_parser::read_ini("../array_config.ini", pt_array);
     mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
     fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
