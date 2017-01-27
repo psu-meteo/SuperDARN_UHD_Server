@@ -115,7 +115,12 @@ void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, siz
     fprintf(stderr, "usrp_driver opening: %s\n", shm_device);
     shm_fd = shm_open(shm_device, O_RDWR, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {
-        fprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d\n", errno);
+        if (errno == ENOENT) {
+       	  fprintf(stderr, "Error: shared memory name did not exist. Is cuda_driver running? (errno %d)\n", errno);
+         }
+        else {
+           fprintf(stderr, "Couldn't get a handle to the shared memory; errno is %d\n", errno);
+        }
     }
     
     if (ftruncate(shm_fd, shm_size) != 0){
