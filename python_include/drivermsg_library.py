@@ -416,9 +416,9 @@ def create_testsequence():
 
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
+    channelScalingFactor = 0.95
 
-
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
+    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
 
     return seq
 

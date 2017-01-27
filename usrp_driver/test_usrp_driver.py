@@ -7,15 +7,37 @@ import posix_ipc
 import pdb
 import time
 import subprocess
+import configparser
+
 
 from termcolor import cprint
+
+sys.path.insert(0, '../python_include')
+sys.path.insert(0, '../cuda_driver')
 
 from drivermsg_library import *
 from socket_utils import *
 from cuda_driver import *
 
 START_DRIVER = False
-ANTENNA_UNDER_TEST = 1
+ANTENNA_UNDER_TEST = 0
+
+
+# parse gpu config file
+driverconfig = configparser.ConfigParser()
+driverconfig.read('../driver_config.ini')
+shm_settings = driverconfig['shm_settings']
+cuda_settings = driverconfig['cuda_settings']
+network_settings = driverconfig['network_settings']
+
+rxshm_size = shm_settings.getint('rxshm_size')
+txshm_size = shm_settings.getint('txshm_size')
+
+
+USRPDRIVER_PORT = network_settings.getint('USRPDriverPort')
+
+RFRATE = 10000000
+
 
 rx_shm_list = [[],[]]
 tx_shm_list = []
@@ -27,10 +49,6 @@ sides = [SIDEA]
 shm_list = []
 sem_list = []
              
-rxshm_size = 99614720
-txshm_size = 51200000
-
-RFRATE = 10000000
 
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
@@ -77,7 +95,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         max_connect_attempts = 5
         for i in range(max_connect_attempts):
-            print('attempting connection to usrp_driver')
+            print('attempting connection to usrp_driver (at localhost:{}'.format(USRPDRIVER_PORT + ANTENNA_UNDER_TEST))
             try:
                 self.serversock.connect(('localhost', USRPDRIVER_PORT + ANTENNA_UNDER_TEST))
                 break;
@@ -153,7 +171,8 @@ class USRP_ServerTestCases(unittest.TestCase):
         # create test tone
         tone = 50e3 # 50 khz tone..
         amplitude = np.iinfo(np.int16).max / 8 # 1/8 of max amplitude
-        samplet = np.arange(0,seq.npulses * seq.tx_time,1/RFRATE)[:-1]
+        # print("nPulses: {}, tx_time: {}, RFRATE: {}".format(seq.npulses, seq.tx_time, RFRATE))
+        samplet = np.arange(0,seq.npulses * seq.tx_time/1e6 ,1/RFRATE)[:-1]
         sample_real = np.int16(amplitude * np.cos(2 * np.pi * tone * samplet))
         sample_imag = np.int16(amplitude * np.sin(2 * np.pi * tone * samplet))
         sample_tx = np.zeros(2 * len(samplet), dtype=np.int16)
@@ -161,10 +180,11 @@ class USRP_ServerTestCases(unittest.TestCase):
         sample_tx[0::2] = sample_real
         sample_tx[1::2] = sample_imag
         tx_shm.write(sample_tx.tobytes())
-
+        num_requested_rx_samples = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))  # TODO: thiss has to changed for integration period 
 
         cprint('sending setup command', 'blue')
-        cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
+        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, num_requested_rx_samples, seq.ctrlprm['number_of_samples'], seq.pulse_offsets_vector)
+        # cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
