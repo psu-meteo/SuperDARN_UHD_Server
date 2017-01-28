@@ -161,11 +161,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         time.sleep(5)
     '''
-    # test trigger pulse read
-    def test_trigger_pulse(self):
-        cprint('testing usrp trigger','red')
-        seq = create_testsequence()
-
+    def fill_tx_shm_with_one_pulse(self, seq):
         cprint('populating tx shm sample buffer','red')
         tx_shm = tx_shm_list[0]
         tx_shm.seek(0)
@@ -183,47 +179,53 @@ class USRP_ServerTestCases(unittest.TestCase):
         sample_tx[0::2] = sample_real
         sample_tx[1::2] = sample_imag
         tx_shm.write(sample_tx.tobytes())
+
+        return nSamples_per_pulse
+
+
+
+    # test trigger pulse read
+    def test_trigger_pulse_one_sequence(self):
+        cprint('testing usrp trigger with one sequence','red')
+        seq = create_testsequence()
+
+        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
+
         num_requested_rx_samples = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))  # TODO: thiss has to changed for integration period 
 
         cprint('sending setup command', 'blue')
         offset_sample_list = [offset * RFRATE for offset in seq.pulse_offsets_vector]
         cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, num_requested_rx_samples, nSamples_per_pulse, offset_sample_list)
-        # cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_SETUP)
+
     
-        for i in range(1):
+        for i in range(10):
+#        while True:
             # grab current usrp time from one usrp_driver
             cmd = usrp_get_time_command(self.serversock)
             cmd.transmit()
             usrp_time = cmd.recv_time(self.serversock)
             cmd.client_return()
-            trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
 
             cprint('sending trigger pulse command', 'blue')
+            trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
             cmd = usrp_trigger_pulse_command([self.serversock], trigger_time)
             cmd.transmit()
-
             client_returns = cmd.client_return()
             for r in client_returns:
                 assert(r == UHD_TRIGGER_PULSE) 
 
+
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-#            transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
             cmd = usrp_ready_data_command([self.serversock])
             cmd.transmit()
-
-            print('looking for pulse data')
-            # TODO: delete this
-            #transmit_dtype(self.serversock, np.int32(ANTENNA_UNDER_TEST ))
-
             ret = cmd.recv_metadata(self.serversock)
             print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
 
-#            cmd.receive(self.serversock) # get pulse data
             client_returns = cmd.client_return()
             for r in client_returns:
                 assert(r == UHD_READY_DATA) 
@@ -241,9 +243,9 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         print('sampled phase')
         import matplotlib.pyplot as plt
-        plt.plot(ar[::2])
-        plt.plot(ar[1::2])
-        plt.show()
+#       plt.plot(ar[::2])
+#       plt.plot(ar[1::2])
+#       plt.show()
 #        pdb.set_trace() 
 
         
