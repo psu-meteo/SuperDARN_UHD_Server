@@ -430,7 +430,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
 
-    std::vector<std::complex<int16_t>> pulse_samples(MAX_PULSE_LENGTH);
+    std::vector<std::complex<int16_t>> pulse_samples(MAX_PULSE_LENGTH,0);
     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
 
@@ -674,7 +674,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         // create local copy of transmit pulse data from shared memory
                         size_t spb = tx_stream->get_max_num_samps();
-                        pulse_samples.resize(pulse_length_rf_samples+spb);
+                        pulse_samples.resize(pulse_length_rf_samples+2*spb);
 
                         if (swing == SWING0) {
                             shm_pulseaddr = &((std::complex<int16_t> *) shm_swingatx)[0];
