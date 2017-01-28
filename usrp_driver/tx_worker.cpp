@@ -50,9 +50,10 @@ void usrp_tx_worker(
     float timeout = 5;
 
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
-    size_t samples_per_pulse = pulse_samples.size();
+    int32_t samples_per_pulse = pulse_samples.size();
 
     size_t spb = tx_stream->get_max_num_samps();
+    
 
     // assume at least spb length zero padding before first pulse
     size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + samples_per_pulse; 
@@ -94,8 +95,9 @@ void usrp_tx_worker(
 
         md.start_of_burst = false;
         md.has_time_spec = false;
+    //    if(DEBUG) std::cout << boost::format(" nacc: %1%, to pulse: %2% ") % nacc_samples % samples_to_pulse;
 
-        if(DEBUG) std::cout << boost::format("Sent packet: %u samples") % ntx_samples << std::endl;
+        if(DEBUG) std::cout << boost::format(" Sent packet:  idx: %u") % sample_idx << std::endl;
         nacc_samples += ntx_samples;
     }
 

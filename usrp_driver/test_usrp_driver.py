@@ -18,6 +18,8 @@ sys.path.insert(0, '../cuda_driver')
 from drivermsg_library import *
 from socket_utils import *
 from cuda_driver import *
+from radar_config_constants import *
+
 
 START_DRIVER = False
 ANTENNA_UNDER_TEST = 0
@@ -79,7 +81,7 @@ def stop_usrpserver(sock, pid):
     
 class USRP_ServerTestCases(unittest.TestCase):
     def setUp(self):
-        antennas = [1]
+        antennas = [ANTENNA_UNDER_TEST]
         for ant in antennas:
             rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
             rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
@@ -170,12 +172,13 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         # create test tone
         tone = 50e3 # 50 khz tone..
-        amplitude = np.iinfo(np.int16).max / 8 # 1/8 of max amplitude
-        # print("nPulses: {}, tx_time: {}, RFRATE: {}".format(seq.npulses, seq.tx_time, RFRATE))
+        amplitude = np.iinfo(np.int16).max / 2 # 1/2 of max amplitude
+        print("nPulses: {}, tx_time: {}, RFRATE: {}".format(seq.npulses, seq.tx_time, RFRATE))
         samplet = np.arange(0,seq.npulses * seq.tx_time/1e6 ,1/RFRATE)[:-1]
         sample_real = np.int16(amplitude * np.cos(2 * np.pi * tone * samplet))
         sample_imag = np.int16(amplitude * np.sin(2 * np.pi * tone * samplet))
         sample_tx = np.zeros(2 * len(samplet), dtype=np.int16)
+        nSamples_per_pulse =  (seq.tx_time/1e6*RFRATE)
 
         sample_tx[0::2] = sample_real
         sample_tx[1::2] = sample_imag
@@ -183,16 +186,24 @@ class USRP_ServerTestCases(unittest.TestCase):
         num_requested_rx_samples = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))  # TODO: thiss has to changed for integration period 
 
         cprint('sending setup command', 'blue')
-        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, num_requested_rx_samples, seq.ctrlprm['number_of_samples'], seq.pulse_offsets_vector)
+        offset_sample_list = [offset * RFRATE for offset in seq.pulse_offsets_vector]
+        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, num_requested_rx_samples, nSamples_per_pulse, offset_sample_list)
         # cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_SETUP)
     
-        for i in range(10):
+        for i in range(1):
+            # grab current usrp time from one usrp_driver
+            cmd = usrp_get_time_command(self.serversock)
+            cmd.transmit()
+            usrp_time = cmd.recv_time(self.serversock)
+            cmd.client_return()
+            trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
+
             cprint('sending trigger pulse command', 'blue')
-            cmd = usrp_trigger_pulse_command([self.serversock])
+            cmd = usrp_trigger_pulse_command([self.serversock], trigger_time)
             cmd.transmit()
 
             client_returns = cmd.client_return()
@@ -201,11 +212,18 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-            transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
+#            transmit_dtype(self.serversock, np.uint8(UHD_READY_DATA)) 
             cmd = usrp_ready_data_command([self.serversock])
+            cmd.transmit()
 
             print('looking for pulse data')
-            cmd.receive(self.serversock) # get pulse data
+            # TODO: delete this
+            #transmit_dtype(self.serversock, np.int32(ANTENNA_UNDER_TEST ))
+
+            ret = cmd.recv_metadata(self.serversock)
+            print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
+
+#            cmd.receive(self.serversock) # get pulse data
             client_returns = cmd.client_return()
             for r in client_returns:
                 assert(r == UHD_READY_DATA) 
@@ -213,7 +231,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             cprint('finished test trigger pulse', 'green')
             
         # plot data
-        num_rx_samples = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_baseband_samples'] / seq.ctrlprm['baseband_samplerate'])))
+        num_rx_samples = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))
         rx_shm = rx_shm_list[0][0]
         rx_shm.seek(0)
         ar = np.frombuffer(rx_shm, dtype=np.int16, count=num_rx_samples)
@@ -222,7 +240,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         print(arp[:200000:1000])
 
         print('sampled phase')
-        pdb.set_trace() 
+#        pdb.set_trace() 
 
         
 

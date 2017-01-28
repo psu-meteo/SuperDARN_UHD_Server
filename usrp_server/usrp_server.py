@@ -405,7 +405,7 @@ class RadarHardwareManager:
 
         for iUSRP, usrpsock in enumerate(self.usrpsocks):
             self.logger.debug('start receiving one USRP status')
-            transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
+          ##  transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']

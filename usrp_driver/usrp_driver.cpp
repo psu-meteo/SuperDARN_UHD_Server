@@ -673,7 +673,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
 
                         // create local copy of transmit pulse data from shared memory
-                        pulse_samples.resize(pulse_length_rf_samples);
+                        size_t spb = tx_stream->get_max_num_samps();
+                        pulse_samples.resize(pulse_length_rf_samples+spb);
+
                         if (swing == SWING0) {
                             shm_pulseaddr = &((std::complex<int16_t> *) shm_swingatx)[0];
                         } else {
@@ -682,7 +684,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * pulse_length_rf_samples;
 
-                        memcpy(&pulse_samples[0], shm_pulseaddr, pulse_bytes);
+                        memcpy(&pulse_samples[spb], shm_pulseaddr, pulse_bytes);
 
 
                         // read in time for start of pulse sequence over socket
@@ -721,7 +723,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 case READY_DATA: {
                     DEBUG_PRINT("READY_DATA command, waiting for uhd threads to join back\n");
-                    uint32_t channel_index;
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
 
@@ -730,7 +731,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
-                    channel_index = sock_get_int32(driverconn); 
+                  
+                   // TODO: delete this
+                   // uint32_t channel_index;
+                   // channel_index = sock_get_int32(driverconn); 
 
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %d\n", state, ant, num_requested_rx_samples);
                     sock_send_int32(driverconn, state);  // send status
