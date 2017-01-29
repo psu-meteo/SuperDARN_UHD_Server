@@ -64,7 +64,8 @@
 // SYNC
 #define SYNC_PINS IO_PIN_08 
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
-#define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
+#define SYNC_OFFSET_END   (400e-6) // start of sync pulse
+#define SYNC_FOR_EACH_SEQUENCE 1
 
 //  MIMIC (LFTX)
 #define MIMIC_TX    IO_PIN_11
@@ -180,6 +181,7 @@ void send_timing_for_sequence(
     bool mimic_active,
     float mimic_delay
 ) {
+    size_t nPulsesPerSequence = 8; // TODO: ask jon if sync for each sequence or just per period
 
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
 
@@ -208,6 +210,21 @@ void send_timing_for_sequence(
 
     // set TX and RX line for each pulse
     for(size_t iPulse = 0; iPulse < pulse_times.size() ; iPulse++) {
+
+       // add sync pulse at start of each sequence
+       if (iPulse % nPulsesPerSequence == 0 && SYNC_FOR_EACH_SEQUENCE ) { // TODO: exclude iPulse == 0
+           fprintf( stderr, "DIO SYNC at pulse  %i\n", iPulse ); 
+           c.mask     = SYNC_PINS;
+           c.value    = SYNC_PINS;
+           c.cmd_time = offset_time_spec(pulse_times[iPulse], SYNC_OFFSET_START);
+           cmdq.push(c);
+           // lower SYNC pin
+           c.value = 0;
+           c.cmd_time = offset_time_spec(pulse_times[iPulse], SYNC_OFFSET_END);
+           cmdq.push(c);	  
+        }
+
+
 
         // set TX high, RX low    
         c.mask     = TR_PINS;
