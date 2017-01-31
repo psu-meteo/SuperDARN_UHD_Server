@@ -44,6 +44,8 @@ void usrp_rx_worker(
 ){
 
     DEBUG_PRINT("entering RX_WORKER\n");
+    fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
+
 
     //setup streaming
     uhd::rx_metadata_t md;

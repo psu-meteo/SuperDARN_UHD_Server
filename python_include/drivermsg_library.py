@@ -47,7 +47,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+     #       print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
@@ -299,8 +299,8 @@ class usrp_ready_data_command(driver_command):
         
     def recv_metadata(self, sock):
         payload = {}
-        payload['status'] = recv_dtype(sock, np.int32)
-        payload['antenna'] = recv_dtype(sock, np.int32)
+        payload['status']   = recv_dtype(sock, np.int32)
+        payload['antenna']  = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
         payload['fault']    = recv_dtype(sock, np.bool_)
         return payload
