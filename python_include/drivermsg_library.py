@@ -369,7 +369,7 @@ class sequence(object):
         if self.npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
 
-
+    
         self.sequence_id = uuid.uuid1()
 
 def create_testsequence():
@@ -403,23 +403,21 @@ def create_testsequence():
     'status' : 0, \
     'pulseseq_idx' : 0}
         
-    npulses = 8
+    npulses = 1
 
     tr_to_pulse_delay = 60
     #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
     pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] 
     pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
     txbbrate = ctrlprm['baseband_samplerate']
-    pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
-    phase_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
-    pulse_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
+    pulse_lens = [300] # length of pulse in baseband samples?
+    phase_masks = [np.zeros(30)] # ... 
+    pulse_masks = [np.zeros(30)]
 
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
-
-
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
-
+    channel_scaling_factor = 1
+    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channel_scaling_factor, ctrlprm)
     return seq
 
 def create_testsequence_uafscan():

@@ -51,13 +51,12 @@ class CUDA_ServerTestCases(unittest.TestCase):
         for i in range(max_connect_attempts): 
             print('attempting connection to usrp_driver') 
             try: 
-                self.serversock.connect(('localhost', CUDADRIVER_PORT))
+                self.serversock.connect(('localhost', 55420))
                 break
             except:
                 print('connecting to cuda driver failed on attempt ' + str(i + 1))
                 time.sleep(5)
 
-        self.cudasocks = [] # TODO...
         rx_shm_list[0].append(shm_mmap(shm_namer(ANTENNA, SWING0, SIDEA, direction = 'rx')))
         tx_shm_list.append(shm_mmap(shm_namer(ANTENNA, SWING0, SIDEA, direction = 'tx')))
 
@@ -83,64 +82,77 @@ class CUDA_ServerTestCases(unittest.TestCase):
         getdata.transmit()
     '''
     def test_cuda_downsample_and_filter(self):
-        
         cprint('testing cuda get data (downsampling)', 'red')
         seq = create_testsequence()
-        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
-        setupcmd.transmit()
+	
+        channel_number = 1
+        nAntennas = 1
+        nMainAntennas = 16
 
-        setupcmd = cuda_add_channel_command([self.serversock], seq) 
-        setupcmd.transmit()
-
-
-        cmd = cuda_process_command([self.serversock])
+        # send channel information
+        cmd = cuda_add_channel_command([self.serversock], seq) 
         cmd.transmit()
-
-
-
-
-# Copy from usrm_server.py
-        cmd = cuda_get_data_command(self.serversock)
-
-        cmd.transmit()
-
-        # TODO: setup through all sockets
-        # recv metadata from cuda drivers about antenna numbers and whatnot
-        # fill up provided main and back baseband sample buffers
-
-        # TODO: fill in sample buffer with baseband sample array
-        cudasock = self.serversock
-            # TODO: recieve antenna number
-
-        transmit_dtype(cudasock, 0 , np.int32)
-        nants = recv_dtype(cudasock, np.uint32)
-        dbPrint('received nants= {}'.format(nants))
-
-        for ant in range(nants):
-            ant = recv_dtype(cudasock, np.uint16)
-            dbPrint('received idx ant = {}'.format(ant))
-            num_samples = recv_dtype(cudasock, np.uint32)
-            samples = recv_dtype(cudasock, np.float32, num_samples)
-             
-            if ant < MAX_MAIN_ARRAY_TODO:
-                main_samples[ant] = samples[:]
-
-            else:
-                back_samples[ant - MAX_MAIN_ARRAY_TODO] = samples
-                           
-        # samples is interleaved I/Q float32 [self.nants, self.nchans, nbbsamps_rx]
-        
-    # TODO: currently assuming samples is main samples, no back array!
-
-
-       # pdb.set_trace()
         cmd.client_return()
 
-       # setupcmd = cuda_get_data_command([self.serversock]) #seq 
-       # setupcmd.transmit()
+        cprint('finished add channel command', 'red')
+        # TODO: populate samples in shared memory
+        
+        # run generate pulse command to initialize memory..
+        cmd = cuda_generate_pulse_command([self.serversock])
+        cmd.transmit()
+        cmd.client_return()
+        cprint('finished generate pulse command', 'red')
 
-       # transmit_dtype(self.serversock, 0, np.int32)
-       # nAnts = recv_dtype(self.serversock, np.int32)
+
+        # process samples from shared memory
+        cmd = cuda_process_command([self.serversock])
+        cmd.transmit()
+        cmd.client_return
+        cprint('finished process command', 'red')
+
+        # copy processed samples
+        cmd = cuda_get_data_command(self.serversock)
+        cmd.transmit()
+        
+        main_samples = None
+        back_samples = None
+
+	# TODO: create main_samples and back_samples arrays
+        cudasock = self.serversock
+        
+        nAntennas = recv_dtype(cudasock, np.uint32)
+
+        transmit_dtype(cudasock, channel_number, np.int32)
+
+        for iAntenna in range(nAntennas):
+            antIdx = recv_dtype(cudasock, np.uint16)
+
+            cprint('collecting samples from antenna {}'.format(antIdx), 'red')
+            num_samples = recv_dtype(cudasock, np.uint32)
+            samples = recv_dtype(cudasock, np.float32, num_samples)
+            samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+
+            #... initialize main/back sample arrays once num_samples is known
+            if main_samples == None:
+                main_samples = np.zeros((4, 16, num_samples))	
+                back_samples = np.zeros((4, 4, num_samples))
+
+            if antIdx < nMainAntennas:
+                main_samples[channel_number][antIdx] = samples[:]
+
+            else:
+                back_samples[channel_number][antIdx - nMainAntennas] = samples[:]
+
+
+        transmit_dtype(cudasock, -1, np.int32) # send channel -1 to cuda driver to end transfer process
+
+        cprint('finished collecting samples!', 'red')
+
+        cmd.client_return()
+
+        # TODO: verify samples
+        pdb.set_trace()
+
     '''
     def test_cuda_add_channel(self):
         cprint('testing cuda add channel', 'red')
