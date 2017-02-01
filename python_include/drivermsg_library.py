@@ -47,7 +47,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+     #       print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
@@ -299,8 +299,8 @@ class usrp_ready_data_command(driver_command):
         
     def recv_metadata(self, sock):
         payload = {}
-        payload['status'] = recv_dtype(sock, np.int32)
-        payload['antenna'] = recv_dtype(sock, np.int32)
+        payload['status']   = recv_dtype(sock, np.int32)
+        payload['antenna']  = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
         payload['fault']    = recv_dtype(sock, np.bool_)
         return payload
@@ -416,8 +416,9 @@ def create_testsequence():
 
     usrp_config = configparser.ConfigParser()
     usrp_config.read('usrp_config.ini')
-    channel_scaling_factor = 1
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channel_scaling_factor, ctrlprm)
+    channelScalingFactor = 0.95
+
+    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
     return seq
 
 def create_testsequence_uafscan():
