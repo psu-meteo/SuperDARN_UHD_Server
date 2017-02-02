@@ -22,7 +22,7 @@ from radar_config_constants import *
 
 
 START_DRIVER = False
-ANTENNA_UNDER_TEST = 0
+ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7]
 
 
 # parse gpu config file
@@ -81,7 +81,7 @@ def stop_usrpserver(sock, pid):
     
 class USRP_ServerTestCases(unittest.TestCase):
     def setUp(self):
-        antennas = [ANTENNA_UNDER_TEST]
+        antennas = ANTENNA_UNDER_TEST
         for ant in antennas:
             rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
             rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
@@ -93,22 +93,24 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         time.sleep(1)
         self.pid = start_usrpserver()
-
-        self.serversock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         max_connect_attempts = 5
-        for i in range(max_connect_attempts):
-            print('attempting connection to usrp_driver (at localhost:{}'.format(USRPDRIVER_PORT + ANTENNA_UNDER_TEST))
-            try:
-                self.serversock.connect(('localhost', USRPDRIVER_PORT + ANTENNA_UNDER_TEST))
-                break;
-            except:
-                print('connecting to usrp driver failed on attempt ' + str(i + 1))
-                time.sleep(3)
 
-                if i == (max_connect_attempts - 1):
-                    subprocess.Popen(['pkill', 'usrp_driver'])
-                    print('connecting to usrp driver failed, exiting')
-                    sys.exit(1)
+        self.serversock = []
+        for iUSRP, antennaNumber in enumerate(ANTENNA_UNDER_TEST):
+           self.serversock.append(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+           for i in range(max_connect_attempts):
+               print('attempting connection to usrp_driver (at localhost:{}'.format(USRPDRIVER_PORT + antennaNumber))
+               try:
+                   self.serversock[iUSRP].connect(('localhost', USRPDRIVER_PORT + antennaNumber))
+                   break;
+               except:
+                   print('connecting to usrp driver failed on attempt ' + str(i + 1))
+                   time.sleep(3)
+  
+                   if i == (max_connect_attempts - 1):
+                       subprocess.Popen(['pkill', 'usrp_driver'])
+                       print('connecting to usrp driver failed, exiting')
+                       sys.exit(1)
 
     def tearDown(self):
         for shm in shm_list:
@@ -119,13 +121,14 @@ class USRP_ServerTestCases(unittest.TestCase):
             sem.unlink()
 
         #stop_usrpserver(self.serversock, self.pid)
-        self.serversock.close()
+        for sock in self.serversock:
+           sock.close()
     '''
     # test setting up usrp.. 
     def test_usrp_setup(self):
         cprint('usrp initialization','red')
         seq = create_testsequence()
-        cmd = usrp_setup_command([self.serversock], seq.ctrlprm, seq, RFRATE)
+        cmd = usrp_setup_command(self.serversock, seq.ctrlprm, seq, RFRATE)
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_SETUP)
@@ -145,7 +148,7 @@ class USRP_ServerTestCases(unittest.TestCase):
     # test rxfe setup
     def test_usrp_rxfe(self):
         cprint('testing usrp rxfe setup', 'red')
-        cmd = usrp_rxfe_setup_command([self.serversock], 0, 0, 0)
+        cmd = usrp_rxfe_setup_command(self.serversock, 0, 0, 0)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
@@ -153,7 +156,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
 
         time.sleep(5)
-        cmd = usrp_rxfe_setup_command([self.serversock], 1, 1, 31)
+        cmd = usrp_rxfe_setup_command(self.serversock, 1, 1, 31)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
@@ -163,8 +166,6 @@ class USRP_ServerTestCases(unittest.TestCase):
     '''
     def fill_tx_shm_with_one_pulse(self, seq):
         cprint('populating tx shm sample buffer','red')
-        tx_shm = tx_shm_list[0]
-        tx_shm.seek(0)
 
         # create test tone
         tone = 50e3 # 50 khz tone..
@@ -178,19 +179,28 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         sample_tx[0::2] = sample_real
         sample_tx[1::2] = sample_imag
-        tx_shm.write(sample_tx.tobytes())
+        for antNo in ANTENNA_UNDER_TEST:
+           tx_shm = tx_shm_list[antNo]
+           tx_shm.seek(0)
+           tx_shm.write(sample_tx.tobytes())
 
         return nSamples_per_pulse
     def test_trigger_pulse_one_period(self):
         cprint('testing usrp trigger with one period','red')
+
+        cmd = usrp_sync_time_command(self.serversock)
+        cmd.transmit()
+        ret = cmd.client_return()
+
+
         seq = create_testsequence()
         nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
 
         # copied from usrp_driver and adjusted
         # determine the length of integration periods for all channels in seconds
-        integration_period = 1 
+        integration_period = 1.2
         PULSE_SEQUENCE_PADDING_TIME = 35e3 * 75 * 2 / 3e8 # without offset
-        INTEGRATION_PERIOD_SYNC_TIME = 0.2 # todo: get from file
+        INTEGRATION_PERIOD_SYNC_TIME = 0.2  # todo: get from file
 
         tx_sample_rate = RFRATE
 
@@ -226,58 +236,67 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
        
-        
-        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets)
+        start_setup = time.time() 
+        cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_SETUP)
-
+        time_needed_for_setup = time.time() - start_setup
     
         for i in range(1):
 #        while True:
             # grab current usrp time from one usrp_driver
-            cmd = usrp_get_time_command(self.serversock)
+            start_sending = time.time()
+            cmd = usrp_get_time_command(self.serversock[0])
             cmd.transmit()
-            usrp_time = cmd.recv_time(self.serversock)
+            usrp_time = cmd.recv_time(self.serversock[0])
             cmd.client_return()
 
             cprint('sending trigger pulse command', 'blue')
             trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-            cmd = usrp_trigger_pulse_command([self.serversock], trigger_time)
+            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time)
             cmd.transmit()
             client_returns = cmd.client_return()
             for r in client_returns:
                 assert(r == UHD_TRIGGER_PULSE) 
 
+            time_needed_for_trigger = time.time() - start_sending
 
+            start_ready_data = time.time()
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-            cmd = usrp_ready_data_command([self.serversock])
+            cmd = usrp_ready_data_command(self.serversock)
             cmd.transmit()
-            ret = cmd.recv_metadata(self.serversock)
-            print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
+            for sock in self.serversock:
+               ret = cmd.recv_metadata(sock)
+               print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
 
             client_returns = cmd.client_return()
             for r in client_returns:
                 assert(r == UHD_READY_DATA) 
-
+            time_needed_for_ready_data = time.time() - start_ready_data
             cprint('finished test trigger pulse', 'green')
             
         # plot data
-        rx_shm = rx_shm_list[0][0]
-        rx_shm.seek(0)
-        ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
-        arp = np.sqrt(np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2)
-        print('sampled power')
-        print(arp[:200000:1000])
+        import matplotlib.pyplot as plt
+        print("Reading data from shm:")
+        for ant in ANTENNA_UNDER_TEST:
+           rx_shm = rx_shm_list[0][ant]
+           rx_shm.seek(0)
+           ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
+           arp = np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2
+           print("  ant {}: rms: {:5.3f}   max: {:5.3f}".format(ant, np.sqrt(np.mean(arp) ), np.sqrt(np.max(arp)) ))
+#           plt.plot(ar[::2])
+ #          plt.plot(ar[1::2])
+           plt.plot(np.sqrt(arp))
+           plt.show()
 
         print('sampled phase')
-        import matplotlib.pyplot as plt
-        plt.plot(ar[::2])
-        plt.plot(ar[1::2])
-        plt.show()
 #        pdb.set_trace() 
+
+
+        print("Time for:  setup: {}\n  get time and trigger: {}\n  ready_data:{}".format(time_needed_for_setup, time_needed_for_trigger, time_needed_for_ready_data))
 
 
 

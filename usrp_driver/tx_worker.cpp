@@ -97,7 +97,7 @@ void usrp_tx_worker(
         md.has_time_spec = false;
     //    if(DEBUG) std::cout << boost::format(" nacc: %1%, to pulse: %2% ") % nacc_samples % samples_to_pulse;
 
-        if(DEBUG) std::cout << boost::format(" Sent packet:  idx: %i") % sample_idx << std::endl;
+        if(DEBUG && sample_idx) std::cout << boost::format(" Sent packet:  idx: %i") % sample_idx << std::endl;
         nacc_samples += ntx_samples;
     }
 
