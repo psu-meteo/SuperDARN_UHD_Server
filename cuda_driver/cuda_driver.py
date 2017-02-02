@@ -568,7 +568,7 @@ class ProcessingGPU(object):
            self.logger.debug('  TX Grid:  {}'.format( str(self.tx_grid )))
 
            self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
-  
+           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
            self.logger.debug("RF => IF")
            self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
            self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
@@ -580,6 +580,7 @@ class ProcessingGPU(object):
            self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
 
            self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
+
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'

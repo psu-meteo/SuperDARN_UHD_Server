@@ -8,6 +8,7 @@ import posix_ipc
 import pdb
 import time
 import subprocess
+from pylab import *
 
 from termcolor import cprint
 
@@ -69,18 +70,6 @@ class CUDA_ServerTestCases(unittest.TestCase):
         tx_shm_list[0].close()
         tx_shm_list = []
    
-    ''' 
-    def test_cuda_getdata(self):
-        cprint('testing get data', 'red')
-
-        seq = create_testsequence()
-        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
-        setupcmd.transmit()
-
-        print('running get data command')
-        getdata = cuda_get_data_command([self.serversock])
-        getdata.transmit()
-    '''
     def test_cuda_downsample_and_filter(self):
         cprint('testing cuda get data (downsampling)', 'red')
         seq = create_testsequence()
@@ -88,6 +77,34 @@ class CUDA_ServerTestCases(unittest.TestCase):
         channel_number = 1
         nAntennas = 1
         nMainAntennas = 16
+        rf_nSamples_per_antenna = 459060
+        bb_nSamples_per_antenna = 305
+
+        rf_sampling_rate = 5e6 
+        bb_sampling_rate = 3.333e3
+    
+        usrp_center_frequency = 13e6
+        usrp_channel_frequency = 12e6
+        tone_frequency = 1e3
+
+        signal_frequency = (usrp_channel_frequency - usrp_center_frequency) + tone_frequency
+        downconverted_tone = tone_frequency 
+
+        # create rf and baseband test signals, copy it into shared memory, gpu accepts complex int16
+        rf_test_signal = np.zeros((nAntennas, 2 * rf_nSamples_per_antenna), dtype=np.int16)
+        expected_bb_signal = np.zeros((nAntennas, bb_nSamples_per_antenna), dtype=np.complex64)
+
+        rf_time_vector = np.arange(rf_nSamples_per_antenna, dtype=np.float64) / rf_sampling_rate 
+        bb_time_vector = np.arange(bb_nSamples_per_antenna, dtype=np.float64) / bb_sampling_rate
+        rf_test_signal[0][0::2] = 1000 * np.sin(rf_time_vector * 2 * np.pi * signal_frequency)
+
+        expected_bb_signal[0][:] = 1000 * np.sin(bb_time_vector * 2 * np.pi * tone_frequency)
+
+        # rx_shm is [swing][antenna][samples]
+        # rf_test_signal is [antenna][samples]
+        # we're only looking at swing a, antenna 0..
+        # move samples into shared memory
+        rx_shm_list[0][0].write(rf_test_signal[0].tobytes())
 
         # send channel information
         cmd = cuda_add_channel_command([self.serversock], seq) 
@@ -152,23 +169,21 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
         cmd.client_return()
 
-        # TODO: verify samples
+        # compare processed samples with expected samples 
+        processed_samples = main_samples[channel_number][0] # pull samples from antenna 0
+        expected_samples = expected_bb_signal[0] 
         pdb.set_trace()
 
+        subplot(2,1,1)
+        plt.plot(bb_time_vector, processed_samples)
+        title('cuda processed samples')
+
+        subplot(2,1,2)
+        plt.plot(bb_time_vector, expected_samples)
+        title('expected signal')
+        plt.show()
+
     '''
-    def test_cuda_add_channel(self):
-        cprint('testing cuda add channel', 'red')
-        seq = create_testsequence()
-        setupcmd = cuda_add_channel_command([self.serversock], seq) 
-        setupcmd.transmit()
-
-
-    def test_cuda_setup(self):
-        cprint('testing cuda setup', 'red')
-        seq = create_testsequence()
-        setupcmd = cuda_setup_command([self.serversock], seq) # cudas
-        setupcmd.transmit()
-
     
     def test_cuda_tx_shm(self):
         cprint('testing cuda transmit sample generation', 'red')
@@ -176,29 +191,13 @@ class CUDA_ServerTestCases(unittest.TestCase):
         setupcmd = cuda_setup_command([self.serversock], seq) # cudas
         setupcmd.transmit()
         
-
-
-
-
-    
- 
     # TODO: test removing channels
     def test_channel_remove(self):
         print('testing removing a channel from a gpu')
-   
-    # TODO: test shared memory
-    def test_cuda_shm(self):
-        print('testing tx sample shared memory')
-
-
-    # TODO: test sample downconversion of rx pulse sequence
-    def test_cuda_downsample(self):
-        print('testing gpu downsampling')
-
-    # TODO: test registering multiple channels
+  
+     # TODO: test registering multiple channels
     def test_cuda_multichannel(self):
         print('testing adding multiple channels')
-
 
     '''
 
