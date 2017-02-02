@@ -32,7 +32,6 @@ CHANNEL_STATE_TIMEOUT = 120
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
-# TODO: pull these from config file
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
 STATE_WAIT = 'WAIT'
@@ -73,12 +72,6 @@ class RadarHardwareManager:
             except socket.error:
                 self.logger.error("RadarChannelHandler: Socket error => Deleting channel... ")
                 self.deleteRadarChannel(channel)
-   #         else:
-   #             self.logger.error("RadarChannelHandler: Other error => Deleting channel... ")
-   #             self.deleteRadarChannel(channel)
-   #             conn.close()
-   #             self.logger.error("RadarChannelHandler: Unexpected error is:", sys.exc_info()[0])
-   #             raise
 
         # TODO: add lock support
         def radar_state_machine():
@@ -382,7 +375,6 @@ class RadarHardwareManager:
 
         ctrlprm = channel.ctrlprm_struct.payload
 
-        cprint('running get_data', 'blue')
         # stall until all channels are ready
         print('todo: scale number of samples in get_data to an integration period')
         pdb.set_trace() # TODO 
@@ -583,7 +575,6 @@ class RadarHardwareManager:
             # TODO: handle multiple usrps with trigger..
             self.logger.debug('waiting for trigger return')
             returns = cmd.client_return()
-            cprint('trigger command return!', 'yellow')
 
             if TRIGGER_BUSY in returns:
                 self.logger.error('could not trigger, usrp driver is busy')

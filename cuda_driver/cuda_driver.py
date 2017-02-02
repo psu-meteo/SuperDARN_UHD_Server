@@ -598,7 +598,7 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_rx_decimationRates, self.rx_decimationRates)
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
-        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplinRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
+        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
         rx_bb_nSamples = int(ctrlprm['number_of_samples']) # number of recv samples
 
         # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
@@ -618,7 +618,7 @@ class ProcessingGPU(object):
         for iChannel in range(self.nChannels):
             if self.sequences[iChannel] != None:
                channelFreqVec[iChannel] = -( self.sequences[iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq) # use negative frequency here since filter is not time inverted for convolution
-               self.logger.debug('generatin rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[iChannel].ctrlprm['rfreq'],  self.sequences[iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq /1000 ))
+               self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[iChannel].ctrlprm['rfreq'],  self.sequences[iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq /1000 ))
  
 
         self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
