@@ -32,7 +32,6 @@ from socket_utils import *
 from drivermsg_library import *
 import dsp_filters
 from phasing_utils import *
-from profiling_tools import timeit
 import logging_usrp
 
 # import pycuda stuff
@@ -103,7 +102,6 @@ class cuda_setup_handler(cudamsg_handler):
     
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_generate_pulse_handler(cudamsg_handler):
-    @timeit
     def process(self):
         self.logger.debug('enter cuda_generate_pulse_handler.process')
         cmd = cuda_generate_pulse_command([self.sock])
@@ -136,8 +134,12 @@ class cuda_generate_pulse_handler(cudamsg_handler):
              os.remove('cuda.dump.tx') # only save tx samples once
              self.logger.info('Wrote raw tx samples to /data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl')
 
+        self.logger.debug('finishing generate_pulse, releasing semaphores') 
+
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
+
+        self.logger.debug('semaphores released') 
 
     # generate baseband sample vectors for a transmit pulse from sequence information
     def generate_bb_signal(self, channel, shapefilter = None):
@@ -230,7 +232,6 @@ class cuda_generate_pulse_handler(cudamsg_handler):
          
 # add a new channel 
 class cuda_add_channel_handler(cudamsg_handler):
-    @timeit
     def process(self):
         self.logger.debug('entering cuda_add_channel_handler, waiting for swing semaphores')
         semaphore_list[SIDEA][SWING0].acquire()
@@ -315,7 +316,6 @@ class cuda_remove_channel_handler(cudamsg_handler):
 
 # take copy and process data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
-    @timeit
     def process(self):
         self.logger.debug('entering cuda_get_data handler')
         cmd = cuda_get_data_command([self.sock])
@@ -324,11 +324,11 @@ class cuda_get_data_handler(cudamsg_handler):
         self.logger.debug('pulling data from gpu memory...') 
         samples = self.gpu.pull_rxdata()
         nAntennas, nChannels, nSamples = samples.shape
-        self.logger.debug('finished pulling date. format: {}'.format(samples.shape))
+        self.logger.debug('finished pulling baseband data from GPU, format (antennas, channels, samples): {}'.format(samples.shape))
 
         self.logger.debug('transmitting nAntennas {}'.format(nAntennas)) 
         transmit_dtype(self.sock, nAntennas, np.uint32)
-
+        
         channel = recv_dtype(self.sock, np.int32) 
 
         while (channel != -1):
@@ -358,12 +358,12 @@ class cuda_exit_handler(cudamsg_handler):
 
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
-    @timeit
     def process(self):
         self.logger.debug('enter cuda_process_handler:process')
         cmd = cuda_process_command([self.sock], SWING0)
         cmd.receive(self.sock)
         # TODO: remove hardcoded swing/side
+
         semaphore_list[SIDEA][SWING0].acquire()
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu.rxsamples_process() 

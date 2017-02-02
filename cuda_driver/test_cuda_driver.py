@@ -15,7 +15,7 @@ from drivermsg_library import *
 from socket_utils import *
 from shm_library import *
 
-START_DRIVER = True 
+START_DRIVER = False
 
 
 if sys.hexversion < 0x030300F0:
@@ -107,7 +107,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
         # process samples from shared memory
         cmd = cuda_process_command([self.serversock])
         cmd.transmit()
-        cmd.client_return
+        cmd.client_return()
         cprint('finished process command', 'red')
 
         # copy processed samples
@@ -117,12 +117,13 @@ class CUDA_ServerTestCases(unittest.TestCase):
         main_samples = None
         back_samples = None
 
-	# TODO: create main_samples and back_samples arrays
         cudasock = self.serversock
         
+        cprint('waiting for number of antennas from cuda_driver', 'red')
         nAntennas = recv_dtype(cudasock, np.uint32)
-
+        cprint('collecting data from {} antennas'.format(nAntennas), 'red')
         transmit_dtype(cudasock, channel_number, np.int32)
+
 
         for iAntenna in range(nAntennas):
             antIdx = recv_dtype(cudasock, np.uint16)
@@ -132,10 +133,11 @@ class CUDA_ServerTestCases(unittest.TestCase):
             samples = recv_dtype(cudasock, np.float32, num_samples)
             samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
 
+
             #... initialize main/back sample arrays once num_samples is known
             if main_samples == None:
-                main_samples = np.zeros((4, 16, num_samples))	
-                back_samples = np.zeros((4, 4, num_samples))
+                main_samples = np.zeros((4, 16, num_samples/2))	
+                back_samples = np.zeros((4, 4, num_samples/2))
 
             if antIdx < nMainAntennas:
                 main_samples[channel_number][antIdx] = samples[:]
