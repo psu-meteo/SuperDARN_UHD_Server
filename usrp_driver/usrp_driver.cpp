@@ -929,6 +929,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sem_close(&sem_swinga);
                     sem_close(&sem_swingb);
                     // TODO: close usrp streams?
+//                    sock_send_uint8(driverconn, EXIT);
                     exit(1);
                     
                     break;

@@ -239,7 +239,7 @@ void send_timing_for_sequence(
         cmdq.push(c);
 
         if (mimic_active) {
-            DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
+           // DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
             // set mimic TX high, mimic RX low    
             c.mask     = MIMIC_PINS;
             c.value    = MIMIC_TX;   
@@ -266,8 +266,8 @@ void send_timing_for_sequence(
         usrp->set_command_time(c.cmd_time);
         usrp->set_gpio_attr(c.port,c.gpiocmd,c.value,c.mask);
 
-        debugt = usrp->get_time_now().get_real_secs();
-        DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.6u at usrp_time %2.6f (%2.4f) \n", c.value, c.mask,  c.cmd_time.get_real_secs(), debugt);
+      //  debugt = usrp->get_time_now().get_real_secs();
+      //  DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.6u at usrp_time %2.6f (%2.4f) \n", c.value, c.mask,  c.cmd_time.get_real_secs(), debugt);
 
         cmdq.pop();
     }
