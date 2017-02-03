@@ -1,12 +1,18 @@
 import logging
-
+import os
 
 consoleOutputLevel = logging.DEBUG
 logfileOutputLevel = logging.DEBUG
 useColor = True
 
-def initLogging(logFileName):
 
+logDir = "../log/"
+if not os.path.exists(logDir):
+   os.makedirs(logDir)
+
+
+def initLogging(logFileName):
+    logFileName = os.path.join(logDir, logFileName)
     # set up logging to file
     logging.basicConfig(level=logfileOutputLevel,
                         format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',

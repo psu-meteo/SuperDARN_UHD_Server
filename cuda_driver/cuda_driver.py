@@ -414,6 +414,7 @@ def create_sem(ant, swing):
     return sem
 
 def clean_exit():
+    print("CUDA: clean_exit()")
     for shm in shm_list:
         posix_ipc.unlink_shared_memory(shm)
 

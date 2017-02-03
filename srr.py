@@ -14,10 +14,13 @@ import numpy as np
 import configparser
 import subprocess
 import time
-
+import errno
+import signal
 
 # TODO: get from config
+CUDADriverPort = 55420
 USRPDriverPort = 54420
+CUDA_EXIT = ord('e')
 UHD_EXIT = ord('e')
 
 ######################
@@ -47,6 +50,39 @@ def print_status():
     for line in srrProcesses:
        print("  {}".format(line))
 
+def pid_exists(pid):
+    """Check whether pid exists in the current process table.  UNIX only. 
+    """
+    if pid < 0:
+        return False
+    if pid == 0:
+        raise ValueError('invalid PID 0')
+    try:
+        os.kill(pid, 0)
+    except OSError as err:
+        if err.errno == errno.ESRCH:
+            # ESRCH == No such process
+            return False
+        elif err.errno == errno.EPERM:
+            # EPERM clearly means there's a process to deny access to
+            return True
+        else:
+            # According to "man 2 kill" possible error values are (EINVAL, EPERM, ESRCH)
+            raise
+    else:
+        return True
+
+def terminate_pid(pid):
+  if pid_exists(pid):
+     print("   killing pid {}".format(pid))
+     os.kill(pid, signal.SIGTERM)
+
+def terminate_all(pidDictList):
+    if len(pidDictList):
+       for process in pidDictList:
+           terminate_pid(process["pid"])
+
+
 #######################
 ## STOP:
 def get_usrp_driver_processes():
@@ -67,7 +103,7 @@ def get_usrp_driver_processes():
 def stop_usrp_driver_soft():
     usrpProcesses = get_usrp_driver_processes()
     if len(usrpProcesses) == 0:
-        print("No usrp_driver processes")
+        print("  No usrp_driver processes")
         return
     print("Found {} usrp_driver processes".format(len(usrpProcesses)))
     
@@ -88,19 +124,44 @@ def stop_usrp_driver_soft():
     
     print("  Done.\nAgain checking for usrp_driver processes...")
     usrpProcesses = get_usrp_driver_processes()
-    print("Found {} usrp_driver processes".format(len(usrpProcesses)))
+    print(" Found {} usrp_driver processes".format(len(usrpProcesses)))
 
 def stop_usrp_driver_hard():
-    print("Stop usrp_driver hard...")
-    print("  ... not implemented jet")
+  #  print("Stop usrp_driver hard...")
+    terminate_all(get_usrp_driver_processes())
+
 
 def stop_usrp_driver():
+    print(" Stopping usrp_driver...")
     stop_usrp_driver_soft()
     stop_usrp_driver_hard()
 
+def get_cuda_driver_processes():
+    processList = get_processes()
+    cudaProcesses = []
+    for line in processList:
+        wordList = [word for word in line.split(" " ) if word != ""]
+        if len(wordList):
+           commandString = " ".join(wordList[10:])
+           if commandString.startswith("/usr/bin/python3 ./cuda_driver.py" ):
+              cudaProcesses.append(dict(pid=int(wordList[1]) ))
+    return cudaProcesses
+
 def stop_cuda_driver():
-    print("Stopping cuda_driver...")
-    print("  ... not implemented jet")
+    print(" Stopping cuda_driver...")
+    cudaProcesses = get_cuda_driver_processes()
+    if len(cudaProcesses):
+       for process in cudaProcesses:
+            print("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(('localhost',CUDADriverPort))
+            sock.sendall(np.uint8(CUDA_EXIT).tobytes())
+        
+       time.sleep(1)
+       # terminate processes if they still exis
+       terminate_all(cudaProcesses)
+    else:
+       print("  No cuda_driver processes found...")
     
     
     
@@ -191,7 +252,7 @@ else:
       if nArguments == 1 or inputArg[1].lower == "all":
          print("Stopping all...")
          stop_usrp_driver()
-         # ...
+         stop_cuda_driver()
       elif inputArg[1].lower() == "usrp_driver":
          stop_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:

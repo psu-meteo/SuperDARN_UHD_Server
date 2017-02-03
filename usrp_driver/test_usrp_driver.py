@@ -204,7 +204,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         tx_sample_rate = RFRATE
 
-        nPulses_in_sequence = seq.npulses
+        nPulses_in_sequence = 8 # seq.npulses
  
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
         sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME
@@ -282,7 +282,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         import matplotlib.pyplot as plt
         print("Reading data from shm:")
         for ant in ANTENNA_UNDER_TEST:
-           rx_shm = rx_shm_list[0][ant]
+           rx_shm = rx_shm_list[0][ant*2]
            rx_shm.seek(0)
            ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
            arp = np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2
