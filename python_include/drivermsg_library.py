@@ -372,55 +372,6 @@ class sequence(object):
     
         self.sequence_id = uuid.uuid1()
 
-def create_testsequence():
-    # fill ctrlprm with something reasonable, create test sequence
-
-    import configparser
-
-    ctrlprm = {\
-    '' : np.zeros(120, dtype=np.uint8), \
-    'radar' : 1, \
-    'channel' : 1, \
-    'local' : 0, \
-    'priority' : 1, \
-    'current_pulseseq_idx': 0, \
-    'tbeam' : 0, \
-    'tbeamcode' : 0, \
-    'tbeamazm': 0, \
-    'tbeamwidth': 0.0, \
-    'tfreq': 11000, \
-    'trise': 5000, \
-    'number_of_samples' : 305, \
-    'buffer_index' : 0, \
-    'baseband_samplerate' : 3333.3333, \
-    'filter_bandwidth' : 3333, \
-    'match_filter' : 0, \
-    'rfreq' : 11000, \
-    'rbeam' : 0, \
-    'rbeamcode' : 0, \
-    'rbeamazm' : 0, \
-    'rbeamwidth' : 0.0, \
-    'status' : 0, \
-    'pulseseq_idx' : 0}
-        
-    npulses = 1
-
-    tr_to_pulse_delay = 60
-    #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
-    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] 
-    pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
-    txbbrate = ctrlprm['baseband_samplerate']
-    pulse_lens = [300] # length of pulse in baseband samples?
-    phase_masks = [np.zeros(30)] # ... 
-    pulse_masks = [np.zeros(30)]
-
-    usrp_config = configparser.ConfigParser()
-    usrp_config.read('usrp_config.ini')
-    channelScalingFactor = 0.95
-
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
-    return seq
-
 def create_testsequence_uafscan():
     import pickle
     fh = open('uafscan_sequence.pickle', 'rb')

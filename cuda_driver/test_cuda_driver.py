@@ -19,6 +19,57 @@ from shm_library import *
 START_DRIVER = False
 
 
+def create_testsequence():
+    # fill ctrlprm with something reasonable, create test sequence
+
+    import configparser
+
+    ctrlprm = {\
+    '' : np.zeros(120, dtype=np.uint8), \
+    'radar' : 1, \
+    'channel' : 1, \
+    'local' : 0, \
+    'priority' : 1, \
+    'current_pulseseq_idx': 0, \
+    'tbeam' : 0, \
+    'tbeamcode' : 0, \
+    'tbeamazm': 0, \
+    'tbeamwidth': 0.0, \
+    'tfreq': 11000, \
+    'trise': 5000, \
+    'number_of_samples' : 10000, \
+    'buffer_index' : 0, \
+    'baseband_samplerate' : 3333.3333, \
+    'filter_bandwidth' : 3333, \
+    'match_filter' : 0, \
+    'rfreq' : 11000, \
+    'rbeam' : 0, \
+    'rbeamcode' : 0, \
+    'rbeamazm' : 0, \
+    'rbeamwidth' : 0.0, \
+    'status' : 0, \
+    'pulseseq_idx' : 0}
+
+    npulses = 1
+
+    tr_to_pulse_delay = 60
+    #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
+    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730]
+    pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
+    txbbrate = ctrlprm['baseband_samplerate']
+    pulse_lens = [300] # length of pulse in baseband samples?
+    phase_masks = [np.zeros(30)] # ... 
+    pulse_masks = [np.zeros(30)]
+
+    usrp_config = configparser.ConfigParser()
+    usrp_config.read('usrp_config.ini')
+    channelScalingFactor = 0.95
+
+    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
+    return seq
+
+
+
 if sys.hexversion < 0x030300F0:
     print('this code requires python 3.3 or greater')
     sys.exit(0)
@@ -75,17 +126,17 @@ class CUDA_ServerTestCases(unittest.TestCase):
         seq = create_testsequence()
 	
         channel_number = 1
-        nAntennas = 1
+        nAntennas = 16
         nMainAntennas = 16
-        rf_nSamples_per_antenna = 459060
-        bb_nSamples_per_antenna = 305
-
         rf_sampling_rate = 5e6 
-        bb_sampling_rate = 3.333e3
-    
-        usrp_center_frequency = 13e6
-        usrp_channel_frequency = 12e6
         tone_frequency = 1e3
+        usrp_center_frequency = 13e6
+
+        bb_nSamples_per_antenna = seq.ctrlprm['number_of_samples']
+        bb_sampling_rate = seq.ctrlprm['baseband_samplerate']
+        usrp_channel_frequency = seq.ctrlprm['tfreq']
+
+        rf_nSamples_per_antenna = int(bb_nSamples_per_antenna * (rf_sampling_rate / bb_sampling_rate))
 
         signal_frequency = (usrp_channel_frequency - usrp_center_frequency) + tone_frequency
         downconverted_tone = tone_frequency 
@@ -96,6 +147,8 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
         rf_time_vector = np.arange(rf_nSamples_per_antenna, dtype=np.float64) / rf_sampling_rate 
         bb_time_vector = np.arange(bb_nSamples_per_antenna, dtype=np.float64) / bb_sampling_rate
+
+        #pdb.set_trace()
         rf_test_signal[0][0::2] = 1000 * np.sin(rf_time_vector * 2 * np.pi * signal_frequency)
 
         expected_bb_signal[0][:] = 1000 * np.sin(bb_time_vector * 2 * np.pi * tone_frequency)
@@ -105,7 +158,8 @@ class CUDA_ServerTestCases(unittest.TestCase):
         # we're only looking at swing a, antenna 0..
         # move samples into shared memory
         rx_shm_list[0][0].write(rf_test_signal[0].tobytes())
-
+        
+        tstart = time.time()
         # send channel information
         cmd = cuda_add_channel_command([self.serversock], seq) 
         cmd.transmit()
@@ -165,10 +219,12 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
         transmit_dtype(cudasock, -1, np.int32) # send channel -1 to cuda driver to end transfer process
 
+        tstop = time.time()
         cprint('finished collecting samples!', 'red')
+        cprint('it took {} seconds'.format(tstop - tstart))
 
         cmd.client_return()
-
+        '''
         # compare processed samples with expected samples 
         processed_samples = main_samples[channel_number][0] # pull samples from antenna 0
         expected_samples = expected_bb_signal[0] 
@@ -182,6 +238,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
         plt.plot(bb_time_vector, expected_samples)
         title('expected signal')
         plt.show()
+        '''
 
     '''
     

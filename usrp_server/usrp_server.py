@@ -1101,20 +1101,17 @@ class RadarChannelHandler:
         self.logger.debug('GET_DATA complete, returning samples')
         # interact with site library's SiteIntegrate loop
         # send back samples and metadata for each pulse sequence 
+
         for sidx in range(num_pulse_sequences_per_integration_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
 
-            transmit_dtype(self.conn, sidx, np.uint32)
-            transmit_dtype(self.conn, sequence_length_samples, np.uint32)
-
-            transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint64)
+            transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint32)
             transmit_dtype(self.conn, self.pulse_start_time_usecs[sidx], np.uint32)
 
             transmit_dtype(self.conn, self.main_beamformed[sidx], np.uint32)
             transmit_dtype(self.conn, self.back_beamformed[sidx], np.uint32)
 
             pdb.set_trace()
-            print('TODO: verify that this is working properly with the site library..')
 
         # currently assuming pulse sequences are uniform within an integration period
         badtrdat_start_usec = self.pulse_sequence_offsets_vector * 1e6 # convert to us

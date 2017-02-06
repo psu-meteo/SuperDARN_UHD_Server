@@ -168,6 +168,7 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      100 -> 50 -> 25 -> 5 -> 1*/
      // parallel reduce samples (could unroll loop for speedup?)
      // Do this as long as the reduction is a power of 2
+
      int32_t s, rem;
      s = blockDim.x;
      rem = blockDim.x % 2;
@@ -202,7 +203,7 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
         }
      }
      __syncthreads();
-
+     
      if (threadIdx.x == 0) {
         // the NCO inclueded in the filter causes a phase error. this is the correction
         double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
@@ -213,8 +214,9 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
 
         // write outout
         uint32_t output_idx = iSampleIF *2 + iChannel * nSamplesIF *2 + iAntenna * nChannels * nSamplesIF *2; 
-        odata[output_idx  ] = (float)  itemp[iThread_lin];
-        odata[output_idx+1] = (float)  qtemp[iThread_lin];
+        odata[output_idx  ] = (float) itemp[iThread_lin];
+        odata[output_idx+1] = (float) qtemp[iThread_lin];
      }
+
 }
 
