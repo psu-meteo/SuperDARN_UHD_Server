@@ -826,6 +826,7 @@ class RadarChannelHandler:
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
+        pdb.set_trace()
         return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
 
     def DefaultHandler(self, rmsg):
@@ -979,14 +980,11 @@ class RadarChannelHandler:
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
         
-        # TODO: calculate the number of possible pulse sequences per integration period
-        pdb.set_trace()
         self.logger.debug("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
-        if npulses == 0:
-            raise ValueError('number of pulses must be greater than zero!')
+        if npulses_per_sequence == 0:
+            raise ValueError('number of pulses per sequence must be greater than zero!')
         if nbb_samples == 0:
             raise ValueError('number of samples in sequence must be nonzero!')
-
 
         return RMSG_SUCCESS
     
@@ -1025,14 +1023,17 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def CheckChannelCompatibility(self):
+        self.logger.debug('checking channel compatibility for channel {}'.format(self.cnum))
         hardwareManager = self.parent_RadarHardwareManager
         commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
-        commonParList_seq  = [ 'npulses', 'pulse_offsets_vector',  'tr_to_pulse_delay' ]
+        commonParList_seq  = [ 'npulses_per_sequence', 'pulse_sequence_offsets_vector',  'tr_to_pulse_delay' ]
         if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
             pulseLength = self.pulse_lens[0]
         else:
             self.logger.error("Pulse lengths has the be the same! ") # TODO raise error?
+            pdb.set_trace()
             return False
+        
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
@@ -1102,7 +1103,7 @@ class RadarChannelHandler:
         # interact with site library's SiteIntegrate loop
         # send back samples and metadata for each pulse sequence 
 
-        for sidx in range(num_pulse_sequences_per_integration_period):
+        for sidx in range(self.num_pulse_sequences_per_integration_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
 
             transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint32)
