@@ -641,6 +641,8 @@ class RadarHardwareManager:
         # calculate relative pulse times over the entire integration period 
 
         # determine the length of integration periods for all channels in seconds
+        # XXX TODO: crashing with KeyError: 'scansc'
+        pdb.set_trace()
         integration_periods = [(channel.ctrlprm_struct.payload['scansc'] + channel.ctrlprm_struct.payload['scanus'] / 1e6) for channel in self.channels]
 
         # for now, all integration periods must be the same length.. check if that is the case
@@ -697,10 +699,8 @@ class RadarHardwareManager:
 
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets)
         '''
-        # TODO: parse tx sample rate dynamocially
+        # TODO: parse tx sample rate dynamically 
         # TODO: handle pretrigger with no channels
-        pulse_offsets_vector = self.commonChannelParameter['pulse_offsets_vector'] 
-        npulses              = self.commonChannelParameter['npulses']
 
         # calculate exact number of RF samples for RX and TX (equal to cuda_driver)
         tx_rf_nSamples = np.uint64(int(self.ini_cuda_settings['TXUpsampleRate']) *  ( np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['pulseLength']/1e6 ) + 2 * np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['tr_to_pulse_delay']/1e6 )))
@@ -826,8 +826,7 @@ class RadarChannelHandler:
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
-        pdb.set_trace()
-        return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
+        return sequence(self.npulses_per_sequence, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
 
     def DefaultHandler(self, rmsg):
         self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))

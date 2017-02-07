@@ -507,18 +507,20 @@ class ProcessingGPU(object):
     def synth_tx_rf_pulses(self, bb_signal, tx_bb_nSamples_per_pulse):
         for iChannel in range(self.nChannels):
             if self.sequences[iChannel] != None:  # if channel is defined
-               for (iAntenna, ant) in enumerate(self.antennas):
-                   for iPulse in range(bb_signal[iChannel].shape[1]):
-                       # bb_signal[channel][nantennas, nPulses, len(pulsesamps)]
-                       # create interleaved real/complex bb vector
-                       bb_vec_interleaved = np.zeros(tx_bb_nSamples_per_pulse * 2)
-                       try:
-                           bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
-                           bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
-                       except:
-                           self.logger.error('error while merging baseband tx vectors..')
-                           pdb.set_trace()
-                       self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
+                for (iAntenna, ant) in enumerate(self.antennas):
+                    for iPulse in range(bb_signal[iChannel].shape[1]):
+                        # bb_signal[channel][nantennas, nPulses, len(pulsesamps)]
+                        # create interleaved real/complex bb vector
+                        bb_vec_interleaved = np.zeros(tx_bb_nSamples_per_pulse * 2)
+                        try:
+                            self.logger.debug('synth_tx_rf_pulses: copying baseband signals from channel: {}, antenna: {}, pulse: {}'.format(iChannel, iAntenna, iPulse))
+                            bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
+                            bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
+                        except:
+                            self.logger.error('error while merging baseband tx vectors..')
+                            pdb.set_trace()
+
+                        self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
