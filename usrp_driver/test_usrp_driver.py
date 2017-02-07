@@ -9,9 +9,7 @@ import time
 import subprocess
 import configparser
 
-
 from termcolor import cprint
-
 sys.path.insert(0, '../python_include')
 sys.path.insert(0, '../cuda_driver')
 
@@ -19,7 +17,8 @@ from drivermsg_library import *
 from socket_utils import *
 from cuda_driver import *
 from radar_config_constants import *
-
+import clear_frequency_search
+import rosmsg
 
 START_DRIVER = False
 ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7]
@@ -99,7 +98,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         for iUSRP, antennaNumber in enumerate(ANTENNA_UNDER_TEST):
            self.serversock.append(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
            for i in range(max_connect_attempts):
-               print('attempting connection to usrp_driver (at localhost:{}'.format(USRPDRIVER_PORT + antennaNumber))
+               print('attempting connection to usrp_driver ( at localhost:{} )'.format(USRPDRIVER_PORT + antennaNumber))
                try:
                    self.serversock[iUSRP].connect(('localhost', USRPDRIVER_PORT + antennaNumber))
                    break;
@@ -144,7 +143,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             c = shm.read_byte()
             print("checking byte {} of shm, read {}".format(i, c))
             assert(i == c)
-
+    '''
     # test rxfe setup
     def test_usrp_rxfe(self):
         cprint('testing usrp rxfe setup', 'red')
@@ -155,15 +154,15 @@ class USRP_ServerTestCases(unittest.TestCase):
             assert(r == UHD_RXFE_SET)
 
 
-        time.sleep(5)
+        time.sleep(1)
         cmd = usrp_rxfe_setup_command(self.serversock, 1, 1, 31)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
             assert(r == UHD_RXFE_SET)
 
-        time.sleep(5)
-    '''
+        time.sleep(1)
+    
     def fill_tx_shm_with_one_pulse(self, seq):
         cprint('populating tx shm sample buffer','red')
 
@@ -249,6 +248,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             # grab current usrp time from one usrp_driver
             start_sending = time.time()
             cmd = usrp_get_time_command(self.serversock[0])
+#            pdb.set_trace()
             cmd.transmit()
             usrp_time = cmd.recv_time(self.serversock[0])
             cmd.client_return()
@@ -287,10 +287,11 @@ class USRP_ServerTestCases(unittest.TestCase):
            ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
            arp = np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2
            print("  ant {}: rms: {:5.3f}   max: {:5.3f}".format(ant, np.sqrt(np.mean(arp) ), np.sqrt(np.max(arp)) ))
-#           plt.plot(ar[::2])
- #          plt.plot(ar[1::2])
-           plt.plot(np.sqrt(arp))
-           plt.show()
+           if False:
+#              plt.plot(ar[::2])
+ #             plt.plot(ar[1::2])
+               plt.plot(np.sqrt(arp))
+               plt.show()
 
         print('sampled phase')
 #        pdb.set_trace() 
@@ -367,15 +368,26 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         
 
-    '''
     # test clear frequency
     def test_usrp_clrfreq(self):
-        pass
+     # I don't know why this is not working: (mgu)
+     #  clear_frequency_search.test_clrfreq(USRP_ANTENNA_IDX=ANTENNA_UNDER_TEST)
+      # pdb.set_trace()
 
-    def test_ready_data_process(self):
-        pass
-         
-    '''  
+       restricted_frequencies = clear_frequency_search.read_restrict_file(clear_frequency_search.RESTRICT_FILE)
+       clrfreq_struct = rosmsg.clrfreqprm_struct(self.serversock)
+
+       #  simulate received clrfreq_struct
+       clrfreq_struct.payload['start'] = 10050
+       clrfreq_struct.payload['end'] = 13050
+       clrfreq_struct.payload['filter_bandwidth'] = 3250
+       clrfreq_struct.payload['pwr_threshold'] = .9
+       clrfreq_struct.payload['nave'] =  10
+
+       clear_freq, noise = clear_frequency_search.clrfreq_search(clrfreq_struct, self.serversock, restricted_frequencies, 3, 3.24, 16, 15.4)
+       print('clear frequency: {}, noise: {}'.format(clear_freq, noise))
+
+
 if __name__ == '__main__':
     make = subprocess.call(['make'])
     time.sleep(.5)

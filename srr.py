@@ -5,6 +5,9 @@
 #  srr.py stop [cuda[_driver] | usrp_driver | driver]       : stops all software radio processes or only the specified 
 #  srr.py start [cuda[_driver] | usrp_driver | [usrp_]server] : comming soon...
 
+#  TODO:
+# restart is processes already running?
+
 import sys
 import os
 import subprocess
@@ -22,6 +25,11 @@ CUDADriverPort = 55420
 USRPDriverPort = 54420
 CUDA_EXIT = ord('e')
 UHD_EXIT = ord('e')
+
+
+basePath = os.path.dirname(os.path.realpath(__file__))
+
+
 
 ######################
 ## Processes:
@@ -176,7 +184,7 @@ def read_config(fileName):
 
 def start_usrps_from_config(usrp_sleep = False):
     print("Starting usrp_driver from config:")
-    fileName ='usrp_config.ini'
+    fileName = os.path.join(basePath, 'usrp_config.ini')
     usrp_config = read_config(fileName)
     
     usrpNameList = usrp_config.sections()
@@ -186,7 +194,7 @@ def start_usrps_from_config(usrp_sleep = False):
     for usrpName in usrpNameList:
        print("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
       
-    os.chdir("usrp_driver")    
+    os.chdir(os.path.join(basePath, "usrp_driver") )   
     for usrpName in usrpNameList:
       # TODO: remove intclk when octoclock is connected
       # TODO: or do this with threading module?
@@ -194,16 +202,16 @@ def start_usrps_from_config(usrp_sleep = False):
        usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
           time.sleep(8)
-    os.chdir("..")
+    os.chdir(basePath)
     
 def start_usrp_driver():
     start_usrps_from_config()
 
 def start_cuda_driver():
     print("Starting cuda_driver...")
-    os.chdir("cuda_driver")    
+    os.chdir(os.path.join(basePath, "cuda_driver") )   
     subprocess.Popen(['./cuda_driver.py' ])
-    os.chdir("..")
+    os.chdir(basePath)
 
 
 def start_usrp_server():
