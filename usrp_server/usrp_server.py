@@ -363,7 +363,7 @@ class RadarHardwareManager:
         pdb.set_trace()
         x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
 
-        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, self.ini_array_settings['nbeams'], x_spacing) 
+        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, int(self.ini_array_settings['nbeams']), x_spacing) 
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
         self.logger.debug('clrfreq for channel {} found {} kHz'.format(chan.cnum, chan.tfreq))
 
