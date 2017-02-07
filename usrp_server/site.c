@@ -493,7 +493,7 @@ int SiteRosSetupRadar() {
 
     sprintf(sharedmemory,"IQBuff_ROS_%d_%d",rnum,cnum);
 
-    iqbufsize = 2 * (mppul) * sizeof(int32) * 1e6 * intsc * nbaud / mpinc; /* calculate size of IQ buffer (JTK) */
+    iqbufsize = 2 * (mppul) * sizeof(int32) * 1e6 * (intsc + intus) * nbaud / mpinc; /* calculate size of IQ buffer (JTK) */
 
     fprintf(stderr,"intc: %d, nbaud %d, mpinc %d, iq buffer size is %d\n",intsc, nbaud, mpinc, iqbufsize);
     samples = (int16 *)ShMemAlloc(sharedmemory,iqbufsize,O_RDWR | O_CREAT,1,&shmemfd);
@@ -728,6 +728,10 @@ int SiteRosTimeSeq(int *ptab) {
     TCPIPMsgSend(sock, &tprm, sizeof(struct SeqPRM));
     TCPIPMsgSend(sock, tsgbuf->rep, sizeof(unsigned char)*tprm.len);
     TCPIPMsgSend(sock, tsgbuf->code, sizeof(unsigned char)*tprm.len);
+
+    TCPIPMsgSend(sock, intsc, sizeof(int));
+    TCPIPMsgSend(sock, intus, sizeof(int));
+
     TCPIPMsgRecv(sock, &rmsg, sizeof(struct ROSMsg));
     if (debug) {
         fprintf(stderr,"REGISTER_SEQ:type=%c\n",rmsg.type);

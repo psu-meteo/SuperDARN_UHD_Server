@@ -28,7 +28,7 @@ MAX_CHANNELS = 10
 RMSG_FAILURE = -1
 RMSG_SUCCESS = 0
 RADAR_STATE_TIME = .0001
-CHANNEL_STATE_TIMEOUT = 120
+CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
@@ -642,9 +642,7 @@ class RadarHardwareManager:
         # calculate relative pulse times over the entire integration period 
 
         # determine the length of integration periods for all channels in seconds
-        # XXX TODO: crashing with KeyError: 'scansc'
-        pdb.set_trace()
-        integration_periods = [(channel.ctrlprm_struct.payload['scansc'] + channel.ctrlprm_struct.payload['scanus'] / 1e6) for channel in self.channels]
+        integration_periods = [(channel.integration_period_duration) for channel in self.channels]
 
         # for now, all integration periods must be the same length.. check if that is the case
         integration_period = integration_periods[0]
@@ -909,6 +907,11 @@ class RadarChannelHandler:
         self.seqprm_struct.receive(self.conn)
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
+    
+        intsc = recv_dtype(self.conn, np.int32)
+        intus = recv_dtype(self.conn, np.int32)
+
+        self.integration_period_duration = intsc + (intus / 1e6)
 
         tx_tsg_idx = self.seqprm_struct.get_data('index')
         tx_tsg_len = self.seqprm_struct.get_data('len')
