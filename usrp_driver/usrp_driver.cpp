@@ -56,7 +56,7 @@
 #define SIDEA 0
 #define SIDEB 1
 #define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
-#define NSWINGS 2 // swings are slots in the swing buffer
+#define nSwings 2 // swings are slots in the swing buffer
 #define VERBOSE 1
 
 #define SAVE_RAW_SAMPLES_DEBUG 0
@@ -171,18 +171,6 @@ void unlock_semaphore(int32_t swing, sem_t sem)
 
 }
 
-uint32_t toggle_swing(uint32_t swing) {
-    if (swing == SWING0) {
-        return SWING1;
-    }
-    else if (swing == SWING1) {
-        return SWING0;
-    }
-    else {
-        fprintf(stderr, "Unknown swing value, reverting to SWING0");
-    }
-    return SWING0; 
-}
 
 double sock_get_float64(int32_t sock)
 {
@@ -368,8 +356,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     int32_t rx_worker_status;
 
     // clean up to fix it later..
-    void *shm_swingarx, *shm_swingbrx;
-    void *shm_swingatx, *shm_swingbtx;
+    std::vector<void *> shm_rx_vec(nSwings);
+    std::vector<void *> shm_tx_vec(nSwings);
     sem_t sem_swinga, sem_swingb;
 
     uint32_t state = ST_INIT;
@@ -487,11 +475,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //}
     
     // open shared rx sample shared memory buffers created by cuda_driver.py
-    shm_swingarx = open_sample_shm(ant, RXDIR, SIDEA, SWING0, rxshm_size);
-    shm_swingbrx = open_sample_shm(ant, RXDIR, SIDEA, SWING1, rxshm_size);
+    for(int iSwing = 0; iSwing < nSwings; iSwing++) {
+        shm_rx_vec[iSwing] = open_sample_shm(ant, RXDIR, SIDEA, iSwing, rxshm_size);
+        shm_tx_vec[iSwing] = open_sample_shm(ant, TXDIR, SIDEA, iSwing, txshm_size);
+    }
 
-    shm_swingatx = open_sample_shm(ant, TXDIR, SIDEA, SWING0, txshm_size);
-    shm_swingbtx = open_sample_shm(ant, TXDIR, SIDEA, SWING1, txshm_size);
 
     // open shared rx sample shared memory buffer semaphores created by cuda_driver.py
     sem_swinga = open_sample_semaphore(ant, SWING0);
@@ -596,7 +584,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         rx_data_buffer.resize(num_requested_rx_samples);
                     }
                    
-                    DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_swingatx);
+                    DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[swing]);
 
                     
                     // if necessary, retune USRP frequency and sampling rate
@@ -676,11 +664,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t spb = tx_stream->get_max_num_samps();
                         pulse_samples.resize(pulse_length_rf_samples+2*spb);
 
-                        if (swing == SWING0) {
-                            shm_pulseaddr = &((std::complex<int16_t> *) shm_swingatx)[0];
-                        } else {
-                            shm_pulseaddr = &((std::complex<int16_t> *) shm_swingbtx)[0];
-                        }
+                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[swing])[0];
 
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * pulse_length_rf_samples;
 
@@ -749,7 +733,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
-                    memcpy(shm_swingarx, &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
+                    memcpy(shm_rx_vec[swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
@@ -922,10 +906,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("entering EXIT command\n");
                     close(driverconn);
 
-                    munmap(shm_swingarx, rxshm_size);
-                    munmap(shm_swingbrx, rxshm_size);
-                    munmap(shm_swingatx, txshm_size);
-                    munmap(shm_swingbtx, txshm_size);
+                    for(int iSwing = 0; iSwing < nSwings; iSwing++) {
+                        munmap(shm_rx_vec[iSwing], rxshm_size);
+                        munmap(shm_tx_vec[iSwing], txshm_size);
+                    }
+
                     sem_close(&sem_swinga);
                     sem_close(&sem_swingb);
                     // TODO: close usrp streams?
