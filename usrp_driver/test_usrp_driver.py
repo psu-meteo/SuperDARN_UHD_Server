@@ -353,7 +353,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
-       
+        swing = 0 
         start_setup = time.time() 
         cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets)
         cmd.transmit()

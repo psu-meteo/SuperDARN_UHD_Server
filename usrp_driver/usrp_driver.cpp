@@ -159,13 +159,12 @@ sem_t open_sample_semaphore(int32_t ant, int32_t swing) {
     return *sem;
 }
 
-// TODO: account for swing?
-void lock_semaphore(int32_t swing, sem_t sem)
+void lock_semaphore(sem_t sem)
 {
     sem_wait(&sem);
 }
 
-void unlock_semaphore(int32_t swing, sem_t sem)
+void unlock_semaphore(sem_t sem)
 {
     sem_post(&sem);
 
@@ -343,41 +342,40 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // spawn a usrp_server for each usrp
     
     uhd::set_thread_priority_safe(); 
-
-    std::string txsubdev, rxsubdev, ref;
-    
-    size_t rxshm_size;
-    size_t txshm_size;
+   
+    size_t rxshm_size, txshm_size;
+    uint32_t ant = 0;
 
     bool mimic_active;
     float mimic_delay;
 
     int32_t verbose = 1; 
-    int32_t rx_worker_status;
+    int32_t rx_worker_status; // TODO: change to swing vector is we need this
 
     // clean up to fix it later..
     std::vector<void *> shm_rx_vec(nSwings);
     std::vector<void *> shm_tx_vec(nSwings);
-    sem_t sem_swinga, sem_swingb;
+    std::vector<sem_t>  sem_rx_vec(nSwings);
 
-    uint32_t state = ST_INIT;
-    uint32_t ant = 0;
+    std::vector<uint32_t> state_vec(nSwings, ST_INIT);
     uint32_t swing = SWING0;
-    size_t num_requested_rx_samples = 0; 
-    size_t pulse_length_rf_samples = 0; 
+    
+    size_t nSamples_rx, nSamples_tx_pulse;
+
 
     uint32_t npulses, nerrors;
     ssize_t cmd_status;
-    int32_t connect_retrys = MAX_SOCKET_RETRYS; 
     uint32_t usrp_driver_base_port;
 
+    int32_t connect_retrys = MAX_SOCKET_RETRYS; 
     int32_t sockopt;
     struct sockaddr_in sockaddr;
     struct sockaddr_storage client_addr;
     socklen_t addr_size;
 
-    uhd::time_spec_t get_data_t0;
-    uhd::time_spec_t get_data_t1;
+//  TODO: what is this for? delete?
+//    uhd::time_spec_t get_data_t0;
+//    uhd::time_spec_t get_data_t1;
     uhd::time_spec_t start_time;
     
     // vector of all pulse start times over an integration period
@@ -418,8 +416,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
 
-    std::vector<std::complex<int16_t>> pulse_samples(MAX_PULSE_LENGTH,0);
-    
+    std::vector<std::complex<int16_t>> tx_samples(MAX_PULSE_LENGTH,0);
+     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
 
     if (SUPRESS_UHD_PRINTS) {
@@ -474,19 +472,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //    signal(SIGINT, siginthandler);
     //}
     
-    // open shared rx sample shared memory buffers created by cuda_driver.py
+    // open shared memory buffers and semaphores created by cuda_driver.py
     for(int iSwing = 0; iSwing < nSwings; iSwing++) {
         shm_rx_vec[iSwing] = open_sample_shm(ant, RXDIR, SIDEA, iSwing, rxshm_size);
+        sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing);
         shm_tx_vec[iSwing] = open_sample_shm(ant, TXDIR, SIDEA, iSwing, txshm_size);
     }
 
 
-    // open shared rx sample shared memory buffer semaphores created by cuda_driver.py
-    sem_swinga = open_sample_semaphore(ant, SWING0);
-    sem_swingb = open_sample_semaphore(ant, SWING1);
-
-    // open existing shared memory created by cuda_driver.py
-    // swing a and swing b
     while(true) {
         if(driversock) {
             close(driverconn);
@@ -532,7 +525,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             
             DEBUG_PRINT("USRP_DRIVER waiting for command\n");
             uint8_t command = sock_get_cmd(driverconn, &cmd_status);
-            DEBUG_PRINT("USRP_DRIVER received command, status: %d\n", cmd_status);
+            DEBUG_PRINT("USRP_DRIVER received command, status: %zu\n", cmd_status);
              
             // see if socket is closed..
             if(cmd_status == 11 || cmd_status == 0 || cmd_status < 0) {
@@ -562,12 +555,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     npulses = sock_get_uint32(driverconn);
 
-                    num_requested_rx_samples = sock_get_uint64(driverconn);
-                    pulse_length_rf_samples = sock_get_uint64(driverconn);
+                    nSamples_rx       = sock_get_uint64(driverconn);
+                    nSamples_tx_pulse = sock_get_uint64(driverconn);
 
-                    DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) num_requested_rx_samples);
-                    DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) pulse_length_rf_samples);
-                    DEBUG_PRINT("USRP_SETUP existing tx rate: %f\n", txrate);
+                    DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) nSamples_rx);
+                    DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) nSamples_tx_pulse);
+                    DEBUG_PRINT("USRP_SETUP existing tx rate : %f (swing %d)\n", txrate, swing);
                     DEBUG_PRINT("USRP_SETUP requested tx rate: %f\n", txrate_new);
 
                     // resize 
@@ -577,11 +570,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     for(uint32_t i = 0; i < npulses; i++) {
                         DEBUG_PRINT("USRP_SETUP waiting for pulse offset %d of %d\n", i+2, npulses);
                         pulse_sample_idx_offsets[i] = sock_get_uint64(driverconn); 
-                        DEBUG_PRINT("USRP_SETUP received %f pulse offset\n", pulse_sample_idx_offsets[i]);
+                        DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
                     }
 
-                    if(rx_data_buffer.size() != num_requested_rx_samples) {
-                        rx_data_buffer.resize(num_requested_rx_samples);
+                    if(rx_data_buffer.size() != nSamples_rx) {
+                        rx_data_buffer.resize(nSamples_rx);
                     }
                    
                     DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[swing]);
@@ -619,8 +612,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO: set the number of samples in a pulse. this is calculated from the pulse duration and the sampling rate 
                     // when do we know this? after USRP_SETUP
                 
-                    state = ST_READY; 
-                    DEBUG_PRINT("changing state to ST_READY\n");
+                    state_vec[swing] = ST_READY; 
+                    DEBUG_PRINT("changing state_vec[swing] to ST_READY\n");
                     sock_send_uint8(driverconn, USRP_SETUP);
                     break;
                     }
@@ -646,29 +639,29 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 case TRIGGER_PULSE: {
                     DEBUG_PRINT("entering TRIGGER_PULSE command\n");
 
-                    if (state != ST_READY) {
+                    if (state_vec[swing] != ST_READY) {
                         sock_send_uint8(driverconn, TRIGGER_BUSY);
-                        DEBUG_PRINT("TRIGGER_PULSE busy in state %d, returning\n", state);
+                        DEBUG_PRINT("TRIGGER_PULSE busy in state_vec[swing] %d, returning\n", state_vec[swing]);
                     }
                     else {
                         std::complex<int16_t> *shm_pulseaddr;
                         DEBUG_PRINT("TRIGGER_PULSE ready\n");
-                        state = ST_PULSE;
+                        state_vec[swing] = ST_PULSE;
 
                         DEBUG_PRINT("TRIGGER_PULSE locking semaphore\n");
-                        lock_semaphore(swing, sem_swinga); // TODO: add back in swing
+                        lock_semaphore(sem_rx_vec[swing]); 
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
 
                         // create local copy of transmit pulse data from shared memory
                         size_t spb = tx_stream->get_max_num_samps();
-                        pulse_samples.resize(pulse_length_rf_samples+2*spb);
+                        tx_samples.resize(nSamples_tx_pulse+2*spb);
 
                         shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[swing])[0];
 
-                        size_t pulse_bytes = sizeof(std::complex<int16_t>) * pulse_length_rf_samples;
+                        size_t pulse_bytes = sizeof(std::complex<int16_t>) * nSamples_tx_pulse;
 
-                        memcpy(&pulse_samples[spb], shm_pulseaddr, pulse_bytes);
+                        memcpy(&tx_samples[spb], shm_pulseaddr, pulse_bytes);
 
 
                         // read in time for start of pulse sequence over socket
@@ -685,18 +678,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
                         
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
-                        double pulseLength = pulse_length_rf_samples / txrate;
+                        double pulseLength = nSamples_tx_pulse / txrate;
                         
                         // float debugt = usrp->get_time_now().get_real_secs();
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, num_requested_rx_samples, start_time, &rx_worker_status)); 
-                        uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, pulse_samples, start_time, pulse_sample_idx_offsets)); 
+                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, start_time, &rx_worker_status)); 
+                        uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay)); 
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
-                        //swing = toggle_swing(swing); 
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
                     }
@@ -711,7 +703,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
 
                     DEBUG_PRINT("READY_DATA unlocking swing a semaphore\n");
-                    unlock_semaphore(swing, sem_swinga);
+                    unlock_semaphore(sem_rx_vec[swing]);
         
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
@@ -720,10 +712,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                    // uint32_t channel_index;
                    // channel_index = sock_get_int32(driverconn); 
 
-                    DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %d\n", state, ant, num_requested_rx_samples);
-                    sock_send_int32(driverconn, state);  // send status
+                    DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], ant, nSamples_rx);
+                    sock_send_int32(driverconn, state_vec[swing]);  // send status
                     sock_send_int32(driverconn, ant);   // send antenna
-                    sock_send_int32(driverconn, num_requested_rx_samples);     // nsamples;  send send number of samples
+                    sock_send_int32(driverconn, nSamples_rx);     // nsamples;  send send number of samples
                    
                     // read FAULT status    
                     bool fault = read_FAULT_status_from_control_board(usrp);
@@ -733,20 +725,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
-                    memcpy(shm_rx_vec[swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * num_requested_rx_samples);
+                    memcpy(shm_rx_vec[swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * nSamples_rx);
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
                         sprintf(raw_dump_name,"raw_samples_ant_%d.cint16", ant);
                         raw_dump_fp = fopen(raw_dump_name, "wb");
-                        fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), num_requested_rx_samples, raw_dump_fp);
+                        fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
                         fclose(raw_dump_fp);
                     }
 
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
-                    state = ST_READY; 
-                    DEBUG_PRINT("changing state to ST_READY\n");
+                    state_vec[swing] = ST_READY; 
+                    DEBUG_PRINT("changing state_vec[swing] to ST_READY\n");
 
                     DEBUG_PRINT("READY_DATA returning command success \n");
                     sock_send_uint8(driverconn, READY_DATA);
@@ -799,11 +791,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("entering CLRFREQ command\n");
                     uhd::rx_metadata_t md;
                     double timeout = 5.0; // TODO: set this dynamically using max delay for clrfreq search
+
                     uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
-                    uint32_t clrfreq_time_full = sock_get_uint32(driverconn);
-                    double clrfreq_time_frac = sock_get_float64(driverconn);
-                    double clrfreq_cfreq = sock_get_float64(driverconn);
-                    double clrfreq_rate = sock_get_float64(driverconn);
+                    uint32_t clrfreq_time_full   = sock_get_uint32(driverconn);
+                    double clrfreq_time_frac     = sock_get_float64(driverconn);
+                    double clrfreq_cfreq         = sock_get_float64(driverconn);
+                    double clrfreq_rate          = sock_get_float64(driverconn);
 
                     uint32_t real_time; 
                     double frac_time;
@@ -847,7 +840,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // so, we're segfaulting on rx_stream->recv, check data buffers
                     while(num_acc_samps < num_clrfreq_samples) {
                         size_t samp_request = std::min(num_max_request_samps, num_clrfreq_samples - num_acc_samps);
-                        DEBUG_PRINT("CLRFREQ requesting %d samples with timeout %.2f\n", samp_request, timeout);
+                        DEBUG_PRINT("CLRFREQ requesting %zu samples with timeout %.2f\n", samp_request, timeout);
                         size_t num_rx_samps = rx_stream->recv(&((clrfreq_data_buffer)[num_acc_samps]), samp_request, md, timeout);
 
                         timeout = .1; 
@@ -909,10 +902,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     for(int iSwing = 0; iSwing < nSwings; iSwing++) {
                         munmap(shm_rx_vec[iSwing], rxshm_size);
                         munmap(shm_tx_vec[iSwing], txshm_size);
+                        sem_close(&sem_rx_vec[iSwing]);
                     }
 
-                    sem_close(&sem_swinga);
-                    sem_close(&sem_swingb);
                     // TODO: close usrp streams?
 //                    sock_send_uint8(driverconn, EXIT);
                     exit(1);
