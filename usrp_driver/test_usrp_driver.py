@@ -237,9 +237,10 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
+        swing = 0
        
         start_setup = time.time() 
-        cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets)
+        cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets, swing)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
@@ -258,7 +259,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('sending trigger pulse command', 'blue')
             trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time)
+            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time, swing)
             cmd.transmit()
             client_returns = cmd.client_return()
             for r in client_returns:
@@ -269,7 +270,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             start_ready_data = time.time()
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-            cmd = usrp_ready_data_command(self.serversock)
+            cmd = usrp_ready_data_command(self.serversock, swing)
             cmd.transmit()
             for sock in self.serversock:
                ret = cmd.recv_metadata(sock)
@@ -353,9 +354,9 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
-        swing = 0 
+        swing = 1 
         start_setup = time.time() 
-        cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets)
+        cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets, swing)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
@@ -374,7 +375,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('sending trigger pulse command', 'blue')
             trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time)
+            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time, swing)
             cmd.transmit()
             client_returns = cmd.client_return()
             for r in client_returns:
@@ -385,7 +386,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             start_ready_data = time.time()
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-            cmd = usrp_ready_data_command(self.serversock)
+            cmd = usrp_ready_data_command(self.serversock, swing)
             cmd.transmit()
             for sock in self.serversock:
                ret = cmd.recv_metadata(sock)
@@ -432,7 +433,8 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         cprint('sending setup command', 'blue')
         offset_sample_list = [offset * RFRATE for offset in seq.pulse_offsets_vector]
-        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, nSamples_rx, nSamples_per_pulse, offset_sample_list)
+        swing = 0
+        cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, nSamples_rx, nSamples_per_pulse, offset_sample_list, swing)
         cmd.transmit()
         client_returns = cmd.client_return()
         for r in client_returns:
@@ -449,7 +451,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('sending trigger pulse command', 'blue')
             trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-            cmd = usrp_trigger_pulse_command([self.serversock], trigger_time)
+            cmd = usrp_trigger_pulse_command([self.serversock], trigger_time, swing)
             cmd.transmit()
             client_returns = cmd.client_return()
             for r in client_returns:
@@ -458,7 +460,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('checking trigger pulse data', 'blue')
             # request pulse data
-            cmd = usrp_ready_data_command([self.serversock])
+            cmd = usrp_ready_data_command([self.serversock], swing)
             cmd.transmit()
             ret = cmd.recv_metadata(self.serversock)
             print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))

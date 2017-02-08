@@ -261,9 +261,10 @@ class cuda_generate_pulse_command(driver_command):
 
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector):
+    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector, swing):
         driver_command.__init__(self, usrps, UHD_SETUP)
-
+        
+        self.queue(swing , np.int16,   'swing' )
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
@@ -283,8 +284,9 @@ class usrp_rxfe_setup_command(driver_command):
 
 # trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
-    def __init__(self, usrps, trigger_time):
+    def __init__(self, usrps, trigger_time, swing):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
+        self.queue(swing , np.int16,   'swing' )
         self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'clrfreq_uhd_time_int')
         self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'clrfreq_uhd_time_frac')
 
@@ -294,8 +296,9 @@ class usrp_trigger_pulse_command(driver_command):
 
 # command usrp drivers to ready rx sample data into shared memory
 class usrp_ready_data_command(driver_command):
-    def __init__(self, usrps):
+    def __init__(self, usrps, swing):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
+        self.queue(swing , np.int16,   'swing' )
         
     def recv_metadata(self, sock):
         payload = {}

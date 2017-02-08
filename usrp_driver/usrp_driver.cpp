@@ -201,6 +201,16 @@ int32_t sock_get_int32(int32_t sock)
    return d;
 }
 
+int16_t sock_get_int16(int32_t sock)
+{
+   int16_t d = 0;
+   ssize_t status = recv(sock, &d, sizeof(int16_t), 0);
+   if(status != sizeof(int16_t)) {
+        fprintf(stderr, "error receiving int16_t\n");
+   }
+   return d;
+}
+
 
 ssize_t sock_send_int32(int32_t sock, int32_t d)
 {
@@ -545,9 +555,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // transmit/receive center frequenies and sampling rates
                     // number of tx/rx samples
                     // number of pulse sequences per integration period, and pulse start times
+                    swing      = sock_get_int16(  driverconn); 
                     
-                    DEBUG_PRINT("entering USRP_SETUP command\n");
-                   
+                    DEBUG_PRINT("entering USRP_SETUP command (swing %d)\n", swing);
+                  
                     txfreq_new = sock_get_float64(driverconn);
                     rxfreq_new = sock_get_float64(driverconn);
                     txrate_new = sock_get_float64(driverconn);
@@ -637,7 +648,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                 case TRIGGER_PULSE: {
-                    DEBUG_PRINT("entering TRIGGER_PULSE command\n");
+                    swing      = sock_get_int16(  driverconn); 
+                    DEBUG_PRINT("entering TRIGGER_PULSE command (swing %d)\n", swing );
 
                     if (state_vec[swing] != ST_READY) {
                         sock_send_uint8(driverconn, TRIGGER_BUSY);
@@ -698,7 +710,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                 case READY_DATA: {
-                    DEBUG_PRINT("READY_DATA command, waiting for uhd threads to join back\n");
+                    swing      = sock_get_int16(  driverconn); 
+                    DEBUG_PRINT("READY_DATA command (swing %d), waiting for uhd threads to join back\n", swing);
 
                     uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
 
