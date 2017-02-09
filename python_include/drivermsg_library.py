@@ -6,34 +6,38 @@ import pdb
 from socket_utils import *
 from termcolor import cprint
 
+checkSwing  = True # check if transmitted swing is declared
+
+
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
-UHD_TRIGGER_BUSY = ord('b')
-UHD_TRIGGER_PROCESS = ord('p')
-UHD_SETUP_READY = ord('y')
 UHD_CLRFREQ = ord('c')
 UHD_GETTIME = ord('m')
 UHD_SYNC = ord('S')
-
 UHD_EXIT = ord('e')
 
-CUDA_SETUP = ord('s')
 CUDA_PROCESS = ord('p')
 CUDA_GET_DATA = ord('g')
 CUDA_EXIT = ord('e')
-
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('l')
+
+
+# NOT USED:
+CUDA_SETUP = ord('s')
 CUDA_PULSE_INIT = ord('i')
-
 NO_COMMAND = ord('n')
-
+UHD_SETUP_READY = ord('y')
+UHD_TRIGGER_BUSY = ord('b')
+UHD_TRIGGER_PROCESS = ord('p')
 USRP_DRIVER_ERROR = -1
-
 TRIGGER_BUSY = 'b'
+
+
+
 
 # parent class for driver socket messages
 class driver_command(object):
@@ -88,6 +92,9 @@ class driver_command(object):
                 transmit_dtype(clientsock, np.uint8(self.command))
 
             for item in self.dataqueue:
+         #       pdb.set_trace()
+                if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
+                   raise ValueError("swing has been not defined!")
                 item.transmit(clientsock)
 
                # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
@@ -180,7 +187,7 @@ class server_ctrlprm(driver_command):
         self.queue(description_arr, np.uint8, name='desc_arr', nitems=120)
 
 class cuda_get_data_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GET_DATA)
         self.queue(swing, np.uint32, 'swing')
     
@@ -189,12 +196,12 @@ class cuda_exit_command(driver_command):
         driver_command.__init__(self, cudas, CUDA_EXIT)
 
 class cuda_pulse_init_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_PULSE_INIT)
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_process_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
 
@@ -214,7 +221,7 @@ class cuda_setup_command(driver_command):
 
 # add a pulse sequence/channel 
 class cuda_add_channel_command(driver_command):
-    def __init__(self, cudas, sequence = None, swing = 0):
+    def __init__(self, cudas, sequence = None, swing = -1):
         driver_command.__init__(self, cudas, CUDA_ADD_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
         self.sequence = sequence
@@ -234,11 +241,10 @@ class cuda_add_channel_command(driver_command):
 # clear one channels from gpu
 # TODO: just transmit channel number to save time?
 class cuda_remove_channel_command(driver_command):
-    def __init__(self, cudas, sequence = None, swing = 0):
+    def __init__(self, cudas, sequence = None, swing = -1):
         driver_command.__init__(self, cudas, CUDA_REMOVE_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
         self.sequence = sequence 
-       # pdb.set_trace()
 
     def receive(self, sock):
         super().receive(sock)
@@ -254,7 +260,7 @@ class cuda_remove_channel_command(driver_command):
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
         self.queue(swing, np.uint32, 'swing')
 

@@ -143,10 +143,15 @@ void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, siz
     return pshm;
 }
 
-sem_t open_sample_semaphore(int32_t ant, int32_t swing) {
+sem_t open_sample_semaphore(int32_t ant, int32_t swing, int32_t dir ) {
     char sem_name[80];
     sem_t *sem = NULL;
-    sprintf(sem_name,"/semaphore_ant_%d_swing_%d", ant, swing);
+    if(dir == TXDIR) {
+       sprintf(sem_name,"/semaphore_tx_ant_%d_swing_%d", ant, swing);
+    }
+    else {
+       sprintf(sem_name,"/semaphore_rx_ant_%d_swing_%d", ant, swing);
+    }
     
     fprintf(stderr, "usrp_driver opening: %s\n", sem_name);
     sem = sem_open(sem_name, 0);
@@ -365,7 +370,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // clean up to fix it later..
     std::vector<void *> shm_rx_vec(nSwings);
     std::vector<void *> shm_tx_vec(nSwings);
-    std::vector<sem_t>  sem_rx_vec(nSwings);
+    std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
     uint32_t swing = SWING0;
@@ -485,8 +490,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // open shared memory buffers and semaphores created by cuda_driver.py
     for(int iSwing = 0; iSwing < nSwings; iSwing++) {
         shm_rx_vec[iSwing] = open_sample_shm(ant, RXDIR, SIDEA, iSwing, rxshm_size);
-        sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing);
+        sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing, RXDIR);
         shm_tx_vec[iSwing] = open_sample_shm(ant, TXDIR, SIDEA, iSwing, txshm_size);
+        sem_tx_vec[iSwing] = open_sample_semaphore(ant, iSwing, TXDIR);
     }
 
 
@@ -662,6 +668,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         DEBUG_PRINT("TRIGGER_PULSE locking semaphore\n");
                         lock_semaphore(sem_rx_vec[swing]); 
+                        lock_semaphore(sem_tx_vec[swing]); 
 
                         DEBUG_PRINT("TRIGGER_PULSE semaphore locked\n");
 
@@ -717,6 +724,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     DEBUG_PRINT("READY_DATA unlocking swing a semaphore\n");
                     unlock_semaphore(sem_rx_vec[swing]);
+                    unlock_semaphore(sem_tx_vec[swing]);
         
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
@@ -916,6 +924,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         munmap(shm_rx_vec[iSwing], rxshm_size);
                         munmap(shm_tx_vec[iSwing], txshm_size);
                         sem_close(&sem_rx_vec[iSwing]);
+                        sem_close(&sem_tx_vec[iSwing]);
                     }
 
                     // TODO: close usrp streams?

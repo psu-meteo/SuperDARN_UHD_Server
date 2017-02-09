@@ -85,13 +85,13 @@ class USRP_ServerTestCases(unittest.TestCase):
     def setUp(self):
         antennas = ANTENNA_UNDER_TEST
         for ant in antennas:
-            rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
-            rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
-            tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
-            tx_shm_list.append(create_shm(ant, SWING1, SIDEA, txshm_size, direction = TXDIR))
+            rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size,  RXDIR))
+            rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size,  RXDIR))
+            tx_shm_list.append(       create_shm(ant, SWING0, SIDEA, txshm_size,  TXDIR))
+            tx_shm_list.append(       create_shm(ant, SWING1, SIDEA, txshm_size,  TXDIR))
 
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING0))
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING1))
+        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING0, RXDIR))
+        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING1, RXDIR))
 
         time.sleep(1)
         self.pid = start_usrpserver()

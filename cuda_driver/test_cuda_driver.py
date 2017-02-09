@@ -161,7 +161,8 @@ class CUDA_ServerTestCases(unittest.TestCase):
         
         tstart = time.time()
         # send channel information
-        cmd = cuda_add_channel_command([self.serversock], seq) 
+        swing = 0
+        cmd = cuda_add_channel_command([self.serversock], seq, swing)
         cmd.transmit()
         cmd.client_return()
 
@@ -169,20 +170,20 @@ class CUDA_ServerTestCases(unittest.TestCase):
         # TODO: populate samples in shared memory
         
         # run generate pulse command to initialize memory..
-        cmd = cuda_generate_pulse_command([self.serversock])
+        cmd = cuda_generate_pulse_command([self.serversock], swing)
         cmd.transmit()
         cmd.client_return()
         cprint('finished generate pulse command', 'red')
 
 
         # process samples from shared memory
-        cmd = cuda_process_command([self.serversock])
+        cmd = cuda_process_command([self.serversock], swing)
         cmd.transmit()
         cmd.client_return()
         cprint('finished process command', 'red')
 
         # copy processed samples
-        cmd = cuda_get_data_command(self.serversock)
+        cmd = cuda_get_data_command(self.serversock, swing)
         cmd.transmit()
         
         main_samples = None
@@ -206,7 +207,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
 
             #... initialize main/back sample arrays once num_samples is known
-            if main_samples == None:
+            if main_samples is None:
                 main_samples = np.zeros((4, 16, num_samples/2))	
                 back_samples = np.zeros((4, 4, num_samples/2))
 
