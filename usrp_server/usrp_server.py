@@ -358,9 +358,8 @@ class RadarHardwareManager:
     def clrfreq(self, chan):
         self.logger.debug('running clrfreq for channel {}'.format(chan.cnum))
         tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
-        tbeamwidth = channel.ctrlprm_struct.get_data('tbeamwidth') 
+        tbeamwidth = chan.ctrlprm_struct.get_data('tbeamwidth') 
         print('todo: verify that tbeamwidth is 3.24ish')
-        pdb.set_trace()
         x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
 
         chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, int(self.ini_array_settings['nbeams']), x_spacing) 
@@ -503,9 +502,14 @@ class RadarHardwareManager:
             self.channels.remove(channelObject)
             # remove channel from cuda
             self.logger.debug('send CUDA_ADD_CHANNEL')
-            cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
-            cmd.transmit()
-            cmd.client_return()
+            try:
+                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
+                cmd.transmit()
+                cmd.client_return()
+            except AttributeError:
+                # catch errors where channel.getSequence() fails because npulses_per_sequence is uninitialized
+                # TODO: discover why this happens..
+                self.logger.error('deleteRadarChannel() failed to remove channel from HardwareManager')
              
             self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
@@ -653,8 +657,8 @@ class RadarHardwareManager:
         sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME 
 
         # determine length of each pulse sequence and inter-pulse-sequence padding 
-        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] + channels[0].pulse_lens[-1] for chan in self.channels]
-        sequence_length = sequence_length[0]
+        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] + self.channels[0].pulse_lens[-1]/1e6 for chan in self.channels]
+        sequence_length = sequence_lengths[0]
         for sl in sequence_lengths:
             assert sl == sequence_length, 'pulses must occur at the same time for all channels'
 
@@ -662,25 +666,26 @@ class RadarHardwareManager:
         pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
-        num_pulse_sequences_per_integration_period = np.floor(sampling_duration / pulse_sequence_period)
+        num_pulse_sequences_per_integration_period = int(sampling_duration / pulse_sequence_period)
         # inform all channels with the number of pulses per integration period
         for ch in self.channels:
             ch.pulse_sequences_per_integration_period = num_pulse_sequences_per_integration_period
 
         # find transmit sample rate
-        tx_sample_rate = self.channels[0].usrp_tx_sampling_rate
+        tx_sample_rate = self.usrp_rf_tx_rate
 
         # then calculate sample indicies at which pulse sequences start within a pulse sequence
         pulse_sequence_offsets_samples = self.channels[0].pulse_sequence_offsets_vector * tx_sample_rate  
         pulse_sequence_offsets_vector = self.channels[0].pulse_sequence_offsets_vector # TODO: verify this is uniform across channels
-        nsamples_per_sequence = pulse_sequence_period * tx_sample_rate
+        self.nsamples_per_sequence = pulse_sequence_period * tx_sample_rate
         npulses_per_sequence = self.channels[0].npulses_per_sequence # TODO: verify this is uniform across channels
 
         # then, calculate sample indicies at which pulses start within an integration period
         integration_period_pulse_sample_offsets = np.zeros(npulses_per_sequence * num_pulse_sequences_per_integration_period, dtype=np.uint64)
+        
         for sidx in range(num_pulse_sequences_per_integration_period):
             for pidx in range(npulses_per_sequence):
-                integration_period_pulse_sample_offsets[sidx * npulses_per_sequence + pidx] = sidx * nsamples_per_sequence + pulse_sequence_offsets_samples[pidx]
+                integration_period_pulse_sample_offsets[sidx * npulses_per_sequence + pidx] = sidx * self.nsamples_per_sequence + pulse_sequence_offsets_samples[pidx]
 
         for ch in self.channels:
             ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
@@ -689,7 +694,9 @@ class RadarHardwareManager:
         ctrlprm = self.channels[0].ctrlprm_struct.payload
         num_requested_rx_samples = np.uint64(np.round((self.usrp_rf_rx_rate) * (ctrlprm['number_of_samples'] / ctrlprm['baseband_samplerate'])))
         tx_time = self.channels[0].tx_time
-        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate)  * tx_time / 1e6))
+        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * tx_time / 1e6))
+
+        npulses_per_integration_period = npulses_per_sequence * num_pulse_sequences_per_integration_period
 
         # calculate pulse length in rf-rate samples
         # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
@@ -889,6 +896,8 @@ class RadarChannelHandler:
     @timeit
     def RegisterSeqHandler(self, rmsg):
         # function to get the indexes of rising edges going from zero to a nonzero value in array ar
+
+        self.logger.debug('Entering RegisterSeqHandler')
         def _rising_edge_idx(ar):
             ar = np.insert(ar, 0, -2)
             edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
@@ -908,9 +917,11 @@ class RadarChannelHandler:
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
     
+        self.logger.debug('RegisterSeqHandler, received sequence data from control program')
         intsc = recv_dtype(self.conn, np.int32)
         intus = recv_dtype(self.conn, np.int32)
 
+        self.logger.debug('RegisterSeqHandler, received intsc: {}, intus: {}'.format(intsc, intus))
         self.integration_period_duration = intsc + (intus / 1e6)
 
         tx_tsg_idx = self.seqprm_struct.get_data('index')
@@ -982,7 +993,8 @@ class RadarChannelHandler:
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
-        
+        self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+
         self.logger.debug("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
         if npulses_per_sequence == 0:
             raise ValueError('number of pulses per sequence must be greater than zero!')
@@ -1049,7 +1061,8 @@ class RadarChannelHandler:
         else:   # not first channel => check if new parameters are compatible
             parCompatibleList_seq = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
             parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
-            idxOffsetVec = commonParList_seq.index('pulse_offsets_vector')  # convert vector of bool to scalar
+
+            idxOffsetVec = commonParList_seq.index('pulse_sequence_offsets_vector')  # convert vector of bool to scalar
             parCompatibleList_seq[idxOffsetVec] = parCompatibleList_seq[idxOffsetVec].all()
  
          #   pdb.set_trace()
