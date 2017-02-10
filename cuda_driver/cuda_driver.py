@@ -100,7 +100,11 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
-        swing = cmd.payload['swing'] 
+        swing = cmd.payload['swing']
+ 
+        if not any(self.gpu.sequences[swing]):
+            self.logger.error("no sequences are defined. Pulse generation not possible")
+            return 
 
         # create empty baseband transmit waveform vector
         nPulses   = self.gpu.nPulses
@@ -606,6 +610,7 @@ class ProcessingGPU(object):
     def rx_init(self, swing ): 
         # build arrays based on first sequence..
         # TODO: support multiple sequences?
+        
         ctrlprm = self.sequences[swing][0].ctrlprm # TODO: remove 0!
         
         decimationRate_rf2if = self.rx_rf2if_downsamplingRate

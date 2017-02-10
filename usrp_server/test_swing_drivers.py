@@ -25,6 +25,7 @@ import test_cuda_driver
 START_DRIVER = False 
 ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7] 
 #ANTENNA_UNDER_TEST = [0] 
+INTEGRATION_PERIOD_SYNC_TIME = 0.2  # todo: get from file
  
 
 
@@ -42,8 +43,8 @@ txshm_size = shm_settings.getint('txshm_size')
 cuda_port = network_settings.getint('CUDADriverPort')
 usrp_port = network_settings.getint('USRPDriverPort')
 
-samplingRate_rx = cuda_settings['FSampTX']
-samplingRate_tx = cuda_settings['FSampRX']
+samplingRate_rx = float(cuda_settings['FSampTX'])
+samplingRate_tx = float(cuda_settings['FSampRX'])
 
 
 
@@ -64,24 +65,24 @@ def connect_to_cuda_driver():
   for i in range(max_connect_attempts):
       print('attempting connection to usrp_driver')
       try:
-          serversock.connect(('localhost', 55420))
+          serversock.connect(('localhost', cuda_port))
           break
       except:
           print('connecting to cuda driver failed on attempt ' + str(i + 1))
           time.sleep(5)
-   return serversock
+  return [serversock]
 
 
-def connect_to_cuda_driver():
-   max_connect_attempts = 5
+def connect_to_usrp_driver():
+    max_connect_attempts = 5
 
     serversock = []
     for iUSRP, antennaNumber in enumerate(ANTENNA_UNDER_TEST):
        serversock.append(socket.socket(socket.AF_INET, socket.SOCK_STREAM))
        for i in range(max_connect_attempts):
-           print('attempting connection to usrp_driver ( at localhost:{} )'.format(USRPDRIVER_PORT + antennaNumber))
+           print('attempting connection to usrp_driver ( at localhost:{} )'.format(usrp_port + antennaNumber))
            try:
-               serversock[iUSRP].connect(('localhost', USRPDRIVER_PORT + antennaNumber))
+               serversock[iUSRP].connect(('localhost', usrp_port + antennaNumber))
                break;
            except:
                print('connecting to usrp driver failed on attempt ' + str(i + 1))
@@ -92,41 +93,66 @@ def connect_to_cuda_driver():
                    sys.exit(1)
     return serversock
 
-
-def test_trigger_pulse_one_period_and_swing(self):
+def sync_usrps(sock):
       cprint('testing usrp trigger with one period','red')
 
-      cmd = usrp_sync_time_command(self.serversock)
+      cmd = usrp_sync_time_command(sock)
       cmd.transmit()
       ret = cmd.client_return()
 
+class swingParameter():
+   def __init__(self, seq):
+      self.seq = seq
+      self.rx_rate = 5e6
+      self.tx_rate = 5e6
+      self.nPulses_per_period = 9
+      self.nSamples_rx = self.rx_rate*2
+      self.nSamples_per_pulse = 4200
+      self.sample_offsets = None
+      self.swing = 0
+
+   @property
+   def tx_freq(self):
+      self.seq.ctrlprm['tfreq']
+   
+   @tx_freq.setter
+   def tx_freq(self, value):
+       self.seq.ctrlprm['tfreq']
+
+   @property
+   def rx_freq(self):
+      self.seq.ctrlprm['rfreq']
+   
+   @rx_freq.setter
+   def rx_freq(self, value):
+       self.seq.ctrlprm['rfreq']
+
+
+
+def generate_parameter(integration_period = 1.2):
       seq = test_cuda_driver.create_testsequence()
+      usrp_par = swingParameter(seq)
+     
 
-
-      nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
-
-      # copied from usrp_driver and adjusted
       # determine the length of integration periods for all channels in seconds
-      integration_period = 1.2
       PULSE_SEQUENCE_PADDING_TIME = 35e3 * 75 * 2 / 3e8 # without offset
-      INTEGRATION_PERIOD_SYNC_TIME = 0.2  # todo: get from file
-
-      tx_sample_rate = RFRATE
-
       nPulses_in_sequence = 8 # seq.npulses
+
+
+      nSamples_per_pulse = np.uint64(int(cuda_settings['TXUpsampleRate']) *  ( np.floor(samplingRate_tx * seq.pulse_lens[0]/1e6 ) + 2 * np.floor(samplingRate_tx * seq.tr_to_pulse_delay/1e6 )))
 
       # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
       sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME
 
       # calculate the pulse sequence period with padding
       time_sequence     = PULSE_SEQUENCE_PADDING_TIME + seq.pulse_offsets_vector[-1] + seq.pulse_lens[-1] /1e6
-      nSamples_sequence = int(np.round(time_sequence * tx_sample_rate))
+      nSamples_sequence = int(np.round(time_sequence * samplingRate_tx))
 
       # calculate the number of pulse sequences that fit in the available time within an integration period
       nSequences_in_period = int(np.floor(sampling_duration / time_sequence))
 
       # then calculate sample indicies at which pulse sequences start within a pulse sequence
-      pulse_sequence_offsets_samples = [int(offset* tx_sample_rate) for offset in seq.pulse_offsets_vector]
+      pulse_sequence_offsets_samples = [int(offset* samplingRate_tx) for offset in seq.pulse_offsets_vector]
       pulse_sequence_offsets_vector = seq.pulse_offsets_vector
 
       # then, calculate sample indicies at which pulses start within an integration period
@@ -136,59 +162,75 @@ def test_trigger_pulse_one_period_and_swing(self):
           for iPulse in range(nPulses_in_sequence):
               integration_period_pulse_sample_offsets[iSequence * nPulses_in_sequence + iPulse] = iSequence * nSamples_sequence + pulse_sequence_offsets_samples[iPulse]
 
-      # calculate the number of RF transmit and receive samples 
-      ctrlprm = seq.ctrlprm
+      # calculate the number of RF transmit and receive samples  
       nSamples_rx = nSamples_sequence * nSequences_in_period
 
-      cprint('sending setup command', 'blue')
       print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
       print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
       print(integration_period_pulse_sample_offsets)
-      swing = 1
+
+
+      swing = 0 
+
+
+      usrp_par.rx_rate = samplingRate_rx
+      usrp_par.tx_rate = samplingRate_tx
+      usrp_par.nPulses_per_period = nPulses_per_period
+      usrp_par.nSamples_rx = nSamples_rx
+      usrp_par.nSamples_per_pulse = nSamples_per_pulse
+      usrp_par.sample_offsets = integration_period_pulse_sample_offsets
+      usrp_par.swing = swing
+
+      return usrp_par
+
+def usrp_setup(sock, usrp_par):
       start_setup = time.time()
-      cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets, swing)
+      cmd = usrp_setup_command(sock, usrp_par.tx_freq,  usrp_par.rx_freq,  usrp_par.rx_rate , usrp_par.tx_rate,  usrp_par.nPulses_per_period, usrp_par.nSamples_rx, usrp_par.nSamples_per_pulse, usrp_par.sample_offsets, usrp_par.swing)
       cmd.transmit()
       client_returns = cmd.client_return()
+
       for r in client_returns:
           assert(r == UHD_SETUP)
       time_needed_for_setup = time.time() - start_setup
+      print("Time for:  setup: {}".format(time_needed_for_setup))
 
-      for i in range(1):
-       while True:
-          # grab current usrp time from one usrp_driver
-          start_sending = time.time()
-          cmd = usrp_get_time_command(self.serversock[0])
-           pdb.set_trace()
-          cmd.transmit()
-          usrp_time = cmd.recv_time(self.serversock[0])
-          cmd.client_return()
+def usrp_trigger(sock, usrp_par):
 
-          cprint('sending trigger pulse command', 'blue')
-          trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-          cmd = usrp_trigger_pulse_command(self.serversock, trigger_time, swing)
-          cmd.transmit()
-          client_returns = cmd.client_return()
-          for r in client_returns:
-              assert(r == UHD_TRIGGER_PULSE)
+    # grab current usrp time from one usrp_driver
+    start_sending = time.time()
+    cmd = usrp_get_time_command(sock[0])
+    cmd.transmit()
+    usrp_time = cmd.recv_time(sock[0])
+    cmd.client_return()
 
-          time_needed_for_trigger = time.time() - start_sending
+    cprint('sending trigger pulse command', 'blue')
+    trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
+    cmd = usrp_trigger_pulse_command(sock, trigger_time, usrp_par.swing)
+    cmd.transmit()
+    client_returns = cmd.client_return()
+    for r in client_returns:
+        assert(r == UHD_TRIGGER_PULSE)
 
-          start_ready_data = time.time()
-          cprint('checking trigger pulse data', 'blue')
-          # request pulse data
-          cmd = usrp_ready_data_command(self.serversock, swing)
-          cmd.transmit()
-          for sock in self.serversock:
-             ret = cmd.recv_metadata(sock)
-             print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
+    time_needed_for_trigger = time.time() - start_sending
 
-          client_returns = cmd.client_return()
-          for r in client_returns:
-              assert(r == UHD_READY_DATA)
-          time_needed_for_ready_data = time.time() - start_ready_data
-          cprint('finished test trigger pulse', 'green')
+    start_ready_data = time.time()
+    cprint('checking trigger pulse data', 'blue')
+    # request pulse data
+    cmd = usrp_ready_data_command(sock, usrp_par.swing)
+    cmd.transmit()
+    for iSock in sock:
+       ret = cmd.recv_metadata(iSock)
+       print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
+
+    client_returns = cmd.client_return()
+    for r in client_returns:
+        assert(r == UHD_READY_DATA)
+    time_needed_for_ready_data = time.time() - start_ready_data
+    cprint('finished test trigger pulse', 'green')
+    print("Time for:  get time and trigger: {}\n  ready_data:{}".format( time_needed_for_trigger, time_needed_for_ready_data))
 
 
+def plot():
       # plot data
       import matplotlib.pyplot as plt
       print("Reading data from shm:")
@@ -205,13 +247,76 @@ def test_trigger_pulse_one_period_and_swing(self):
              plt.show()
 
       print('sampled phase')
-       pdb.set_trace() 
+      # pdb.set_trace() 
+
+def cuda_add_channel(sock, parClass):
+   cmd = cuda_add_channel_command(sock, parClass.seq, parClass.swing)
+   cmd.transmit()
+   cmd.client_return()
+
+def cuda_generate_pulse(sock, parClass):
+     cmd = cuda_generate_pulse_command(sock, parClass.swing)
+     cmd.transmit()
+     cmd.client_return()
 
 
-      print("Time for:  setup: {}\n  get time and trigger: {}\n  ready_data:{}".format(time_needed_for_setup, time_needed_for_trigger, time_needed_for_ready_data))
+def cuda_process(sock, parClass):
+   # process samples from shared memory
+   cmd = cuda_process_command(sock, parClass.swing)
+   cmd.transmit()
+   cmd.client_return()
+
+def cuda_get_data(sock, parClass, channel_number):
+     # copy processed samples
+     cmd = cuda_get_data_command(sock, parClass.swing)
+     cmd.transmit()
+
+     main_samples = None
+     back_samples = None
+   
+     for cudasock in sock:
+
+        cprint('waiting for number of antennas from cuda_driver', 'red')
+        nAntennas = recv_dtype(cudasock, np.uint32)
+        cprint('collecting data from {} antennas'.format(nAntennas), 'red')
+        transmit_dtype(cudasock, channel_number, np.int32)
+
+        for iAntenna in range(nAntennas):
+            antIdx = recv_dtype(cudasock, np.uint16)
+
+            cprint('collecting samples from antenna {}'.format(antIdx), 'red')
+            num_samples = recv_dtype(cudasock, np.uint32)
+            samples = recv_dtype(cudasock, np.float32, num_samples)
+            samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+
+
+            #... initialize main/back sample arrays once num_samples is known
+            if main_samples is None:
+                main_samples = np.zeros((4, 16, num_samples/2))
+                back_samples = np.zeros((4, 4, num_samples/2))
+
+            if antIdx < 16:
+                main_samples[channel_number][antIdx] = samples[:]
+
+            else:
+                back_samples[channel_number][antIdx - nMainAntennas] = samples[:]
+
+
+        transmit_dtype(cudasock, -1, np.int32) # send channel -1 to cuda driver to end transfer process
+     cprint('finished collecting samples!', 'red')
+
+     cmd.client_return()
+     return [main_samples, back_samples]
 
 
 cuda_sock = connect_to_cuda_driver()
 usrp_sock = connect_to_usrp_driver()
+par_swing0 = generate_parameter()
 
-
+usrp_setup(usrp_sock, par_swing0)
+cuda_add_channel(cuda_sock, par_swing0)
+cuda_generate_pulse(cuda_sock, par_swing0)
+usrp_trigger(usrp_sock, par_swing0)
+cuda_process(cuda_sock, par_swing0)
+channel_number = 1
+data = cuda_get_data(cuda_sock, par_swing0, channel_number)
