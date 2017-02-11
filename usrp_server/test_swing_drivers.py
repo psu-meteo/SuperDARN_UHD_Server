@@ -8,6 +8,7 @@ import pdb
 import time 
 import subprocess 
 import configparser 
+import datetime 
  
 from termcolor import cprint 
 sys.path.insert(0, '../python_include') 
@@ -20,6 +21,7 @@ from radar_config_constants import *
 import clear_frequency_search 
 import rosmsg 
 import test_cuda_driver 
+
  
  
 START_DRIVER = False 
@@ -27,6 +29,13 @@ ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7]
 #ANTENNA_UNDER_TEST = [0] 
 INTEGRATION_PERIOD_SYNC_TIME = 0.2  # todo: get from file
  
+
+# init logging
+logFile = open("../log/test_swing.log", "wt")
+
+def logmsg(msg):
+   logFile.write("{} - {}\n".format(datetime.now().strftime("%H:%M:%S:%f"), msg) )
+
 
 
 # parse gpu config file
@@ -94,11 +103,13 @@ def connect_to_usrp_driver():
     return serversock
 
 def sync_usrps(sock):
+      logmsg("Start sync_usrps")
       cprint('testing usrp trigger with one period','red')
 
       cmd = usrp_sync_time_command(sock)
       cmd.transmit()
       ret = cmd.client_return()
+      logmsg("End sync_usrps")
 
 class swingParameter():
    def __init__(self, seq):
@@ -129,7 +140,7 @@ class swingParameter():
 
 
 
-def generate_parameter(integration_period = 1.2):
+def generate_parameter(integration_period = 2):
       seq = test_cuda_driver.create_testsequence()
       usrp_par = swingParameter(seq)
      
@@ -184,6 +195,7 @@ def generate_parameter(integration_period = 1.2):
       return usrp_par
 
 def usrp_setup(sock, usrp_par):
+      logmsg("Start usrp_setup (swing{})".format(usrp_par.swing))
       start_setup = time.time()
       cmd = usrp_setup_command(sock, usrp_par.tx_freq,  usrp_par.rx_freq,  usrp_par.rx_rate , usrp_par.tx_rate,  usrp_par.nPulses_per_period, usrp_par.nSamples_rx, usrp_par.nSamples_per_pulse, usrp_par.sample_offsets, usrp_par.swing)
       cmd.transmit()
@@ -193,41 +205,42 @@ def usrp_setup(sock, usrp_par):
           assert(r == UHD_SETUP)
       time_needed_for_setup = time.time() - start_setup
       print("Time for:  setup: {}".format(time_needed_for_setup))
+      logmsg("End usrp_setup (swing{})".format(usrp_par.swing))
 
 def usrp_trigger(sock, usrp_par):
-
+    logmsg("Start usrp_tigger (swing{})".format(usrp_par.swing))
     # grab current usrp time from one usrp_driver
-    start_sending = time.time()
     cmd = usrp_get_time_command(sock[0])
     cmd.transmit()
     usrp_time = cmd.recv_time(sock[0])
     cmd.client_return()
 
-    cprint('sending trigger pulse command', 'blue')
     trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
     cmd = usrp_trigger_pulse_command(sock, trigger_time, usrp_par.swing)
     cmd.transmit()
     client_returns = cmd.client_return()
     for r in client_returns:
         assert(r == UHD_TRIGGER_PULSE)
+    logmsg("End usrp_tigger (swing{})".format(usrp_par.swing))
 
-    time_needed_for_trigger = time.time() - start_sending
+def usrp_ready_data(sock, usrp_par):
+    logmsg("Start usrp_ready (swing{})".format(usrp_par.swing))
 
-    start_ready_data = time.time()
-    cprint('checking trigger pulse data', 'blue')
     # request pulse data
     cmd = usrp_ready_data_command(sock, usrp_par.swing)
     cmd.transmit()
+    logmsg("Start usrp_ready waiting (swing{})".format(usrp_par.swing))
     for iSock in sock:
        ret = cmd.recv_metadata(iSock)
        print("  recieved READY STATUS: status:{}, ant: {}, nSamples: {}, fault: {}".format(ret['status'], ret['antenna'], ret['nsamples'], ret['fault']))
+    logmsg("End usrp_ready waiting (swing{})".format(usrp_par.swing))
 
     client_returns = cmd.client_return()
     for r in client_returns:
         assert(r == UHD_READY_DATA)
-    time_needed_for_ready_data = time.time() - start_ready_data
-    cprint('finished test trigger pulse', 'green')
-    print("Time for:  get time and trigger: {}\n  ready_data:{}".format( time_needed_for_trigger, time_needed_for_ready_data))
+    logmsg("End usrp_ready (swing{})".format(usrp_par.swing))
+
+
 
 
 def plot():
@@ -250,23 +263,30 @@ def plot():
       # pdb.set_trace() 
 
 def cuda_add_channel(sock, parClass):
+   logmsg("Start cuda_add_channel (swing{})".format(parClass.swing))
    cmd = cuda_add_channel_command(sock, parClass.seq, parClass.swing)
    cmd.transmit()
    cmd.client_return()
+   logmsg("End cuda_add_channel (swing{})".format(parClass.swing))
 
 def cuda_generate_pulse(sock, parClass):
-     cmd = cuda_generate_pulse_command(sock, parClass.swing)
-     cmd.transmit()
-     cmd.client_return()
+   logmsg("Start cuda_generate (swing{})".format(parClass.swing))
+   cmd = cuda_generate_pulse_command(sock, parClass.swing)
+   cmd.transmit()
+   cmd.client_return()
+   logmsg("End cuda_generate (swing{})".format(parClass.swing))
 
 
 def cuda_process(sock, parClass):
+   logmsg("Start cuda_process (swing{})".format(parClass.swing))
    # process samples from shared memory
    cmd = cuda_process_command(sock, parClass.swing)
    cmd.transmit()
    cmd.client_return()
+   logmsg("End cuda_process (swing{})".format(parClass.swing))
 
 def cuda_get_data(sock, parClass, channel_number):
+     logmsg("Start cuda_get_data (swing{})".format(parClass.swing))
      # copy processed samples
      cmd = cuda_get_data_command(sock, parClass.swing)
      cmd.transmit()
@@ -306,17 +326,123 @@ def cuda_get_data(sock, parClass, channel_number):
      cprint('finished collecting samples!', 'red')
 
      cmd.client_return()
+     logmsg("End cuda_get_data (swing{})".format(parClass.swing))
      return [main_samples, back_samples]
 
 
-cuda_sock = connect_to_cuda_driver()
-usrp_sock = connect_to_usrp_driver()
-par_swing0 = generate_parameter()
+def cuda_exit(sock):
+    cmd = cuda_exit_command(sock)
+    cmd.transmit()
 
-usrp_setup(usrp_sock, par_swing0)
-cuda_add_channel(cuda_sock, par_swing0)
-cuda_generate_pulse(cuda_sock, par_swing0)
-usrp_trigger(usrp_sock, par_swing0)
-cuda_process(cuda_sock, par_swing0)
-channel_number = 1
-data = cuda_get_data(cuda_sock, par_swing0, channel_number)
+
+
+def test_one_swing():
+   cuda_sock = connect_to_cuda_driver()
+   usrp_sock = connect_to_usrp_driver()
+   par_swing0 = generate_parameter()
+   
+   usrp_setup(usrp_sock, par_swing0)
+   cuda_add_channel(cuda_sock, par_swing0)
+   cuda_generate_pulse(cuda_sock, par_swing0)
+   usrp_trigger(usrp_sock, par_swing0)
+   usrp_ready_data(usrp_sock, par_swing0)
+   cuda_process(cuda_sock, par_swing0)
+   channel_number = 1
+   data = cuda_get_data(cuda_sock, par_swing0, channel_number)
+
+   cuda_exit(cuda_sock)
+
+
+def test_both_swings():
+   cuda_sock = connect_to_cuda_driver()
+   usrp_sock = connect_to_usrp_driver()
+   par_swing0 = generate_parameter()
+   par_swing1 = generate_parameter()
+   par_swing1.swing = 1
+
+   # swing A
+   usrp_setup(usrp_sock, par_swing0)
+   cuda_add_channel(cuda_sock, par_swing0)
+   cuda_generate_pulse(cuda_sock, par_swing0)
+   usrp_trigger(usrp_sock, par_swing0)
+ 
+   # B
+   cuda_add_channel(cuda_sock, par_swing1)
+   cuda_generate_pulse(cuda_sock, par_swing1)
+
+   # wait for A
+   usrp_ready_data(usrp_sock, par_swing0)
+   cuda_process(cuda_sock, par_swing0)
+   
+   usrp_trigger(usrp_sock, par_swing1)
+   
+   channel_number = 1
+   data = cuda_get_data(cuda_sock, par_swing0, channel_number) # swin A finished
+   cuda_add_channel(cuda_sock, par_swing0)
+   cuda_generate_pulse(cuda_sock, par_swing0)
+
+   # wait for B
+   usrp_ready_data(usrp_sock, par_swing1)
+   cuda_process(cuda_sock, par_swing1)
+   
+
+#   usrp_setup(usrp_sock, par_swing0)
+   channel_number = 1
+   data = cuda_get_data(cuda_sock, par_swing1, channel_number) # swing B finished
+
+   cuda_exit(cuda_sock)
+
+def test_nSequences(nSequences):
+   
+   if nSequences < 1:
+      print("nSequences have to be >= 1. Setting it to 1")
+      nSequences = 1
+
+   # connect and setup
+   cuda_sock = connect_to_cuda_driver()
+   usrp_sock = connect_to_usrp_driver()
+   par_swing0 = generate_parameter()
+   par_swing1 = generate_parameter()
+   par_swing1.swing = 1
+   par_vec = [par_swing0, par_swing1]
+
+   # prepare  first swing
+   usrp_setup(usrp_sock, par_swing0)
+   cuda_add_channel(cuda_sock, par_swing0)
+   cuda_generate_pulse(cuda_sock, par_swing0)
+   usrp_trigger(usrp_sock, par_swing0)
+ 
+   channel_number = 1
+   active_swing = 0 # swing finishing tx/rx, signal processing and tranismitting of final data
+   prep_swing   = 1 # preparing swing (add cuda channel, generate pulse, usrp setup) and start transmitting
+
+   for iSequence in range(nSequences-1):
+      # prepare prep_swing in cuda
+      cuda_add_channel(cuda_sock, par_vec[prep_swing])
+      cuda_generate_pulse(cuda_sock, par_vec[prep_swing])
+   
+      # wait active_swing and start cuda processing
+      usrp_ready_data(usrp_sock, par_vec[active_swing])
+      cuda_process(cuda_sock, par_vec[active_swing])
+      
+      # setup usrp for prep_swing and trigger usrp
+      usrp_setup(usrp_sock, par_vec[prep_swing])
+      usrp_trigger(usrp_sock, par_vec[prep_swing])
+
+      # get data of active_swing
+      data = cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) 
+
+      # switch prep and active swing
+      active_swing = 1 - active_swing
+      prep_swing = 1 - prep_swing
+
+   usrp_ready_data(usrp_sock, par_vec[active_swing])
+   cuda_process(cuda_sock, par_vec[active_swing])
+   data = cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) 
+
+   cuda_exit(cuda_sock)
+
+
+
+
+test_nSequences(3)
