@@ -243,17 +243,45 @@ else:
          start_cuda_driver()
          start_usrp_driver()
          start_usrp_server()
-      elif inputArg[1].lower() == "usrp_driver":
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          start_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          start_cuda_driver()
       elif inputArg[1].lower() == "driver":
-         start_usrp_driver()
          start_cuda_driver()
+         start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          start_usrp_server()
       else:
          print("unknown process to start")
+
+   elif firstArg == "restart":
+      if nArguments == 1 or inputArg[1].lower == "all":
+         print("Restarting all...")
+         stop_usrp_driver()
+         stop_cuda_driver()
+         print("waiting for 5 sec")
+         time.sleep(5)
+         start_cuda_driver()
+         start_usrp_driver()
+#         start_usrp_server()
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+         stop_usrp_driver()
+         print("waiting for 5 sec")
+         time.sleep(5)
+         start_usrp_driver()
+      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+         stop_cuda_driver()
+         start_cuda_driver()
+      elif inputArg[1].lower() == "driver":
+         stop_usrp_driver()
+         stop_cuda_driver()
+         start_cuda_driver()
+         start_usrp_driver()
+      elif inputArg[1].lower() in ["usrp_server", "server"]:
+         start_usrp_server()
+      else:
+         print("unknown process to restart")
 
 
    elif firstArg == "stop":
@@ -261,7 +289,7 @@ else:
          print("Stopping all...")
          stop_usrp_driver()
          stop_cuda_driver()
-      elif inputArg[1].lower() == "usrp_driver":
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()
@@ -270,6 +298,11 @@ else:
          stop_cuda_driver()
       else:
          print("unknown process to stop")
+   elif firstArg == "edit":
+       commandList = ['vim ', os.path.realpath(__file__) ] 
+       print(commandList)
+       subprocess.Popen(commandList)
+ 
    else:
       print("Unknown arguments ")
    

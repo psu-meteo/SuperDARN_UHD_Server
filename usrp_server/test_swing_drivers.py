@@ -405,6 +405,7 @@ def test_nSequences(nSequences):
    par_swing1 = generate_parameter()
    par_swing1.swing = 1
    par_vec = [par_swing0, par_swing1]
+   rx_data_list = []
 
    # prepare  first swing
    usrp_setup(usrp_sock, par_swing0)
@@ -430,7 +431,7 @@ def test_nSequences(nSequences):
       usrp_trigger(usrp_sock, par_vec[prep_swing])
 
       # get data of active_swing
-      data = cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) 
+      rx_data_list.append( cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) )
 
       # switch prep and active swing
       active_swing = 1 - active_swing
@@ -438,11 +439,16 @@ def test_nSequences(nSequences):
 
    usrp_ready_data(usrp_sock, par_vec[active_swing])
    cuda_process(cuda_sock, par_vec[active_swing])
-   data = cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) 
+   rx_data_list.append(cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) )
 
    cuda_exit(cuda_sock)
+   return rx_data_list
 
 
 
 
-test_nSequences(3)
+rx_data_list = test_nSequences(3)
+
+pdb.set_trace()
+for iResult in rx_data_list:
+   pass   

@@ -323,7 +323,7 @@ class cuda_get_data_handler(cudamsg_handler):
 
             for iAntenna in range(nAntennas):
                 transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
-                self.logger.debug('transmitted antenna index')
+                self.logger.debug('transmitted antenna index {}'.format(iAntenna))
 
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))

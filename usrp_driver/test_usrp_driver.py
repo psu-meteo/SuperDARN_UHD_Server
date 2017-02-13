@@ -24,7 +24,7 @@ import test_cuda_driver
 
 START_DRIVER = False
 ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7]
-ANTENNA_UNDER_TEST = [0]
+#ANTENNA_UNDER_TEST = [0]
 
 
 # parse gpu config file
@@ -43,9 +43,9 @@ USRPDRIVER_PORT = network_settings.getint('USRPDriverPort')
 RFRATE = 10000000
 
 
-rx_shm_list = [[],[]]
-tx_shm_list = []
-rx_semaphore_list = [[],[]] # [side][swing]
+rx_shm_list = [[[], []],[]]
+tx_shm_list = [[],[]]
+rx_semaphore_list = [[ [],[] ],[]] # [side][swing]
 swings = [SWING0, SWING1]
 sides = [SIDEA]
 
@@ -84,14 +84,13 @@ def stop_usrpserver(sock, pid):
 class USRP_ServerTestCases(unittest.TestCase):
     def setUp(self):
         antennas = ANTENNA_UNDER_TEST
-        for ant in antennas:
-            rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size,  RXDIR))
-            rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size,  RXDIR))
-            tx_shm_list.append(       create_shm(ant, SWING0, SIDEA, txshm_size,  TXDIR))
-            tx_shm_list.append(       create_shm(ant, SWING1, SIDEA, txshm_size,  TXDIR))
+        for iSwing in swings:
+           for ant in antennas:
+               rx_shm_list[SIDEA][iSwing].append(create_shm(ant, iSwing, SIDEA, rxshm_size,  RXDIR))
+               tx_shm_list[iSwing].append(       create_shm(ant, iSwing, SIDEA, txshm_size,  TXDIR))
+  
+           rx_semaphore_list[SIDEA][iSwing].append(create_sem(ant, iSwing, RXDIR))
 
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING0, RXDIR))
-        rx_semaphore_list[SIDEA].append(create_sem(ant, SWING1, RXDIR))
 
         time.sleep(1)
         self.pid = start_usrpserver()
@@ -166,7 +165,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
         time.sleep(1)
     
-    def fill_tx_shm_with_one_pulse(self, seq):
+    def fill_tx_shm_with_one_pulse(self, seq, swing):
         cprint('populating tx shm sample buffer','red')
 
         # create test tone
@@ -182,7 +181,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         sample_tx[0::2] = sample_real
         sample_tx[1::2] = sample_imag
         for antNo in ANTENNA_UNDER_TEST:
-           tx_shm = tx_shm_list[antNo]
+           tx_shm = tx_shm_list[swing][antNo]
            tx_shm.seek(0)
            tx_shm.write(sample_tx.tobytes())
 
@@ -196,7 +195,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
 
         seq = test_cuda_driver.create_testsequence()
-        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
+        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq, swing)
 
         # copied from usrp_driver and adjusted
         # determine the length of integration periods for all channels in seconds
@@ -237,7 +236,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
-        swing = 0
+        swing = 1
        
         start_setup = time.time() 
         cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets, swing)
@@ -286,7 +285,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         import matplotlib.pyplot as plt
         print("Reading data from shm:")
         for ant in ANTENNA_UNDER_TEST:
-           rx_shm = rx_shm_list[0][ant*2]
+           rx_shm = rx_shm_list[SIDEA][swing][ant]
            rx_shm.seek(0)
            ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
            arp = np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2
@@ -311,9 +310,9 @@ class USRP_ServerTestCases(unittest.TestCase):
         ret = cmd.client_return()
 
         seq = test_cuda_driver.create_testsequence()
-
+        swing = 1 
         
-        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
+        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq, swing)
 
         # copied from usrp_driver and adjusted
         # determine the length of integration periods for all channels in seconds
@@ -354,7 +353,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
         print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
         print(integration_period_pulse_sample_offsets)
-        swing = 1 
+
         start_setup = time.time() 
         cmd = usrp_setup_command(self.serversock, seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, nPulses_per_period, nSamples_rx, nSamples_per_pulse, integration_period_pulse_sample_offsets, swing)
         cmd.transmit()
@@ -402,7 +401,7 @@ class USRP_ServerTestCases(unittest.TestCase):
         import matplotlib.pyplot as plt
         print("Reading data from shm:")
         for ant in ANTENNA_UNDER_TEST:
-           rx_shm = rx_shm_list[0][ant*2]
+           rx_shm = rx_shm_list[SIDEA][swing][ant]
            rx_shm.seek(0)
            ar = np.frombuffer(rx_shm, dtype=np.int16, count=nSamples_rx*2)
            arp = np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2
@@ -426,14 +425,14 @@ class USRP_ServerTestCases(unittest.TestCase):
     def xtest_trigger_pulse_one_sequence(self):
         cprint('testing usrp trigger with one sequence','red')
         seq = create_testsequence()
-
-        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq)
+        swing = 0
+        nSamples_per_pulse =  self.fill_tx_shm_with_one_pulse(seq, swing)
 
         nSamples_rx = np.uint64(np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))  # TODO: thiss has to changed for integration period 
 
         cprint('sending setup command', 'blue')
         offset_sample_list = [offset * RFRATE for offset in seq.pulse_offsets_vector]
-        swing = 0
+
         cmd = usrp_setup_command([self.serversock], seq.ctrlprm['tfreq'], seq.ctrlprm['rfreq'],RFRATE, RFRATE, seq.npulses, nSamples_rx, nSamples_per_pulse, offset_sample_list, swing)
         cmd.transmit()
         client_returns = cmd.client_return()
@@ -473,7 +472,7 @@ class USRP_ServerTestCases(unittest.TestCase):
             
         # plot data
         num_rx_samples = np.uint64(2*np.round((RFRATE) * (seq.ctrlprm['number_of_samples'] / seq.ctrlprm['baseband_samplerate'])))
-        rx_shm = rx_shm_list[0][0]
+        rx_shm = rx_shm_list[SIDEA][swing][0]
         rx_shm.seek(0)
         ar = np.frombuffer(rx_shm, dtype=np.int16, count=num_rx_samples)
         arp = np.sqrt(np.float32(ar[0::2]) ** 2 + np.float32(ar[1::2]) ** 2)
