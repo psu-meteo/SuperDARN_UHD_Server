@@ -346,13 +346,14 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
+    def __init__(self, npulses, nbb_rx_samples_per_integration_period, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens # length of pulses, in seconds
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
+        self.nbb_rx_samples_per_integration_period = nbb_rx_samples_per_integration_period
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay

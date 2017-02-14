@@ -122,7 +122,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 bb_signal[chIndex]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
-        self.gpu.synth_channels(bb_signal)
+        self.logger.warning('TODO: refactor cuda_generate_pulse_handler to fix accessing rx bb samples per integration period by hardcoded first sequence')
+        self.gpu.synth_channels(bb_signal, self.gpu.sequences[0].nbb_rx_samples_per_integration_period)
         
         # copy rf waveform to shared memory from GPU memory 
         self.gpu.txsamples_host_to_shm()
@@ -164,11 +165,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         if not (tx_center_freq >= int(self.hardware_limits['minimum_tfreq'])):
             self.logger.error('transmit center frequency too low for hardware')
-            #pdb.set_trace()
 
         if tx_center_freq > int(self.hardware_limits['maximum_tfreq']):
             self.logger.error('transmit center frequency too high for hardware')
-            #pdb.set_trace()
 
         #assert tfreq < int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
 
@@ -274,7 +273,6 @@ class cuda_add_channel_handler(cudamsg_handler):
         # release semaphores
         semaphore_list[SIDEA][SWING0].release()
         semaphore_list[SIDEA][SWING1].release()
-        #pdb.set_trace()
         self.logger.debug('semaphores released in cuda add channel handler')
 
 # prepare for a refresh of sequences 
@@ -338,7 +336,6 @@ class cuda_get_data_handler(cudamsg_handler):
             for iAntenna in range(nAntennas):
                 transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
                 self.logger.debug('transmitted antenna index')
-
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
@@ -587,11 +584,9 @@ class ProcessingGPU(object):
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
-        #pdb.set_trace()
 
-    def rx_init(self): 
+    def rx_init(self, nbb_rx_samples_per_integration_period): 
         # build arrays based on first sequence..
-        # TODO: support multiple sequences?
         ctrlprm = self.sequences[0].ctrlprm
         
         decimationRate_rf2if = self.rx_rf2if_downsamplingRate
@@ -603,7 +598,7 @@ class ProcessingGPU(object):
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
         assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
-        rx_bb_nSamples = int(ctrlprm['number_of_samples']) # number of recv samples
+        rx_bb_nSamples = nbb_rx_samples_per_integration_period
 
         # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
         rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
@@ -662,8 +657,8 @@ class ProcessingGPU(object):
 
 
         # synthesize rf waveform (beamforming, apply phase_masks, mixing in cuda)
-    def synth_channels(self, bb_signal):
-        self.rx_init()
+    def synth_channels(self, bb_signal, nbb_rx_samples_per_integration_period):
+        self.rx_init(nbb_rx_samples_per_integration_period)
         # TODO: this assumes all channels have the same number of samples 
         tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
         self.tx_init(tx_bb_nSamples_per_pulse)
@@ -700,7 +695,6 @@ class ProcessingGPU(object):
             plt.title('spectrum of one TX RF pulse')
             
             plt.show()
-         #   pdb.set_trace()
         
     # calculates the threads in a block from a block size tuple
     def _threadsPerBlock(self, block):
@@ -768,7 +762,6 @@ class ProcessingGPU(object):
 
         #    mpt.plot_time_freq(self.rx_rf_samples[0][0][400000:440000], self.rx_rf_samplingRate, iqInterleaved=True)
         #    plt.title("Second pulse separate")
-            # pdb.set_trace()
 
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self):
@@ -780,7 +773,6 @@ class ProcessingGPU(object):
     def interpolate_and_multiply(self):
         cuda.memcpy_htod(self.cu_tx_bb_indata, self.tx_bb_indata)
       #  import myPlotTools as mpt
-      #  pdb.set_trace()
         self.cu_tx_interpolate_and_multiply(self.cu_tx_bb_indata, self.cu_tx_rf_outdata, block = self.tx_block, grid = self.tx_grid)
     
     # copy rf samples to shared memory for transmission by usrp driver
@@ -894,7 +886,6 @@ def main():
     
     # create shared memory buffers and semaphores for rx and tx
     for ant in antennas:
-        #pdb.set_trace()
         rx_shm_list[SIDEA].append(create_shm(ant, SWING0, SIDEA, rxshm_size, direction = RXDIR))
         rx_shm_list[SIDEA].append(create_shm(ant, SWING1, SIDEA, rxshm_size, direction = RXDIR))
         tx_shm_list.append(create_shm(ant, SWING0, SIDEA, txshm_size, direction = TXDIR))
