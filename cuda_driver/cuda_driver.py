@@ -314,7 +314,6 @@ class cuda_get_data_handler(cudamsg_handler):
 
         self.logger.debug('transmitting nAntennas {}'.format(nAntennas)) 
         transmit_dtype(self.sock, nAntennas, np.uint32)
-        
         # transmit requested channels
         channel = recv_dtype(self.sock, np.int32) 
         while (channel != -1):
@@ -327,6 +326,7 @@ class cuda_get_data_handler(cudamsg_handler):
 
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))
+                self.logger.debug(" transmitting sum : {}".format(np.sum(samples[iAntenna][channelIndex]) ))
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
 
             channel = recv_dtype(self.sock, np.int32) 
@@ -337,16 +337,18 @@ class cuda_get_data_handler(cudamsg_handler):
 # copy data to gpu, start processing
 class cuda_process_handler(cudamsg_handler):
     def process(self):
-        self.logger.debug('enter cuda_process_handler')
         cmd = cuda_process_command([self.sock])
         cmd.receive(self.sock)
         swing = cmd.payload['swing']
+        self.logger.debug('enter cuda_process_handler (swing {})'.format(swing))
+#        pdb.set_trace()
+#        acquire_sem(rx_sem_list[SIDEA][swing])
 
-        acquire_sem(rx_sem_list[SIDEA][swing])
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu._set_rx_phaseIncrement(swing) 
         self.gpu.rxsamples_process(swing) 
-        release_sem(rx_sem_list[SIDEA][swing])
+ #       release_sem(rx_sem_list[SIDEA][swing])
+        self.logger.debug('leaving cuda_process_handler (swing {})'.format(swing))
 
 
 # cleanly exit.
@@ -733,7 +735,8 @@ class ProcessingGPU(object):
     def rxsamples_shm_to_gpu(self, shm):      
         for aidx in range(self.nAntennas):
             shm[aidx].seek(0)
-            self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2) 
+            self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
+        print(self.rx_rf_samples[0][:11]) 
 
 
                
@@ -794,6 +797,15 @@ class ProcessingGPU(object):
     def pull_rxdata(self, swing):
         self.streams[swing].synchronize()
         cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples)
+        if False:
+           import matplotlib.pyplot as plt
+           plt.figure()
+
+           for iChannel in range(2):
+              for iAnt in range(self.nAntennas):
+                 plt.subplot(2 , self.nAntennas, iChannel*self.nAntennas + iAnt+1)
+                 plt.plot(self.rx_bb_samples[iAnt][iChannel])
+           plt.show() 
         return self.rx_bb_samples  #TODO remove the bb samples form class, if possible
     
     # upsample baseband data on gpu

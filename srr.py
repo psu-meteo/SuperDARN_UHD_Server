@@ -28,8 +28,8 @@ UHD_EXIT = ord('e')
 
 
 basePath = os.path.dirname(os.path.realpath(__file__))
-
-
+nSecs_restart_pause = 10
+print("-------------------------------\n| Software Radio Radar ")
 
 ######################
 ## Processes:
@@ -260,15 +260,15 @@ else:
          print("Restarting all...")
          stop_usrp_driver()
          stop_cuda_driver()
-         print("waiting for 5 sec")
-         time.sleep(5)
+         print("waiting for {} sec".format(nSecs_restart_pause))
+         time.sleep(nSecs_restart_pause)
          start_cuda_driver()
          start_usrp_driver()
 #         start_usrp_server()
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
-         print("waiting for 5 sec")
-         time.sleep(5)
+         print("waiting for {} sec".format(nSecs_restart_pause))
+         time.sleep(nSecs_restart_pause)
          start_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()

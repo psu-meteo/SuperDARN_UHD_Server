@@ -3,6 +3,7 @@
 import unittest 
 import numpy as np 
 import sys 
+import os
 import posix_ipc 
 import pdb 
 import time 
@@ -158,7 +159,7 @@ def generate_parameter(integration_period = 2):
       # calculate the pulse sequence period with padding
       time_sequence     = PULSE_SEQUENCE_PADDING_TIME + seq.pulse_offsets_vector[-1] + seq.pulse_lens[-1] /1e6
       nSamples_sequence = int(np.round(time_sequence * samplingRate_tx))
-
+      usrp_par.seq.ctrlprm['number_of_samples'] = int(time_sequence*usrp_par.seq.ctrlprm['baseband_samplerate'])
       # calculate the number of pulse sequences that fit in the available time within an integration period
       nSequences_in_period = int(np.floor(sampling_duration / time_sequence))
 
@@ -316,10 +317,10 @@ def cuda_get_data(sock, parClass, channel_number):
                 back_samples = np.zeros((4, 4, num_samples/2))
 
             if antIdx < 16:
-                main_samples[channel_number][antIdx] = samples[:]
+                main_samples[channel_number-1][antIdx] = samples[:]
 
             else:
-                back_samples[channel_number][antIdx - nMainAntennas] = samples[:]
+                back_samples[channel_number-1][antIdx - nMainAntennas] = samples[:]
 
 
         transmit_dtype(cudasock, -1, np.int32) # send channel -1 to cuda driver to end transfer process
@@ -441,7 +442,8 @@ def test_nSequences(nSequences):
    cuda_process(cuda_sock, par_vec[active_swing])
    rx_data_list.append(cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) )
 
-   cuda_exit(cuda_sock)
+#   cuda_exit(cuda_sock)
+   os.system("../srr.py stop") 
    return rx_data_list
 
 
@@ -449,6 +451,23 @@ def test_nSequences(nSequences):
 
 rx_data_list = test_nSequences(3)
 
-pdb.set_trace()
-for iResult in rx_data_list:
-   pass   
+
+import matplotlib.pyplot as plt
+# rx_data[iSequence|iSwing][mainArray|backArray][iChannel][iAntenne][iComplexSample]
+nSequences = len(rx_data_list)
+for iSequence, seqRxData in enumerate(rx_data_list):
+#  plt.figure()
+  for i, antennaData in enumerate(seqRxData[0][0]):
+     if i == 0:
+         plt.ylabel("seq {}".format(iSequence))
+     elif i > 7:
+        break
+     plt.subplot(nSequences,8,  i+1+iSequence*8)
+     plt.plot(np.real(antennaData))
+     plt.plot(np.imag(antennaData))
+     power = np.abs(antennaData)**2
+     print("sequence {}: ant {: >2}, rms {: >9.3f}   max  {: >9.3f}".format(iSequence, i, np.sqrt(np.sum(power)), np.sqrt(max(power))  ))
+
+#plt.plot(rx_data_list[0][0][1][0])
+
+plt.show()
