@@ -102,7 +102,7 @@ timSpansServer = timeSpans(server)
 # %% plot data
 
 fig, ax = plt.subplots()
-uniqueNames = list(set(timSpansServer.msg))
+uniqueNames = sorted(list(set(timSpansServer.msg)))
 
 t0 = timSpansServer.startTime[0]
 

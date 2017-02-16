@@ -290,11 +290,13 @@ class usrp_rxfe_setup_command(driver_command):
 
 # trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
-    def __init__(self, usrps, trigger_time, swing):
+    def __init__(self, usrps, trigger_time, tr_to_pulse_delay, swing):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
         self.queue(swing , np.int16,   'swing' )
-        self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'clrfreq_uhd_time_int')
-        self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'clrfreq_uhd_time_frac')
+        self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'uhd_time_int')
+        self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'uhd_time_frac')
+        self.queue(np.float64(tr_to_pulse_delay), np.float64, 'tr_to_pulse_delay')
+
 
 
 

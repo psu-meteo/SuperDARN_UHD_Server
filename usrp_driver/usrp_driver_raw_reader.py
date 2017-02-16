@@ -2,7 +2,7 @@
 # reads in raw sample dump from usrp_driver
 import sys
 
-filename = "raw_samples_ant_0.cint16"
+filename = "diag/raw_samples_tx_ant_0.cint16"
 
 cfreq = 13e6
 rfrate = 10e6

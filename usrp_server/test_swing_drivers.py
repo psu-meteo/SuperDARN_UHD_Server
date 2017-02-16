@@ -28,7 +28,7 @@ import test_cuda_driver
 START_DRIVER = False 
 ANTENNA_UNDER_TEST = [0, 1, 2, 3, 4 ,5, 6, 7] 
 #ANTENNA_UNDER_TEST = [0] 
-INTEGRATION_PERIOD_SYNC_TIME = 0.2  # todo: get from file
+INTEGRATION_PERIOD_SYNC_TIME = 0.3  # todo: get from file
  
 
 # init logging
@@ -129,7 +129,7 @@ class swingParameter():
    
    @tx_freq.setter
    def tx_freq(self, value):
-       self.seq.ctrlprm['tfreq']
+       self.seq.ctrlprm['tfreq'] = value
 
    @property
    def rx_freq(self):
@@ -137,7 +137,7 @@ class swingParameter():
    
    @rx_freq.setter
    def rx_freq(self, value):
-       self.seq.ctrlprm['rfreq']
+       self.seq.ctrlprm['rfreq'] = value
 
 
 
@@ -151,7 +151,8 @@ def generate_parameter(integration_period = 2):
       nPulses_in_sequence = 8 # seq.npulses
 
 
-      nSamples_per_pulse = np.uint64(int(cuda_settings['TXUpsampleRate']) *  ( np.floor(samplingRate_tx * seq.pulse_lens[0]/1e6 ) + 2 * np.floor(samplingRate_tx * seq.tr_to_pulse_delay/1e6 )))
+#      nSamples_per_pulse = np.uint64(int(cuda_settings['TXUpsampleRate']) *  ( np.floor(samplingRate_tx * seq.pulse_lens[0]/1e6 ) + 2 * np.floor(samplingRate_tx * seq.tr_to_pulse_delay/1e6 )))
+      nSamples_per_pulse = np.uint64( ( np.floor(samplingRate_tx * seq.pulse_lens[0]/1e6 ) + 2 * np.floor(samplingRate_tx * seq.tr_to_pulse_delay/1e6 )))
 
       # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
       sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME
@@ -217,7 +218,7 @@ def usrp_trigger(sock, usrp_par):
     cmd.client_return()
 
     trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-    cmd = usrp_trigger_pulse_command(sock, trigger_time, usrp_par.swing)
+    cmd = usrp_trigger_pulse_command(sock, trigger_time, usrp_par.seq.tr_to_pulse_delay / 1e9, usrp_par.swing)
     cmd.transmit()
     client_returns = cmd.client_return()
     for r in client_returns:
@@ -405,6 +406,8 @@ def test_nSequences(nSequences):
    par_swing0 = generate_parameter()
    par_swing1 = generate_parameter()
    par_swing1.swing = 1
+   par_swing1.tx_freq = 15000
+   par_swing1.rx_freq = 15000
    par_vec = [par_swing0, par_swing1]
    rx_data_list = []
 
@@ -425,12 +428,13 @@ def test_nSequences(nSequences):
    
       # wait active_swing and start cuda processing
       usrp_ready_data(usrp_sock, par_vec[active_swing])
-      cuda_process(cuda_sock, par_vec[active_swing])
+#      cuda_process(cuda_sock, par_vec[active_swing])
       
       # setup usrp for prep_swing and trigger usrp
       usrp_setup(usrp_sock, par_vec[prep_swing])
       usrp_trigger(usrp_sock, par_vec[prep_swing])
 
+      cuda_process(cuda_sock, par_vec[active_swing])
       # get data of active_swing
       rx_data_list.append( cuda_get_data(cuda_sock, par_vec[active_swing], channel_number) )
 
@@ -448,26 +452,37 @@ def test_nSequences(nSequences):
 
 
 
+def plot_sequences(rx_data_list):
+    import matplotlib.pyplot as plt
+    # rx_data[iSequence|iSwing][mainArray|backArray][iChannel][iAntenne][iComplexSample]
+    nSequences = len(rx_data_list)
+    for iSequence, seqRxData in enumerate(rx_data_list):
+    #  plt.figure()
+      for i, antennaData in enumerate(seqRxData[0][0]):
+         if i > 7:
+            break
+         plt.subplot(nSequences,8,  i+1+iSequence*8)
+         if i == 0:
+             plt.title("seq {} ant {}".format(iSequence, i))
+
+         plt.plot(np.real(antennaData))
+         plt.plot(np.imag(antennaData))
+         power = np.abs(antennaData)**2
+         print("sequence {}: ant {: >2}, rms {: >9.3f}   max  {: >9.3f}".format(iSequence, i, np.sqrt(np.sum(power)), np.sqrt(max(power))  ))
+    plt.figure()
+    data =rx_data_list[0][0][0][0] 
+    plt.plot([i/3333.33 for i in range(len(data))], data)
+    plt.title("sequence 0, ant 0")
+    plt.show()
+
+
+def tmp():
+   cuda_sock = connect_to_cuda_driver()
+   par_swing0 = generate_parameter()
+   cuda_add_channel(cuda_sock, par_swing0)
+   cuda_generate_pulse(cuda_sock, par_swing0)
+   cuda_exit(cuda_sock)
+
 
 rx_data_list = test_nSequences(3)
-
-
-import matplotlib.pyplot as plt
-# rx_data[iSequence|iSwing][mainArray|backArray][iChannel][iAntenne][iComplexSample]
-nSequences = len(rx_data_list)
-for iSequence, seqRxData in enumerate(rx_data_list):
-#  plt.figure()
-  for i, antennaData in enumerate(seqRxData[0][0]):
-     if i == 0:
-         plt.ylabel("seq {}".format(iSequence))
-     elif i > 7:
-        break
-     plt.subplot(nSequences,8,  i+1+iSequence*8)
-     plt.plot(np.real(antennaData))
-     plt.plot(np.imag(antennaData))
-     power = np.abs(antennaData)**2
-     print("sequence {}: ant {: >2}, rms {: >9.3f}   max  {: >9.3f}".format(iSequence, i, np.sqrt(np.sum(power)), np.sqrt(max(power))  ))
-
-#plt.plot(rx_data_list[0][0][1][0])
-
-plt.show()
+plot_sequences(rx_data_list)

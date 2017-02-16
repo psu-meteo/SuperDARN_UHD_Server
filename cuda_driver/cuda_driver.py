@@ -342,7 +342,9 @@ class cuda_process_handler(cudamsg_handler):
         swing = cmd.payload['swing']
         self.logger.debug('enter cuda_process_handler (swing {})'.format(swing))
 #        pdb.set_trace()
+
 #        acquire_sem(rx_sem_list[SIDEA][swing])
+        self.gpu.rx_init(swing)
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu._set_rx_phaseIncrement(swing) 
@@ -590,19 +592,20 @@ class ProcessingGPU(object):
            self.logger.debug('  TX Block: {}'.format( str(self.tx_block)))
            self.logger.debug('  TX Grid:  {}'.format( str(self.tx_grid )))
 
-           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
-           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
-           self.logger.debug("RF => IF")
-           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
-           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
-           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
-
-           self.logger.debug("RF => IF")
-           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
-           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
-           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
-
-           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
+# some of the rx variable do not exist, since rx_init moved to process_handler
+#           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
+#           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
+#           self.logger.debug("RF => IF")
+#           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
+#           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
+#           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
+#
+#           self.logger.debug("RF => IF")
+#           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
+#           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
+#           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
+#
+#           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
 
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
@@ -650,7 +653,7 @@ class ProcessingGPU(object):
         # dsp_filters.rolloff_filter_s1()
         self.rx_filtertap_ifbb = dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
-       # self._plot_filter()
+#        self._plot_filter()
         
         self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
         self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
@@ -684,7 +687,7 @@ class ProcessingGPU(object):
 
         # synthesize rf waveform (beamforming, apply phase_masks, mixing in cuda)
     def synth_channels(self, bb_signal, swing):
-        self.rx_init(swing)
+#        self.rx_init(swing) moved to process_handler
         # TODO: this assumes all channels have the same number of samples 
         tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
         self.tx_init(tx_bb_nSamples_per_pulse)
@@ -835,7 +838,7 @@ class ProcessingGPU(object):
     def _set_rx_phaseIncrement(self,  swing):
         for channel in range(self.nChannels):
             if self.sequences[swing][channel] is not None:
-               fc = self.sequences[swing][channel].ctrlprm['rfreq'] * 1000
+               fc = self.sequences[swing][channel].ctrlprm['rfreq'] * 1000 
                self.rx_phaseIncrement_rad[channel] = np.float64(2 * np.pi * (  self.usrp_mixing_freq[swing] - fc ) / self.rx_rf_samplingRate)
                self.logger.debug('setting rx mixer freq (phase offset) for ch {}: {} MHz (usrp BB {} MHz) swing {} '.format(channel, fc/1e6, ( self.usrp_mixing_freq[swing] - fc)/1e6, swing)  )
                cuda.memcpy_htod(self.cu_rx_phaseIncrement_rad, self.rx_phaseIncrement_rad)

@@ -59,7 +59,7 @@
 #define nSwings 2 // swings are slots in the swing buffer
 #define VERBOSE 1
 
-#define SAVE_RAW_SAMPLES_DEBUG 0
+#define SAVE_RAW_SAMPLES_DEBUG 0 
 
 #define MAX_SOCKET_RETRYS 5
 #define TRIGGER_BUSY 'b'
@@ -391,7 +391,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 //  TODO: what is this for? delete?
 //    uhd::time_spec_t get_data_t0;
 //    uhd::time_spec_t get_data_t1;
-    uhd::time_spec_t start_time;
+    uhd::time_spec_t start_time, rx_start_time;
     
     // vector of all pulse start times over an integration period
     std::vector<uhd::time_spec_t> pulse_time_offsets;
@@ -585,9 +585,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     pulse_time_offsets.resize(npulses);
 
                     for(uint32_t i = 0; i < npulses; i++) {
-                        DEBUG_PRINT("USRP_SETUP waiting for pulse offset %d of %d\n", i+2, npulses);
+                //        DEBUG_PRINT("USRP_SETUP waiting for pulse offset %d of %d\n", i+2, npulses);
                         pulse_sample_idx_offsets[i] = sock_get_uint64(driverconn); 
-                        DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
+                //        DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
                     }
 
                     if(rx_data_buffer.size() != nSamples_rx) {
@@ -682,11 +682,23 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         memcpy(&tx_samples[spb], shm_pulseaddr, pulse_bytes);
 
+                        if(SAVE_RAW_SAMPLES_DEBUG) {
+                            FILE *raw_dump_fp;
+                            char raw_dump_name[80];
+
+                            sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", ant);
+                            raw_dump_fp = fopen(raw_dump_name, "wb");
+                            fwrite(&tx_samples[0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
+                            fclose(raw_dump_fp);
+                        }
 
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
                         double pulse_time_frac = sock_get_float64(driverconn);
                         start_time = uhd::time_spec_t(pulse_time_full, pulse_time_frac);
+                        double tr_to_pulse_delay = sock_get_float64(driverconn);
+
+
                         
                         // calculate usrp clock time of the start of each pulse over the integration period
                         // so we can schedule the io (perhaps we will have to move io off of the usrp if it can't keep up)
@@ -696,6 +708,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
                         
+                        rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay);
+                        rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
+                            
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = nSamples_tx_pulse / txrate;
                         
@@ -703,7 +718,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, start_time, &rx_worker_status)); 
+                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay)); 
 
@@ -751,10 +766,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
-                        sprintf(raw_dump_name,"raw_samples_ant_%d.cint16", ant);
+                        sprintf(raw_dump_name,"diag/raw_samples_rx_ant_%d.cint16", ant);
                         raw_dump_fp = fopen(raw_dump_name, "wb");
                         fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
                         fclose(raw_dump_fp);
+
                     }
 
                     DEBUG_PRINT("READY_DATA finished copying rx data buffer to shared memory\n");
