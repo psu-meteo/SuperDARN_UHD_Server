@@ -37,7 +37,7 @@ def create_testsequence():
     'tbeamwidth': 0.0, \
     'tfreq': 11000, \
     'trise': 5000, \
-    'number_of_samples' : 10000, \
+    'number_of_samples' : 200, \
     'buffer_index' : 0, \
     'baseband_samplerate' : 3333.3333, \
     'filter_bandwidth' : 3333, \
@@ -129,17 +129,17 @@ class CUDA_ServerTestCases(unittest.TestCase):
         nAntennas = 16
         nMainAntennas = 16
         rf_sampling_rate = 5e6 
-        tone_frequency = 1e3
+        tone_frequency = 0
         usrp_center_frequency = 13e6
 
         bb_nSamples_per_antenna = seq.ctrlprm['number_of_samples']
         bb_sampling_rate = seq.ctrlprm['baseband_samplerate']
-        usrp_channel_frequency = seq.ctrlprm['tfreq']
+        usrp_channel_frequency = seq.ctrlprm['tfreq'] * 1000
 
         rf_nSamples_per_antenna = int(bb_nSamples_per_antenna * (rf_sampling_rate / bb_sampling_rate))
 
         signal_frequency = (usrp_channel_frequency - usrp_center_frequency) + tone_frequency
-        downconverted_tone = tone_frequency 
+      
 
         # create rf and baseband test signals, copy it into shared memory, gpu accepts complex int16
         rf_test_signal = np.zeros((nAntennas, 2 * rf_nSamples_per_antenna), dtype=np.int16)
@@ -150,6 +150,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
         #pdb.set_trace()
         rf_test_signal[0][0::2] = 1000 * np.sin(rf_time_vector * 2 * np.pi * signal_frequency)
+        rf_test_signal[0][1::2] = 1000 * np.cos(rf_time_vector * 2 * np.pi * signal_frequency)
 
         expected_bb_signal[0][:] = 1000 * np.sin(bb_time_vector * 2 * np.pi * tone_frequency)
 
@@ -161,7 +162,8 @@ class CUDA_ServerTestCases(unittest.TestCase):
         
         tstart = time.time()
         # send channel information
-        cmd = cuda_add_channel_command([self.serversock], seq) 
+        swing = 0
+        cmd = cuda_add_channel_command([self.serversock], seq, swing)
         cmd.transmit()
         cmd.client_return()
 
@@ -169,20 +171,20 @@ class CUDA_ServerTestCases(unittest.TestCase):
         # TODO: populate samples in shared memory
         
         # run generate pulse command to initialize memory..
-        cmd = cuda_generate_pulse_command([self.serversock])
+        cmd = cuda_generate_pulse_command([self.serversock], swing)
         cmd.transmit()
         cmd.client_return()
         cprint('finished generate pulse command', 'red')
 
 
         # process samples from shared memory
-        cmd = cuda_process_command([self.serversock])
+        cmd = cuda_process_command([self.serversock], swing)
         cmd.transmit()
         cmd.client_return()
         cprint('finished process command', 'red')
 
         # copy processed samples
-        cmd = cuda_get_data_command(self.serversock)
+        cmd = cuda_get_data_command(self.serversock, swing)
         cmd.transmit()
         
         main_samples = None
@@ -206,7 +208,7 @@ class CUDA_ServerTestCases(unittest.TestCase):
 
 
             #... initialize main/back sample arrays once num_samples is known
-            if main_samples == None:
+            if main_samples is None:
                 main_samples = np.zeros((4, 16, num_samples/2))	
                 back_samples = np.zeros((4, 4, num_samples/2))
 

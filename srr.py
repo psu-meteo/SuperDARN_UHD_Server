@@ -28,7 +28,16 @@ UHD_EXIT = ord('e')
 
 
 basePath = os.path.dirname(os.path.realpath(__file__))
+nSecs_restart_pause = 10
 
+def myPrint(msg):
+   print("||>  {}".format(msg))
+basePrintLine = "||>==============================================================="
+
+print(basePrintLine)
+myPrint("Software Radio Radar")
+print(basePrintLine)
+myPrint(" ")
 
 
 ######################
@@ -54,9 +63,9 @@ def print_status():
                   srrProcesses.append(commandString)
                   break
    
-    print("Found {} processes:".format(len(srrProcesses)))
+    myPrint("Found {} processes:".format(len(srrProcesses)))
     for line in srrProcesses:
-       print("  {}".format(line))
+       myPrint("  {}".format(line))
 
 def pid_exists(pid):
     """Check whether pid exists in the current process table.  UNIX only. 
@@ -82,7 +91,7 @@ def pid_exists(pid):
 
 def terminate_pid(pid):
   if pid_exists(pid):
-     print("   killing pid {}".format(pid))
+     myPrint("   killing pid {}".format(pid))
      os.kill(pid, signal.SIGTERM)
 
 def terminate_all(pidDictList):
@@ -104,43 +113,43 @@ def get_usrp_driver_processes():
                host = wordList[wordList.index("--host")+1]
                usrpProcesses.append(dict(pid=int(wordList[1]), host=host, antenna=antenna))
             except:
-               print("  not a driver process: {}".format(line))
+               myPrint("  not a driver process: {}".format(line))
 
     return usrpProcesses
 
 def stop_usrp_driver_soft():
     usrpProcesses = get_usrp_driver_processes()
     if len(usrpProcesses) == 0:
-        print("  No usrp_driver processes")
+        myPrint("  No usrp_driver processes")
         return
-    print("Found {} usrp_driver processes".format(len(usrpProcesses)))
+    myPrint("Found {} usrp_driver processes".format(len(usrpProcesses)))
     
     dtype = np.uint8
     
     for process in usrpProcesses:
-        print("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], process['antenna'] + USRPDriverPort, process['pid']))
+        myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], process['antenna'] + USRPDriverPort, process['pid']))
         usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         usrpsock.connect(('localhost', process['antenna'] + USRPDriverPort))
     
         usrpsock.sendall(dtype(UHD_EXIT).tobytes())
     
        # dstr = usrpsock.recv(dtype().nbytes )
-       # print('  => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes , dstr  ))
+       # myPrint('  => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes , dstr  ))
        # data = np.fromstring(dstr, dtype=dtype)
-       # print("   data:{}".format(data))
+       # myPrint("   data:{}".format(data))
     
     
-    print("  Done.\nAgain checking for usrp_driver processes...")
+    myPrint("  Done.\nAgain checking for usrp_driver processes...")
     usrpProcesses = get_usrp_driver_processes()
-    print(" Found {} usrp_driver processes".format(len(usrpProcesses)))
+    myPrint(" Found {} usrp_driver processes".format(len(usrpProcesses)))
 
 def stop_usrp_driver_hard():
-  #  print("Stop usrp_driver hard...")
+  #  myPrint("Stop usrp_driver hard...")
     terminate_all(get_usrp_driver_processes())
 
 
 def stop_usrp_driver():
-    print(" Stopping usrp_driver...")
+    myPrint(" Stopping usrp_driver...")
     stop_usrp_driver_soft()
     stop_usrp_driver_hard()
 
@@ -156,11 +165,11 @@ def get_cuda_driver_processes():
     return cudaProcesses
 
 def stop_cuda_driver():
-    print(" Stopping cuda_driver...")
+    myPrint(" Stopping cuda_driver...")
     cudaProcesses = get_cuda_driver_processes()
     if len(cudaProcesses):
        for process in cudaProcesses:
-            print("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+            myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect(('localhost',CUDADriverPort))
             sock.sendall(np.uint8(CUDA_EXIT).tobytes())
@@ -169,7 +178,7 @@ def stop_cuda_driver():
        # terminate processes if they still exis
        terminate_all(cudaProcesses)
     else:
-       print("  No cuda_driver processes found...")
+       myPrint("  No cuda_driver processes found...")
     
     
     
@@ -183,22 +192,22 @@ def read_config(fileName):
    return config
 
 def start_usrps_from_config(usrp_sleep = False):
-    print("Starting usrp_driver from config:")
+    myPrint("Starting usrp_driver from config:")
     fileName = os.path.join(basePath, 'usrp_config.ini')
     usrp_config = read_config(fileName)
     
     usrpNameList = usrp_config.sections()
     usrpPIDlist  = []
     
-    print("  Found {} usrps in config {}:".format(len(usrpNameList), fileName))
+    myPrint("  Found {} usrps in config {}:".format(len(usrpNameList), fileName))
     for usrpName in usrpNameList:
-       print("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+       myPrint("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
     for usrpName in usrpNameList:
       # TODO: remove intclk when octoclock is connected
       # TODO: or do this with threading module?
-       print("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
+       myPrint("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
        usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
           time.sleep(8)
@@ -208,15 +217,15 @@ def start_usrp_driver():
     start_usrps_from_config()
 
 def start_cuda_driver():
-    print("Starting cuda_driver...")
+    myPrint("Starting cuda_driver...")
     os.chdir(os.path.join(basePath, "cuda_driver") )   
     subprocess.Popen(['./cuda_driver.py' ])
     os.chdir(basePath)
 
 
 def start_usrp_server():
-    print("Starting usrp_server...")
-    print("not implemented jet")
+    myPrint("Starting usrp_server...")
+    myPrint("not implemented jet")
 
 
 
@@ -239,29 +248,57 @@ else:
 
    elif firstArg == "start":
       if nArguments == 1 or inputArg[1].lower == "all":
-         print("Starting all...")
+         myPrint("Starting all...")
          start_cuda_driver()
          start_usrp_driver()
          start_usrp_server()
-      elif inputArg[1].lower() == "usrp_driver":
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          start_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          start_cuda_driver()
       elif inputArg[1].lower() == "driver":
-         start_usrp_driver()
          start_cuda_driver()
+         start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          start_usrp_server()
       else:
-         print("unknown process to start")
+         myPrint("unknown process to start")
+
+   elif firstArg == "restart":
+      if nArguments == 1 or inputArg[1].lower == "all":
+         myPrint("Restarting all...")
+         stop_usrp_driver()
+         stop_cuda_driver()
+         myPrint("waiting for {} sec".format(nSecs_restart_pause))
+         time.sleep(nSecs_restart_pause)
+         start_cuda_driver()
+         start_usrp_driver()
+#         start_usrp_server()
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+         stop_usrp_driver()
+         myPrint("waiting for {} sec".format(nSecs_restart_pause))
+         time.sleep(nSecs_restart_pause)
+         start_usrp_driver()
+      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+         stop_cuda_driver()
+         start_cuda_driver()
+      elif inputArg[1].lower() == "driver":
+         stop_usrp_driver()
+         stop_cuda_driver()
+         start_cuda_driver()
+         start_usrp_driver()
+      elif inputArg[1].lower() in ["usrp_server", "server"]:
+         start_usrp_server()
+      else:
+         myPrint("unknown process to restart")
 
 
    elif firstArg == "stop":
       if nArguments == 1 or inputArg[1].lower == "all":
-         print("Stopping all...")
+         myPrint("Stopping all...")
          stop_usrp_driver()
          stop_cuda_driver()
-      elif inputArg[1].lower() == "usrp_driver":
+      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()
@@ -269,11 +306,18 @@ else:
          stop_usrp_driver()
          stop_cuda_driver()
       else:
-         print("unknown process to stop")
+         myPrint("unknown process to stop")
+   elif firstArg == "edit":
+       commandList = ['vim ', os.path.realpath(__file__) ] 
+       myPrint(commandList)
+       subprocess.Popen(commandList)
+ 
    else:
-      print("Unknown arguments ")
+      myPrint("Unknown arguments ")
    
-   
+myPrint(" ")
+print(basePrintLine)
+print(basePrintLine)
    
    
    
