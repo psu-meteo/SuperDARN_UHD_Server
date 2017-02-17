@@ -10,6 +10,10 @@ import pdb
 import socket
 import time
 import configparser
+import copy
+
+sys.path.insert(0, '../python_include')
+
 
 from phasing_utils import *
 from socket_utils import *
@@ -17,20 +21,17 @@ from rosmsg import *
 from drivermsg_library import *
 from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, clrfreq_search
+from profiling_tools import *
 import logging_usrp
 
 MAX_CHANNELS = 10
 RMSG_FAILURE = -1
 RMSG_SUCCESS = 0
 RADAR_STATE_TIME = .0001
-CHANNEL_STATE_TIMEOUT = 120000
+CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
-debug = True
-
-USRP_TRIGGER_START_DELAY = .5 # TODO: move this to a config file
-# TODO: pull these from config file
 STATE_INIT = 'INIT'
 STATE_RESET = 'RESET'
 STATE_WAIT = 'WAIT'
@@ -39,6 +40,7 @@ STATE_TRIGGER = 'TRIGGER'
 STATE_CLR_FREQ = 'CLR_FREQ_WAIT'
 STATE_GET_DATA = 'GET_DATA'
 
+debug = True
 
 # handle arbitration with multiple channels accessing the usrp hardware
 # track state of a grouping of usrps
@@ -70,12 +72,6 @@ class RadarHardwareManager:
             except socket.error:
                 self.logger.error("RadarChannelHandler: Socket error => Deleting channel... ")
                 self.deleteRadarChannel(channel)
-   #         else:
-   #             self.logger.error("RadarChannelHandler: Other error => Deleting channel... ")
-   #             self.deleteRadarChannel(channel)
-   #             conn.close()
-   #             self.logger.error("RadarChannelHandler: Unexpected error is:", sys.exc_info()[0])
-   #             raise
 
         # TODO: add lock support
         def radar_state_machine():
@@ -191,7 +187,6 @@ class RadarHardwareManager:
         ct = threading.Thread(target=radar_state_machine)
         ct.start()
         while True:
-
             usrp_server_logger.info('waiting for control program')
             client_conn, addr = self.client_sock.accept()
 
@@ -201,9 +196,8 @@ class RadarHardwareManager:
             ct.start()
        
             # remove threads that are not alive
+            # TODO: the client_sock.accept is probably blocking, this will only execute after connection of a new control program. is that the intended behavior? -jtk
             client_threads = [iThread for iThread in client_threads if iThread.is_alive()]
-
- 
 
         self.client_sock.close()
 
@@ -212,14 +206,14 @@ class RadarHardwareManager:
     def ini_file_init(self):
         # READ driver_config.ini
         driver_config = configparser.ConfigParser()
-        driver_config.read('driver_config.ini')
+        driver_config.read('../driver_config.ini')
         self.ini_shm_settings = driver_config['shm_settings']
         self.ini_cuda_settings = driver_config['cuda_settings']
         self.ini_network_settings = driver_config['network_settings']
 
         # READ usrp_config.ini
         usrp_config = configparser.ConfigParser()
-        usrp_config.read('usrp_config.ini')
+        usrp_config.read('../usrp_config.ini')
         usrp_configs = []
         for usrp in usrp_config.sections():
             usrp_configs.append(usrp_config[usrp])
@@ -228,7 +222,7 @@ class RadarHardwareManager:
 
         # READ array_config.ini
         array_config = configparser.ConfigParser()
-        array_config.read('array_config.ini')
+        array_config.read('../array_config.ini')
         self.ini_array_settings = array_config['array_info']
         self.ini_rxfe_settings  = array_config['rxfe']
         self.totalScalingFactor = float(array_config['gain_control']['total_scaling_factor'])
@@ -288,16 +282,16 @@ class RadarHardwareManager:
             cmd.client_return()
      
             # check if sync succeeded..
-            if max(np.array(usrptimes) - usrptimes[0]) < 1:
+            if max(np.abs(np.array(usrptimes) - usrptimes[0])) < .5:
                 usrps_synced = True
+                print('USRPs synchronized, approximate times: ' + str(usrptimes))
             else:
                 # TODO: why does USRP synchronization fail?
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again..')
                 time.sleep(1)
 
-
+    @timeit
     def rxfe_init(self):
-        
         activeStrings = ['true', '1', 'on']
         amp1 = self.ini_rxfe_settings['enable_amp1'].lower() in activeStrings
         amp2 = self.ini_rxfe_settings['enable_amp2'].lower() in activeStrings
@@ -340,7 +334,6 @@ class RadarHardwareManager:
         #time.sleep(.05)
 
         self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate']) # TODO: delete because unused
-
         # connect cuda_driver servers
         cuda_driver_socks = []
 
@@ -358,16 +351,18 @@ class RadarHardwareManager:
             sys.exit(1)
 
         self.cudasocks = cuda_driver_socks
-
-
+    
     def setup(self, chan):
         pass
 
     def clrfreq(self, chan):
         self.logger.debug('running clrfreq for channel {}'.format(chan.cnum))
         tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
-        tbeamwidth = 3.24 # TODO: why is it zero, this should be chan.ctrlprm_struct.get_data('tbeamwidth')
-        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, self.ini_array_settings['nbeams']) 
+        tbeamwidth = chan.ctrlprm_struct.get_data('tbeamwidth') 
+        print('todo: verify that tbeamwidth is 3.24ish')
+        x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
+
+        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, int(self.ini_array_settings['nbeams']), x_spacing) 
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
         self.logger.debug('clrfreq for channel {} found {} kHz'.format(chan.cnum, chan.tfreq))
 
@@ -378,6 +373,9 @@ class RadarHardwareManager:
 
         nChannels = len(allChannels)
 
+        # stall until all channels are ready
+        print('todo: scale number of samples in get_data to an integration period')
+
         # stall until all USRPs are ready
         self.logger.debug('sending USRP_READY_DATA command ')
         cmd = usrp_ready_data_command(self.usrpsocks)
@@ -385,15 +383,16 @@ class RadarHardwareManager:
         self.logger.debug('sending USRP_READY_DATA command sent, waiting on READY_DATA status')
 
         # alloc memory
-        nSamples_bb  = self.commonChannelParameter['number_of_samples'] 
+
+        # TODO: this is a bad idea, move it into the common channel parameters or something
+        nSamples_bb  = self.channels[0].nbb_rx_samples_per_integration_period
         main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
         back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
         
         # check status of usrp drivers
-
         for iUSRP, usrpsock in enumerate(self.usrpsocks):
             self.logger.debug('start receiving one USRP status')
-            transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
+          ##  transmit_dtype(usrpsock, 11 , np.int32) # WHY DO THIS? (not used in usrp_driver) 
 
             ready_return = cmd.recv_metadata(usrpsock)
             rx_status = ready_return['status']
@@ -433,6 +432,9 @@ class RadarHardwareManager:
                 for iAntenna in range(nAntennas):
                     antIdx = recv_dtype(cudasock, np.uint16)
                     num_samples = recv_dtype(cudasock, np.uint32)
+                    
+                    self.logger.warning('GET_DATA: stalling for 100 ms to avoid a race condition')
+                    time.sleep(.1)
                     samples = recv_dtype(cudasock, np.float32, num_samples)
                     samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                     
@@ -484,7 +486,8 @@ class RadarHardwareManager:
 
 
             channel.main_beamformed = _beamform_uhd_samples(main_samples[iChannel], phasingMatrix_main, nSamples_bb, antennas_list)
-           #channel.back_beamformed = _beamform_uhd_samples(back_samples, phasingMatrix_back, nSamples_bb, antennas)
+
+            #channel.back_beamformed = _beamform_uhd_samples(back_samples, phasingMatrix_back, nSamples_bb, antennas_list)
         
         self.logger.debug('get_data complete!')
 
@@ -498,9 +501,14 @@ class RadarHardwareManager:
             self.channels.remove(channelObject)
             # remove channel from cuda
             self.logger.debug('send CUDA_ADD_CHANNEL')
-            cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
-            cmd.transmit()
-            cmd.client_return()
+            try:
+                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
+                cmd.transmit()
+                cmd.client_return()
+            except AttributeError:
+                # catch errors where channel.getSequence() fails because npulses_per_sequence is uninitialized
+                # TODO: discover why this happens..
+                self.logger.error('deleteRadarChannel() failed to remove channel from HardwareManager')
              
             self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
@@ -533,18 +541,38 @@ class RadarHardwareManager:
         self.logger.info('received exit command, cleaning up..')
 
         sys.exit(0)
-
+    
+    @timeit
     def trigger(self):
         self.logger.debug('running trigger, triggering usrp drivers')
 
-        if len(self.channels):
         
-            # grab current time from a usrp
+        # so, schedule pulse start times for the integration period..
+        if len(self.channels):
+
+            # grab current usrp time from one usrp_driver
             cmd = usrp_get_time_command(self.usrpsocks[0])
-            cmd.transmit() 
+            cmd.transmit()
+            
+            # todo: tag time using a better source? this will have a few hundred microseconds of uncertainty
+            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
+            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
+
             usrp_time = cmd.recv_time(self.usrpsocks[0])
             cmd.client_return()
-            trigger_time = usrp_time + USRP_TRIGGER_START_DELAY
+          
+            # provide sequence times for 
+            for channel in self.channels: 
+                channel.pulse_start_time_secs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
+                channel.pulse_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
+
+                for sidx in range(channel.pulse_sequences_per_integration_period):
+                    pulse_start_time = usrp_integration_period_start_clock_time + sidx * self.nsamples_per_sequence / self.usrp_rf_rx_rate
+                    channel.pulse_start_time_secs[sidx] = int(pulse_start_time) 
+                    channel.pulse_start_time_usecs[sidx] = pulse_start_time - int(pulse_start_time)
+
+            # broadcast the start of the next integration period to all usrp
+            trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
             cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time)
             self.logger.debug('sending trigger pulse command')
             cmd.transmit()
@@ -577,25 +605,75 @@ class RadarHardwareManager:
     # TODO: Merge channel infomation here!
     # TODO: pretrigger cuda client return fails
     # key error: 0?
+    @timeit
     def pretrigger(self):
         self.logger.debug('start RadarHardwareManager.pretrigger()')
-        
-
-       #  self.logger.debug('running cuda_pulse_init command')
-        # TODO: untangle cuda pulse init handler
-        #        pdb.set_trace()
-        #        cmd = cuda_pulse_init_command(self.cudasocks)
-        #        cmd.transmit()
-        #        self.logger.debug('waiting for cuda driver return')
-        #        cmd.client_return()
-        #        self.logger.debug('cuda return received')
-
-        # gain control: calculate scaling factor for each channel
-        self.gain_control_divide_by_nChannels()
-
- 
         synth_pulse = False
         
+
+        # determine the length of integration periods for all channels in seconds
+        integration_periods = [(channel.integration_period_duration) for channel in self.channels]
+
+        # for now, all integration periods must be the same length.. check if that is the case
+        integration_period = integration_periods[0]
+        for p in integration_periods:
+            assert p == integration_period, 'integration periods for all channels must be equal.'
+        
+        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
+        sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME 
+
+        # determine length of each pulse sequence in baseband samples and inter-pulse-sequence padding 
+        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] - self.channels[0].pulse_sequence_offsets_vector[0] for chan in self.channels]
+        sequence_length = sequence_lengths[0]
+        for sl in sequence_lengths:
+            assert sl == sequence_length, 'pulses must occur at the same time for all channels'
+
+        # calculate the pulse sequence period with padding
+        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+
+        # calculate the number of pulse sequences that fit in the available time within an integration period
+        num_pulse_sequences_per_integration_period = int(sampling_duration / pulse_sequence_period)
+        
+        # inform all channels with the number of pulses per integration period
+        for ch in self.channels:
+            ch.pulse_sequences_per_integration_period = num_pulse_sequences_per_integration_period
+            ch.nbb_rx_samples_per_integration_period = int(np.ceil(num_pulse_sequences_per_integration_period * pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
+
+
+        # find transmit sample rate
+        tx_sample_rate = self.usrp_rf_tx_rate
+
+        # then calculate sample indicies at which pulse sequences start within a pulse sequence
+        pulse_sequence_offsets_samples = self.channels[0].pulse_sequence_offsets_vector * tx_sample_rate  
+        pulse_sequence_offsets_vector = self.channels[0].pulse_sequence_offsets_vector # TODO: verify this is uniform across channels
+        self.nsamples_per_sequence = pulse_sequence_period * tx_sample_rate
+        npulses_per_sequence = self.channels[0].npulses_per_sequence # TODO: verify this is uniform across channels
+
+        # then, calculate sample indicies at which pulses start within an integration period
+        integration_period_pulse_sample_offsets = np.zeros(npulses_per_sequence * num_pulse_sequences_per_integration_period, dtype=np.uint64)
+        
+        for sidx in range(num_pulse_sequences_per_integration_period):
+            for pidx in range(npulses_per_sequence):
+                integration_period_pulse_sample_offsets[sidx * npulses_per_sequence + pidx] = sidx * self.nsamples_per_sequence + pulse_sequence_offsets_samples[pidx]
+
+        for ch in self.channels:
+            ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
+
+        # calculate the number of RF transmit and receive samples 
+        ctrlprm = self.channels[0].ctrlprm_struct.payload
+        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+        tx_time = self.channels[0].tx_time
+        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (tx_time / 1e6)))
+
+        npulses_per_integration_period = npulses_per_sequence * num_pulse_sequences_per_integration_period
+        # calculate pulse length in rf-rate samples
+        # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
+        # currently assumes all channels have the same pulse length, and all pulses within an integration period are the same length
+        padded_nsamples_per_pulse = int(3 * self.channels[0].pulse_lens[0] / 1e6 * tx_sample_rate)
+       
+
         for ch in self.channels:
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
@@ -612,15 +690,14 @@ class RadarHardwareManager:
                     self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
                     #pdb.set_trace()
                 cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
-                # TODO: separate loading sequences from generating baseband samples..
 
                 self.logger.debug('send CUDA_ADD_CHANNEL')
                 cmd.transmit()
 
                 cmd.client_return()
+                ch.update_channel = False
                 self.logger.debug('receiver response CUDA_ADD_CHANNEL')
                 synth_pulse = True
-
 
         if synth_pulse:
             self.logger.debug('send CUDA_GENERATE_PULSE')
@@ -629,19 +706,9 @@ class RadarHardwareManager:
             cmd.client_return()
             self.logger.debug('received respinse CUDA_GENERATE_PULSE')
 
-        # TODO: parse tx sample rate dynamocially
-        # TODO: handle pretrigger with no channels
-        pulse_offsets_vector = self.commonChannelParameter['pulse_offsets_vector'] 
-        npulses              = self.commonChannelParameter['npulses']
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets)
 
-        # calculate exact number of RF samples for RX and TX (equal to cuda_driver)
-        tx_rf_nSamples = np.uint64( ( np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['pulseLength']/1e6 ) + 2 * np.floor(self.usrp_rf_tx_rate * self.commonChannelParameter['tr_to_pulse_delay']/1e6 )))
-        rx_if_nSamples = np.floor((self.commonChannelParameter['number_of_samples'] -1) * int(self.ini_cuda_settings['IFBBRATE']) + int(self.ini_cuda_settings['NTapsRX_ifbb']))
-        rx_rf_nSamples = np.uint64(np.floor((rx_if_nSamples -1) * int(self.ini_cuda_settings['RFIFRATE']) + int(self.ini_cuda_settings['NTapsRX_rfif'])))
-
-        self.logger.debug("nSamples rx: {}   nSamples tx: {}".format(rx_rf_nSamples, tx_rf_nSamples))
-        self.logger.debug('send USRP_SETUP')
-        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, npulses, rx_rf_nSamples, tx_rf_nSamples, pulse_offsets_vector)
         cmd.transmit()
         cmd.client_return()
         self.logger.debug('received response USRP_SETUP')
@@ -652,12 +719,12 @@ class RadarHardwareManager:
 
         self.logger.debug('end RadarHardwareManager.pretrigger()')
 
-
 class RadarChannelHandler:
     def __init__(self, conn, parent_RadarHardwareManager):
         self.active = False# TODO: eliminate
         self.ready = False # TODO: eliminate
         self.conn = conn
+        self.update_channel = True # flag indicating a new beam or pulse sequence 
         self.parent_RadarHardwareManager = parent_RadarHardwareManager
         self.logger = logging.getLogger("ChManager")
         self.state = STATE_WAIT
@@ -757,8 +824,8 @@ class RadarChannelHandler:
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
-        return sequence(self.npulses, self.tr_to_pulse_delay, self.pulse_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
-
+        return sequence(self.npulses_per_sequence, self.nbb_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
+    
     def DefaultHandler(self, rmsg):
         self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))
         pdb.set_trace()
@@ -766,9 +833,9 @@ class RadarChannelHandler:
 
     def QuitHandler(self, rmsg):
         # TODO: close down stuff cleanly
-        rmsg.set_data('status', RMSG_FAILURE)
-        rmsg.set_data('type', rmsg.payload['type'])
-        rmsg.transmit()
+        #rmsg.set_data('status', RMSG_FAILURE)
+        #rmsg.set_data('type', rmsg.payload['type'])
+        #rmsg.transmit()
         self.conn.close()
         self.logger.debug('Deleting channel...')
         hardwareManager = self.parent_RadarHardwareManager
@@ -780,7 +847,8 @@ class RadarChannelHandler:
 
     def PingHandler(self, rmsg):
         return RMSG_SUCCESS
-
+    
+    @timeit
     def RequestAssignedFreqHandler(self, rmsg):
         # wait for clear frequency search to end, hardware manager will set channel state to WAIT
         self._waitForState(STATE_WAIT) 
@@ -792,6 +860,7 @@ class RadarChannelHandler:
         self.logger.info('clr frequency search time: {}'.format(self.clrfreq_stop - self.clrfreq_start))
         return RMSG_SUCCESS
 
+    @timeit
     def RequestClearFreqSearchHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
         self.clrfreq_struct.receive(self.conn)
@@ -809,15 +878,18 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
-        # TODO: check if samples are ready?
+        transmit_dtype(self.conn, self.pulse_sequences_per_integration_period, np.uint32)
         self.state = STATE_TRIGGER
         # send trigger command
         self.ready = True
         self._waitForState(STATE_WAIT)
         return RMSG_SUCCESS
-
+    
+    @timeit
     def RegisterSeqHandler(self, rmsg):
         # function to get the indexes of rising edges going from zero to a nonzero value in array ar
+
+        self.logger.debug('Entering RegisterSeqHandler')
         def _rising_edge_idx(ar):
             ar = np.insert(ar, 0, -2)
             edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
@@ -836,6 +908,13 @@ class RadarChannelHandler:
         self.seqprm_struct.receive(self.conn)
         self.seq_rep = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
         self.seq_code = recv_dtype(self.conn, np.uint8, self.seqprm_struct.payload['len'])
+    
+        self.logger.debug('RegisterSeqHandler, received sequence data from control program')
+        intsc = recv_dtype(self.conn, np.int32)
+        intus = recv_dtype(self.conn, np.int32)
+
+        self.logger.debug('RegisterSeqHandler, received intsc: {}, intus: {}'.format(intsc, intus))
+        self.integration_period_duration = intsc + (intus / 1e6)
 
         tx_tsg_idx = self.seqprm_struct.get_data('index')
         tx_tsg_len = self.seqprm_struct.get_data('len')
@@ -879,13 +958,13 @@ class RadarChannelHandler:
         # extract pulse start timing
         tr_window_idx = np.nonzero(tr_window)[0]
         tr_rising_edge_idx = _rising_edge_idx(tr_window_idx)
-        pulse_offsets_vector = tr_rising_edge_idx * tx_tsg_step
+        pulse_sequence_offsets_vector = tr_rising_edge_idx * tx_tsg_step
 
         # extract tr window to rf pulse delay
         rf_pulse_idx = np.nonzero(rf_pulse)[0]
         rf_pulse_edge_idx = _rising_edge_idx(rf_pulse_idx)
         tr_to_pulse_delay = (rf_pulse_edge_idx[0] - tr_rising_edge_idx[0]) * tx_tsg_step
-        npulses = len(rf_pulse_edge_idx)
+        npulses_per_sequence = len(rf_pulse_edge_idx)
 
         # extract per-pulse phase coding and transmit pulse masks
         # indexes are in microseconds from start of pulse
@@ -893,43 +972,54 @@ class RadarChannelHandler:
         pulse_masks = []
         pulse_lens = []
 
-        for i in range(npulses):
+        for i in range(npulses_per_sequence):
             pstart = rf_pulse_edge_idx[i]
             pend = pstart + _pulse_len(rf_pulse, pstart)
             phase_masks.append(phase_mask[pstart:pend])
             pulse_masks.append(rf_pulse[pstart:pend])
             pulse_lens.append((pend - pstart) * tx_tsg_step)
 
-        self.npulses = npulses
-        self.pulse_offsets_vector = pulse_offsets_vector / 1e6
+        self.npulses_per_sequence = npulses_per_sequence
+        self.pulse_sequence_offsets_vector = pulse_sequence_offsets_vector / 1e6
         self.pulse_lens = pulse_lens # length of pulses, in seconds
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
-        # self.ready = True # TODO: what is ready flag for?
-        
-        
+        self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+
         self.logger.debug("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
-        if npulses == 0:
-            raise ValueError('number of pulses must be greater than zero!')
+        if npulses_per_sequence == 0:
+            raise ValueError('number of pulses per sequence must be greater than zero!')
         if nbb_samples == 0:
             raise ValueError('number of samples in sequence must be nonzero!')
 
-      #  pdb.set_trace()
-
         return RMSG_SUCCESS
-
+    
     # receive a ctrlprm struct
+    @timeit
     def SetParametersHandler(self, rmsg):
         self._waitForState(STATE_WAIT)
         self.logger.debug('channel {} starting PRETRIGGER'.format(self.cnum))
+        # check if the sequence is new before diving into PRETRIGGER state?
+        
+        ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
         self.ctrlprm_struct.receive(self.conn)
+
         self.logger.debug('tfreq: {}, rfreq: {}'.format(self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+
+        # if we're not due for an update already, check and see if we need to update the transmit pulse sequence
+        if not self.update_channel:
+            for key in ctrlprm_old.keys():
+                if key != '': # TODO: what is the blank key doing in the ctrlprm?..
+                    if ctrlprm_old[key] != self.ctrlprm_struct.payload[key]:
+                        self.update_channel = True
+                        break
+        print('usrp_server RadarChannelHandler.SetParametersHandler: tfreq: ' + str(self.ctrlprm_struct.payload['tfreq']))
+        print('usrp_server RadarChannelHandler.SetParametersHandler: rfreq: ' + str(self.ctrlprm_struct.payload['rfreq']))
 
         if not self.CheckChannelCompatibility():   # TODO: move this to point where sequence is received?
             self.logger.error("new channel is not compatible")
             return RMSG_FAILURE
-
 
         self.state = STATE_PRETRIGGER
         self.logger.debug('channel {} going into PRETRIGGER state'.format(self.cnum))
@@ -940,14 +1030,17 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def CheckChannelCompatibility(self):
+        self.logger.debug('checking channel compatibility for channel {}'.format(self.cnum))
         hardwareManager = self.parent_RadarHardwareManager
         commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
-        commonParList_seq  = [ 'npulses', 'pulse_offsets_vector',  'tr_to_pulse_delay' ]
+        commonParList_seq  = [ 'npulses_per_sequence', 'pulse_sequence_offsets_vector',  'tr_to_pulse_delay' ]
         if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
             pulseLength = self.pulse_lens[0]
         else:
             self.logger.error("Pulse lengths has the be the same! ") # TODO raise error?
+            pdb.set_trace()
             return False
+        
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
@@ -960,7 +1053,8 @@ class RadarChannelHandler:
         else:   # not first channel => check if new parameters are compatible
             parCompatibleList_seq = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
             parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
-            idxOffsetVec = commonParList_seq.index('pulse_offsets_vector')  # convert vector of bool to scalar
+
+            idxOffsetVec = commonParList_seq.index('pulse_sequence_offsets_vector')  # convert vector of bool to scalar
             parCompatibleList_seq[idxOffsetVec] = parCompatibleList_seq[idxOffsetVec].all()
  
          #   pdb.set_trace()
@@ -985,11 +1079,13 @@ class RadarChannelHandler:
 
 
     # send ctrlprm struct
+    @timeit
     def GetParametersHandler(self, rmsg):
         # TODO: return bad status if negative radar or channel
         self.ctrlprm_struct.transmit()
         return RMSG_SUCCESS
-
+    
+    @timeit
     def GetDataHandler(self, rmsg):
         self.logger.debug('entering hardware manager get data handler')
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
@@ -1008,29 +1104,21 @@ class RadarChannelHandler:
         self.logger.debug('entering GET_DATA state')
         self.state = STATE_GET_DATA
         self.logger.debug('waiting to return to WAIT before returning samples')
+
         self._waitForState(STATE_WAIT)
+
         self.logger.debug('GET_DATA complete, returning samples')
-
-
-        # TODO: get data handler waits for control_program to set active flag in controlprg struct
-        # need some sort of synchronizaion..
-        # TODO: back samples..
-        main_samples = self.main_beamformed
-        back_samples = np.zeros(self.dataprm_struct.get_data('samples'))
-
-        transmit_dtype(self.conn, main_samples, np.uint32)
-        transmit_dtype(self.conn, back_samples, np.uint32)
-        
-
-        badtrdat_start_usec = self.pulse_offsets_vector * 1e6 # convert to us
-        transmit_dtype(self.conn, self.npulses, np.uint32)
+        # interact with site library's SiteIntegrate loop
+        # send metadata for integration period
+        # currently assuming pulse sequences are uniform within an integration period
+        badtrdat_start_usec = self.pulse_sequence_offsets_vector * 1e6 # convert to us
+        transmit_dtype(self.conn, self.npulses_per_sequence, np.uint32)
         transmit_dtype(self.conn, badtrdat_start_usec, np.uint32) # length badtrdat_len
         transmit_dtype(self.conn, self.pulse_lens, np.uint32) # length badtrdat_len
 
         # stuff these with junk, they don't seem to be used..
         num_transmitters = self.parent_RadarHardwareManager.nUSRPs # TODO update for polarization?
         txstatus_agc = self.parent_RadarHardwareManager.fault_status # TODO: is this the right way to return fault status????
-#        txstatus_agc = np.zeros(num_transmitters)
         txstatus_lowpwr = np.zeros(num_transmitters)
         if txstatus_agc.any():
             self.logger.warning('Following USRPs report Fault:  {} (usrp index)'.format([k for k in range(txstatus_agc.size) if txstatus_agc[k] != 0]))
@@ -1039,9 +1127,33 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, num_transmitters, np.int32)
         transmit_dtype(self.conn, txstatus_agc, np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr, np.int32) # length num_transmitters
+        
+        # send back ctrlprm
+        self.ctrlprm_struct.transmit()
+    
+        # send back samples with pulse start times 
+        for sidx in range(self.pulse_sequences_per_integration_period):
+            self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
+            
+            transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint32)
+            transmit_dtype(self.conn, self.pulse_start_time_usecs[sidx], np.uint32)
+
+            # calculate the baseband sample index for the start and end of a pulse sequence
+            # within a block of beamformed samples over the entire integration period
+            # assuming that the first sample is aligned with the center of the first transmit pulse
+            # and all sequences within the integration period have the same length
+            pulse_sequence_start_index = sidx * self.nbb_rx_samples_per_sequence
+            pulse_sequence_end_index = pulse_sequence_start_index + self.ctrlprm_struct.payload['number_of_samples']
+        
+            # send the packed complex int16 samples to the control program.. 
+            transmit_dtype(self.conn, self.main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            transmit_dtype(self.conn, self.main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
+
 
         return RMSG_SUCCESS
-
+    
+    @timeit
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)

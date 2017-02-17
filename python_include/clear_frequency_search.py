@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
 
-MIN_CLRFREQ_DELAY = .10 # TODO: lower this?
+MIN_CLRFREQ_DELAY = .20 # TODO: lower this?
 MAX_CLRFREQ_AVERAGE = 5 
 MAX_CLRFREQ_BANDWIDTH = 512
 MAX_CLRFREQ_USABLE_BANDWIDTH = 300
@@ -29,6 +29,12 @@ RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 PLOT_CLEAR_FREQUENCY_SEARCH = False 
 OBEY_RESTRICTED_FREQS = True 
+
+DEBUG = 1
+def dbPrint(msg):
+   if DEBUG:
+     print("clear_frequency_serch.py : " + msg)
+
 
 def read_restrict_file(restrict_file):
     restricted_frequencies = []
@@ -43,7 +49,8 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg, nBeams):
+def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg, nBeams, x_spacing):
+    dbPrint("enter clrfreq_search")
     # unpack clear frequency search parameters
     fstart = clrfreq_struct.payload['start'] * 1000 # convert kHz in struct to Hz
     fstop = clrfreq_struct.payload['end'] * 1000  # convert kHz in struct to Hz
@@ -87,7 +94,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     
     # calculate phasing
     bmazm = calc_beam_azm_rad(nBeams, tbeam_number, tbeam_width_deg)
-    pshift_per_antenna = calc_phase_increment(bmazm, center_freq) # calculate phase shift between neighboring antennas for phasing of received samples
+    pshift_per_antenna = calc_phase_increment(bmazm, center_freq, x_spacing) # calculate phase shift between neighboring antennas for phasing of received samples
     # gather samples from usrps
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
     spectrum_power = np.zeros(len(spectrum_freqs))
@@ -119,6 +126,7 @@ def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, re
     return spectrum_power
 
 def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 10e3):
+    dbPrint("enter find_clrfreq_from_spectrum")
     # apply filter to convolve spectrum with filter response
     # TODO: filter response is currently assumed to be boxcar..
     # return lowest power frequency
@@ -143,21 +151,24 @@ def fft_clrfreq_samples(samples):
     return power_spectrum 
 
 def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):
+    dbPrint("enter grap_usrp_clrfreq_samples")
     # gather current UHD time
+
     combined_samples = np.zeros(num_clrfreq_samples, dtype=np.complex128)
-    gettime_cmd = usrp_get_time_command(usrp_sockets)
+    dbPrint("send usrp_get_time")
+    gettime_cmd = usrp_get_time_command(usrp_sockets[0])
     gettime_cmd.transmit()
     
     clrfreq_rate_actual = 0
-
-    usrptimes = []
-    for usrpsock in usrp_sockets:
-            usrptimes.append(gettime_cmd.recv_time(usrpsock))
+  
+    usrptime  = gettime_cmd.recv_time(usrp_sockets[0])
 
     gettime_cmd.client_return()
 
     # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
-    clrfreq_time = np.max(usrptimes) + MIN_CLRFREQ_DELAY
+    dbPrint(" send clrfreq_command")
+
+    clrfreq_time = usrptime + MIN_CLRFREQ_DELAY
     clrfreq_cmd = usrp_clrfreq_command(usrp_sockets, num_clrfreq_samples, clrfreq_time, center_freq, clrfreq_rate_requested)
     clrfreq_cmd.transmit()
 
@@ -175,14 +186,14 @@ def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, cl
     return combined_samples, clrfreq_rate_actual
 
 
-def test_clrfreq():
+def test_clrfreq(USRP_ANTENNA_IDX = [0]):
     import sys
     restricted_frequencies = read_restrict_file(RESTRICT_FILE)
 
     # setup to talk to usrp_driver, request clear frequency search
     usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
     usrp_driver_socks = []
-    USRP_ANTENNA_IDX = [0]
+    
     USRP_DRIVER_PORT = 54420
     
     for aidx in USRP_ANTENNA_IDX:
@@ -197,6 +208,14 @@ def test_clrfreq():
         except ConnectionRefusedError:
             cprint('USRP server connection failed', 'blue')
             sys.exit(1)
+
+    pdb.set_trace()
+    cmd = usrp_setup_command(usrp_driver_socks, 10000, 10000, 10000000, 10000000, 20, 10000000*2, 42000, [0, 1000 , 20000])
+    cmd.transmit()
+
+    client_returns = cmd.client_return()
+
+
     
     clrfreq_struct = clrfreqprm_struct(usrp_driver_socks)
 
@@ -206,7 +225,7 @@ def test_clrfreq():
     clrfreq_struct.payload['filter_bandwidth'] = 3250
     clrfreq_struct.payload['pwr_threshold'] = .9
     clrfreq_struct.payload['nave'] =  10
-    clear_freq, noise = clrfreq_search(clrfreq_struct, usrp_driver_socks, restricted_frequencies, 3, 3.24)
+    clear_freq, noise = clrfreq_search(clrfreq_struct, usrp_driver_socks, restricted_frequencies, 3, 3.24, 16, 15.4)
     print('clear frequency: {}, noise: {}'.format(clear_freq, noise))
 
 

@@ -1,6 +1,7 @@
+#!/usr/bin/python3
 # reads in raw sample dump from usrp_driver
 
-filename = "raw_samples_ant_0.cint16"
+filename = 'tx_samples.int16'
 
 cfreq = 13e6
 rfrate = 10e6
@@ -14,4 +15,8 @@ with open(filename, 'r') as raw_file:
     samples = samples[0::2] + 1j * samples[1::2]
 
     plot_freq(samples, rfrate)
+    plot(np.real(samples))
+    plot(np.imag(samples))
+    show()
+
 

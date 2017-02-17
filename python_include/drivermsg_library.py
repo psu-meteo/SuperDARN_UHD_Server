@@ -6,34 +6,38 @@ import pdb
 from socket_utils import *
 from termcolor import cprint
 
+checkSwing  = True # check if transmitted swing is declared
+
+
 UHD_SETUP = ord('s')
 UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
-UHD_TRIGGER_BUSY = ord('b')
-UHD_TRIGGER_PROCESS = ord('p')
-UHD_SETUP_READY = ord('y')
 UHD_CLRFREQ = ord('c')
 UHD_GETTIME = ord('m')
 UHD_SYNC = ord('S')
-
 UHD_EXIT = ord('e')
 
-CUDA_SETUP = ord('s')
 CUDA_PROCESS = ord('p')
 CUDA_GET_DATA = ord('g')
 CUDA_EXIT = ord('e')
-
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('l')
+
+
+# NOT USED:
+CUDA_SETUP = ord('s')
 CUDA_PULSE_INIT = ord('i')
-
 NO_COMMAND = ord('n')
-
+UHD_SETUP_READY = ord('y')
+UHD_TRIGGER_BUSY = ord('b')
+UHD_TRIGGER_PROCESS = ord('p')
 USRP_DRIVER_ERROR = -1
-
 TRIGGER_BUSY = 'b'
+
+
+
 
 # parent class for driver socket messages
 class driver_command(object):
@@ -47,7 +51,7 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+     #       print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
@@ -88,6 +92,9 @@ class driver_command(object):
                 transmit_dtype(clientsock, np.uint8(self.command))
 
             for item in self.dataqueue:
+         #       pdb.set_trace()
+                if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
+                   raise ValueError("swing has been not defined!")
                 item.transmit(clientsock)
 
                # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
@@ -180,7 +187,7 @@ class server_ctrlprm(driver_command):
         self.queue(description_arr, np.uint8, name='desc_arr', nitems=120)
 
 class cuda_get_data_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GET_DATA)
         self.queue(swing, np.uint32, 'swing')
     
@@ -189,12 +196,12 @@ class cuda_exit_command(driver_command):
         driver_command.__init__(self, cudas, CUDA_EXIT)
 
 class cuda_pulse_init_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_PULSE_INIT)
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_process_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
 
@@ -214,7 +221,7 @@ class cuda_setup_command(driver_command):
 
 # add a pulse sequence/channel 
 class cuda_add_channel_command(driver_command):
-    def __init__(self, cudas, sequence = None, swing = 0):
+    def __init__(self, cudas, sequence = None, swing = -1):
         driver_command.__init__(self, cudas, CUDA_ADD_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
         self.sequence = sequence
@@ -234,11 +241,10 @@ class cuda_add_channel_command(driver_command):
 # clear one channels from gpu
 # TODO: just transmit channel number to save time?
 class cuda_remove_channel_command(driver_command):
-    def __init__(self, cudas, sequence = None, swing = 0):
+    def __init__(self, cudas, sequence = None, swing = -1):
         driver_command.__init__(self, cudas, CUDA_REMOVE_CHANNEL)
         self.queue(swing, np.uint32, 'swing')
         self.sequence = sequence 
-       # pdb.set_trace()
 
     def receive(self, sock):
         super().receive(sock)
@@ -254,16 +260,17 @@ class cuda_remove_channel_command(driver_command):
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
-    def __init__(self, cudas, swing = 0):
+    def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
         self.queue(swing, np.uint32, 'swing')
 
 
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector):
+    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector, swing):
         driver_command.__init__(self, usrps, UHD_SETUP)
-
+        
+        self.queue(swing , np.int16,   'swing' )
         self.queue(txfreq, np.float64, 'txfreq')
         self.queue(rxfreq, np.float64, 'rxfreq')
         self.queue(txrate, np.float64, 'txrate')
@@ -271,7 +278,7 @@ class usrp_setup_command(driver_command):
         self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
-        self.queue(pulse_offsets_vector, np.float64, 'pulse_offsets_vector')
+        self.queue(pulse_offsets_vector, np.uint64, 'pulse_offsets_vector')
 
 # set rxfe (amplifier and attenuator) settings 
 class usrp_rxfe_setup_command(driver_command):
@@ -281,23 +288,30 @@ class usrp_rxfe_setup_command(driver_command):
         self.queue(amp1, np.uint8, 'amp1')
         self.queue(att, np.uint8, 'att')
 
-# start usrp trigger
+# trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
-    def __init__(self, usrps, trigger_time):
+    def __init__(self, usrps, trigger_time, tr_to_pulse_delay, swing):
         driver_command.__init__(self, usrps, UHD_TRIGGER_PULSE)
-        self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'clrfreq_uhd_time_int')
-        self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'clrfreq_uhd_time_frac')
+        self.queue(swing , np.int16,   'swing' )
+        self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'uhd_time_int')
+        self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'uhd_time_frac')
+        self.queue(np.float64(tr_to_pulse_delay), np.float64, 'tr_to_pulse_delay')
+
+
+
+
 
 
 # command usrp drivers to ready rx sample data into shared memory
 class usrp_ready_data_command(driver_command):
-    def __init__(self, usrps):
+    def __init__(self, usrps, swing):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
+        self.queue(swing , np.int16,   'swing' )
         
     def recv_metadata(self, sock):
         payload = {}
-        payload['status'] = recv_dtype(sock, np.int32)
-        payload['antenna'] = recv_dtype(sock, np.int32)
+        payload['status']   = recv_dtype(sock, np.int32)
+        payload['antenna']  = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
         payload['fault']    = recv_dtype(sock, np.bool_)
         return payload
@@ -343,13 +357,14 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
+    def __init__(self, npulses, nbb_rx_samples_per_integration_period, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens # length of pulses, in seconds
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
+        self.nbb_rx_samples_per_integration_period = nbb_rx_samples_per_integration_period
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
@@ -366,58 +381,8 @@ class sequence(object):
         if self.npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
 
-
+    
         self.sequence_id = uuid.uuid1()
-
-def create_testsequence():
-    # fill ctrlprm with something reasonable, create test sequence
-
-    import configparser
-
-    ctrlprm = {\
-    '' : np.zeros(120, dtype=np.uint8), \
-    'radar' : 1, \
-    'channel' : 1, \
-    'local' : 0, \
-    'priority' : 1, \
-    'current_pulseseq_idx': 0, \
-    'tbeam' : 0, \
-    'tbeamcode' : 0, \
-    'tbeamazm': 0, \
-    'tbeamwidth': 0.0, \
-    'tfreq': 11000, \
-    'trise': 5000, \
-    'number_of_samples' : 305, \
-    'buffer_index' : 0, \
-    'baseband_samplerate' : 3333.3333, \
-    'filter_bandwidth' : 3333, \
-    'match_filter' : 0, \
-    'rfreq' : 11000, \
-    'rbeam' : 0, \
-    'rbeamcode' : 0, \
-    'rbeamazm' : 0, \
-    'rbeamwidth' : 0.0, \
-    'status' : 0, \
-    'pulseseq_idx' : 0}
-        
-    npulses = 8
-
-    tr_to_pulse_delay = 60
-    #pulse_offsets_vector = [1.35e-3, 6.15e-3, 12.15e-3]
-    pulse_offsets_vector = [230, 21230, 33230, 36230, 40730, 46730, 63230, 64730] 
-    pulse_offsets_vector = [val/1e6 for val in pulse_offsets_vector]
-    txbbrate = ctrlprm['baseband_samplerate']
-    pulse_lens = [300, 300, 300, 300, 300, 300, 300, 300]
-    phase_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
-    pulse_masks = [np.zeros(int(p*txbbrate)) for p in pulse_lens]
-
-    usrp_config = configparser.ConfigParser()
-    usrp_config.read('usrp_config.ini')
-
-
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, ctrlprm)
-
-    return seq
 
 def create_testsequence_uafscan():
     import pickle

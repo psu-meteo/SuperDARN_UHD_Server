@@ -65,6 +65,7 @@
 #define SYNC_PINS IO_PIN_08 
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
 #define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
+#define SYNC_FOR_EACH_SEQUENCE 1
 
 //  MIMIC (LFTX)
 #define MIMIC_TX    IO_PIN_11
@@ -209,6 +210,23 @@ void send_timing_for_sequence(
     // set TX and RX line for each pulse
     for(size_t iPulse = 0; iPulse < pulse_times.size() ; iPulse++) {
 
+       /*   
+       // add sync pulse at start of each sequence
+       size_t nPulsesPerSequence = 8; // this has to be known from usrp_driver
+       if (iPulse % nPulsesPerSequence == 0 && SYNC_FOR_EACH_SEQUENCE ) { // TODO: exclude iPulse == 0
+           fprintf( stderr, "DIO SYNC at pulse  %i\n", iPulse ); 
+           c.mask     = SYNC_PINS;
+           c.value    = SYNC_PINS;
+           c.cmd_time = offset_time_spec(pulse_times[iPulse], SYNC_OFFSET_START);
+           cmdq.push(c);
+           // lower SYNC pin
+           c.value = 0;
+           c.cmd_time = offset_time_spec(pulse_times[iPulse], SYNC_OFFSET_END);
+           cmdq.push(c);	  
+        }
+      */
+
+
         // set TX high, RX low    
         c.mask     = TR_PINS;
         c.value    = TR_TX;   
@@ -221,7 +239,7 @@ void send_timing_for_sequence(
         cmdq.push(c);
 
         if (mimic_active) {
-            DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
+           // DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
             // set mimic TX high, mimic RX low    
             c.mask     = MIMIC_PINS;
             c.value    = MIMIC_TX;   
@@ -238,8 +256,6 @@ void send_timing_for_sequence(
     }
 
 
-
-
     float debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO: pushed gpio commands at usrp_time %2.4f\n", debugt);
     // issue gpio commands in time sorted order 
@@ -249,11 +265,13 @@ void send_timing_for_sequence(
         c = cmdq.top();
         usrp->set_command_time(c.cmd_time);
         usrp->set_gpio_attr(c.port,c.gpiocmd,c.value,c.mask);
-       // DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.0u at usrp_time %2.6f\n", c.value, c.mask,  c.cmd_time.get_real_secs());
+
+      //  debugt = usrp->get_time_now().get_real_secs();
+      //  DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.6u at usrp_time %2.6f (%2.4f) \n", c.value, c.mask,  c.cmd_time.get_real_secs(), debugt);
 
         cmdq.pop();
     }
-
+    DEBUG_PRINT("All DIO commands send!\n");
     usrp->clear_command_time();
 
 
