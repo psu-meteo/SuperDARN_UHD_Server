@@ -386,8 +386,6 @@ class RadarHardwareManager:
 
         # TODO: this is a bad idea, move it into the common channel parameters or something
         nSamples_bb  = self.channels[0].nbb_rx_samples_per_integration_period
-        self.logger.warning('nSamples_bb should be the total number of baseband samples for the entire integration period')
-        pdb.set_trace()
         main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
         back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
         
@@ -434,10 +432,12 @@ class RadarHardwareManager:
                 for iAntenna in range(nAntennas):
                     antIdx = recv_dtype(cudasock, np.uint16)
                     num_samples = recv_dtype(cudasock, np.uint32)
+                    
+                    self.logger.warning('GET_DATA: stalling for 100 ms to avoid a race condition')
+                    time.sleep(.1)
                     samples = recv_dtype(cudasock, np.float32, num_samples)
                     samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                     
-                    pdb.set_trace() # XXX
                     if antIdx < nMainAntennas:
                         main_samples[iChannel][antIdx] = samples[:]
 
@@ -622,8 +622,8 @@ class RadarHardwareManager:
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
         sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME 
 
-        # determine length of each pulse sequence and inter-pulse-sequence padding 
-        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] + self.channels[0].pulse_lens[-1]/1e6 for chan in self.channels]
+        # determine length of each pulse sequence in baseband samples and inter-pulse-sequence padding 
+        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] - self.channels[0].pulse_sequence_offsets_vector[0] for chan in self.channels]
         sequence_length = sequence_lengths[0]
         for sl in sequence_lengths:
             assert sl == sequence_length, 'pulses must occur at the same time for all channels'
@@ -637,7 +637,9 @@ class RadarHardwareManager:
         # inform all channels with the number of pulses per integration period
         for ch in self.channels:
             ch.pulse_sequences_per_integration_period = num_pulse_sequences_per_integration_period
-            ch.nbb_rx_samples_per_integration_period = np.ceil(num_pulse_sequences_per_integration_period * pulse_sequence_period * self.commonChannelParameter['baseband_samplerate'])
+            ch.nbb_rx_samples_per_integration_period = int(np.ceil(num_pulse_sequences_per_integration_period * pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
 
 
         # find transmit sample rate
@@ -666,12 +668,12 @@ class RadarHardwareManager:
         num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (tx_time / 1e6)))
 
         npulses_per_integration_period = npulses_per_sequence * num_pulse_sequences_per_integration_period
-
         # calculate pulse length in rf-rate samples
         # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
         # currently assumes all channels have the same pulse length, and all pulses within an integration period are the same length
         padded_nsamples_per_pulse = int(3 * self.channels[0].pulse_lens[0] / 1e6 * tx_sample_rate)
        
+
         for ch in self.channels:
             #pdb.set_trace()
             if ch.ctrlprm_struct.payload['tfreq'] != 0:
@@ -1127,18 +1129,25 @@ class RadarChannelHandler:
         
         # send back ctrlprm
         self.ctrlprm_struct.transmit()
-
+    
         # send back samples with pulse start times 
         for sidx in range(self.pulse_sequences_per_integration_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
-
+            
             transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint32)
             transmit_dtype(self.conn, self.pulse_start_time_usecs[sidx], np.uint32)
-            pdb.set_trace()
-            transmit_dtype(self.conn, self.main_beamformed[sidx], np.uint32)
-            transmit_dtype(self.conn, self.main_beamformed[sidx], np.uint32)
-            # TODO: sending main array samples twice instead of main then back array..
-            # XXX transmit_dtype(self.conn, self.back_beamformed[sidx], np.uint32)
+
+            # calculate the baseband sample index for the start and end of a pulse sequence
+            # within a block of beamformed samples over the entire integration period
+            # assuming that the first sample is aligned with the center of the first transmit pulse
+            # and all sequences within the integration period have the same length
+            pulse_sequence_start_index = sidx * self.nbb_rx_samples_per_sequence
+            pulse_sequence_end_index = pulse_sequence_start_index + self.ctrlprm_struct.payload['number_of_samples']
+        
+            # send the packed complex int16 samples to the control program.. 
+            transmit_dtype(self.conn, self.main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            transmit_dtype(self.conn, self.main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 
         return RMSG_SUCCESS
