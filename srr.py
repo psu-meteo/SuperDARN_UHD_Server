@@ -139,9 +139,10 @@ def stop_usrp_driver_soft():
        # myPrint("   data:{}".format(data))
     
     
-    myPrint("  Done.\nAgain checking for usrp_driver processes...")
+    myPrint("  Done.")
+    myPrint("  Again checking for usrp_driver processes...")
     usrpProcesses = get_usrp_driver_processes()
-    myPrint(" Found {} usrp_driver processes".format(len(usrpProcesses)))
+    myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
 
 def stop_usrp_driver_hard():
   #  myPrint("Stop usrp_driver hard...")

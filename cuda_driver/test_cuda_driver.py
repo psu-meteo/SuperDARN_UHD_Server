@@ -61,11 +61,16 @@ def create_testsequence():
     phase_masks = [np.zeros(30)] # ... 
     pulse_masks = [np.zeros(30)]
 
-    usrp_config = configparser.ConfigParser()
-    usrp_config.read('usrp_config.ini')
+#    usrp_config = configparser.ConfigParser()
+#    usrp_config.read('usrp_config.ini')
+    driver_config = configparser.ConfigParser()
+    driver_config.read('../driver_config.ini')
+    samplingRate_rx_rf = float(driver_config['cuda_settings']['FSampRX'])
     channelScalingFactor = 0.95
-
-    seq = sequence(npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
+    nSequences = 5
+    nSamples_rx_integrationPeriod = int(samplingRate_rx_rf * nSequences * (pulse_offsets_vector[-1] +  pulse_lens[0]/1e6 + 35e3 * 75 * 2 / 3e8))
+    pdb.set_trace()
+    seq = sequence(npulses, nSamples_rx_integrationPeriod, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm)
     return seq
 
 

@@ -118,7 +118,6 @@ class swingParameter():
       self.rx_rate = 5e6
       self.tx_rate = 5e6
       self.nPulses_per_period = 9
-      self.nSamples_rx = self.rx_rate*2
       self.nSamples_per_pulse = 4200
       self.sample_offsets = None
       self.swing = 0
@@ -176,9 +175,9 @@ def generate_parameter(integration_period = 2):
               integration_period_pulse_sample_offsets[iSequence * nPulses_in_sequence + iPulse] = iSequence * nSamples_sequence + pulse_sequence_offsets_samples[iPulse]
 
       # calculate the number of RF transmit and receive samples  
-      nSamples_rx = nSamples_sequence * nSequences_in_period
+      usrp_par.seq.nbb_rx_samples_per_integration_period = nSamples_sequence * nSequences_in_period
 
-      print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(nSamples_rx, nSamples_per_pulse))
+      print("nSamples_rx:{}, nSamples_per_pulse:{}, integration_period_pulse_sample_offsets:".format(usrp_par.seq.nbb_rx_samples_per_integration_period , nSamples_per_pulse))
       print("nSequences_in_period:{}, nPulses_per_period:{}, ".format(nSequences_in_period, nPulses_per_period))
       print(integration_period_pulse_sample_offsets)
 
@@ -189,7 +188,7 @@ def generate_parameter(integration_period = 2):
       usrp_par.rx_rate = samplingRate_rx
       usrp_par.tx_rate = samplingRate_tx
       usrp_par.nPulses_per_period = nPulses_per_period
-      usrp_par.nSamples_rx = nSamples_rx
+
       usrp_par.nSamples_per_pulse = nSamples_per_pulse
       usrp_par.sample_offsets = integration_period_pulse_sample_offsets
       usrp_par.swing = swing
@@ -199,7 +198,7 @@ def generate_parameter(integration_period = 2):
 def usrp_setup(sock, usrp_par):
       logmsg("Start usrp_setup (swing{})".format(usrp_par.swing))
       start_setup = time.time()
-      cmd = usrp_setup_command(sock, usrp_par.tx_freq,  usrp_par.rx_freq,  usrp_par.rx_rate , usrp_par.tx_rate,  usrp_par.nPulses_per_period, usrp_par.nSamples_rx, usrp_par.nSamples_per_pulse, usrp_par.sample_offsets, usrp_par.swing)
+      cmd = usrp_setup_command(sock, usrp_par.tx_freq,  usrp_par.rx_freq,  usrp_par.rx_rate , usrp_par.tx_rate,  usrp_par.nPulses_per_period, usrp_par.seq.nbb_rx_samples_per_integration_period, usrp_par.nSamples_per_pulse, usrp_par.sample_offsets, usrp_par.swing)
       cmd.transmit()
       client_returns = cmd.client_return()
 

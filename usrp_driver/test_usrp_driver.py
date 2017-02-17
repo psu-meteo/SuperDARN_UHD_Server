@@ -374,7 +374,7 @@ class USRP_ServerTestCases(unittest.TestCase):
 
             cprint('sending trigger pulse command', 'blue')
             trigger_time = usrp_time +  INTEGRATION_PERIOD_SYNC_TIME
-            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time, swing)
+            cmd = usrp_trigger_pulse_command(self.serversock, trigger_time, seq.tr_to_pulse_delay/1e6,  swing)
             cmd.transmit()
             client_returns = cmd.client_return()
             for r in client_returns:

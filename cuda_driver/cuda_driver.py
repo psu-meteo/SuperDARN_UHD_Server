@@ -613,7 +613,7 @@ class ProcessingGPU(object):
 
     def rx_init(self, swing): 
         # build arrays based on first sequence.
-        seq = self.sequence[0] # TODO: check if seq[0] exists
+        seq = self.sequences[swing][0] # TODO: check if seq[0] exists
         ctrlprm = seq.ctrlprm
         
         decimationRate_rf2if = self.rx_rf2if_downsamplingRate
@@ -625,11 +625,18 @@ class ProcessingGPU(object):
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
         assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
-        rx_bb_nSamples = seq.dnbb_rx_samples_per_integration_period
+        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
 
-        # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
-        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
-        self.rx_rf_nSamples = int((rx_if_nSamples-1) * decimationRate_rf2if + self.ntaps_rfif)
+#        # OLD: now we start with nSamples_rx_rf
+#        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
+#        # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
+#        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
+#        self.rx_rf_nSamples = int((rx_if_nSamples-1) * decimationRate_rf2if + self.ntaps_rfif)
+        self.rx_rf_nSamples = int(seq.nbb_rx_samples_per_integration_period)
+        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif + 1 ) / decimationRate_rf2if + 1 )
+        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb + 1 ) / decimationRate_if2bb +1  )
+
+        self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
 
         # calculate rx sample decimation rates
         rx_time = rx_bb_nSamples / rx_bb_samplingRate
@@ -644,7 +651,7 @@ class ProcessingGPU(object):
         for iChannel in range(self.nChannels):
             if self.sequences[swing][iChannel] != None:
                channelFreqVec[iChannel] = -( self.sequences[swing][iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq[swing]) # use negative frequency here since filter is not time inverted for convolution
-               self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
+               self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
  
 
         self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
