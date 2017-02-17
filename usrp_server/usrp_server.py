@@ -42,6 +42,7 @@ STATE_GET_DATA = 'GET_DATA'
 
 debug = True
 
+
 # handle arbitration with multiple channels accessing the usrp hardware
 # track state of a grouping of usrps
 # merge information from multiple control programs, handle disparate settings
@@ -83,6 +84,8 @@ class RadarHardwareManager:
             statePriorityOrder = [ STATE_CLR_FREQ, STATE_PRETRIGGER, STATE_TRIGGER, STATE_GET_DATA]
           
             sleepTime = 0.01 # used if state machine waits for one channel
+           
+            swing = 0 #  starting with one swing for everything, TODO: implement swing handling and delete this line
 
             while True:
                 self.state = self.next_state
@@ -136,7 +139,7 @@ class RadarHardwareManager:
                     if self.next_state == STATE_WAIT:
                         sm_logger.debug('start pretrigger()')
                         self.addingNewChannelsAllowed = False
-                        self.pretrigger()
+                        self.pretrigger(swing)
                         sm_logger.debug('end pretrigger()')
 
 
@@ -156,14 +159,14 @@ class RadarHardwareManager:
                     # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
                     if self.next_state == STATE_WAIT:
                         sm_logger.debug('start trigger()')
-                        self.trigger()
+                        self.trigger(swing)
                         sm_logger.debug('end trigger()')
 
                 if self.state == STATE_GET_DATA:
                     sm_logger.debug('start get_data()')
                     self.next_state = STATE_WAIT
 
-                    self.get_data(self.channels)
+                    self.get_data(self.channels, swing )
 
                     for ch in self.channels:
                         if ch.state == STATE_GET_DATA: 
@@ -366,7 +369,7 @@ class RadarHardwareManager:
         chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
         self.logger.debug('clrfreq for channel {} found {} kHz'.format(chan.cnum, chan.tfreq))
 
-    def get_data(self, allChannels):
+    def get_data(self, allChannels, swing):
         nMainAntennas = int(self.ini_array_settings['main_ants'])
         nBackAntennas = int(self.ini_array_settings['back_ants'])
         self.logger.debug('running get_data()')
@@ -378,7 +381,7 @@ class RadarHardwareManager:
 
         # stall until all USRPs are ready
         self.logger.debug('sending USRP_READY_DATA command ')
-        cmd = usrp_ready_data_command(self.usrpsocks)
+        cmd = usrp_ready_data_command(self.usrpsocks, swing)
         cmd.transmit()
         self.logger.debug('sending USRP_READY_DATA command sent, waiting on READY_DATA status')
 
@@ -412,7 +415,7 @@ class RadarHardwareManager:
 
         # DOWNSAMPLING
         self.logger.debug('start get_data(): CUDA_PROCESS')
-        cmd = cuda_process_command(self.cudasocks)
+        cmd = cuda_process_command(self.cudasocks, swing)
         cmd.transmit()
         cmd.client_return()
         self.logger.debug('end get_data(): CUDA_PROCESS')
@@ -421,7 +424,7 @@ class RadarHardwareManager:
         # recv metadata from cuda drivers about antenna numbers and whatnot
         # fill up provided main and back baseband sample buffers
         self.logger.debug('start get_data() transfering rx data via socket')
-        cmd = cuda_get_data_command(self.cudasocks)
+        cmd = cuda_get_data_command(self.cudasocks, swing)
         cmd.transmit()
 
         for cudasock in self.cudasocks:
@@ -500,16 +503,17 @@ class RadarHardwareManager:
             self.logger.info('deleteRadarChannel() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
             # remove channel from cuda
-            self.logger.debug('send CUDA_ADD_CHANNEL')
-            try:
-                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence())
-                cmd.transmit()
-                cmd.client_return()
-            except AttributeError:
-                # catch errors where channel.getSequence() fails because npulses_per_sequence is uninitialized
-                # TODO: discover why this happens..
-                self.logger.error('deleteRadarChannel() failed to remove channel from HardwareManager')
-             
+            self.logger.debug('send CUDA_REMOVE_CHANNEL')
+            for iSwing in range(nSwings):
+               try:
+                   cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence(), iSwing)
+                   cmd.transmit()
+                   cmd.client_return()
+               except AttributeError:
+                   # catch errors where channel.getSequence() fails because npulses_per_sequence is uninitialized
+                   # TODO: discover why this happens..
+                   self.logger.error('deleteRadarChannel() failed to remove channel from HardwareManager')
+                
             self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
             if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
                 self.addingNewChannelsAllowed = True
@@ -543,7 +547,7 @@ class RadarHardwareManager:
         sys.exit(0)
     
     @timeit
-    def trigger(self):
+    def trigger(self, swing):
         self.logger.debug('running trigger, triggering usrp drivers')
 
         
@@ -573,7 +577,7 @@ class RadarHardwareManager:
 
             # broadcast the start of the next integration period to all usrp
             trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
-            cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time)
+            cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swing) 
             self.logger.debug('sending trigger pulse command')
             cmd.transmit()
             # TODO: handle multiple usrps with trigger..
@@ -606,7 +610,7 @@ class RadarHardwareManager:
     # TODO: pretrigger cuda client return fails
     # key error: 0?
     @timeit
-    def pretrigger(self):
+    def pretrigger(self, swing):
         self.logger.debug('start RadarHardwareManager.pretrigger()')
         synth_pulse = False
         
@@ -689,7 +693,7 @@ class RadarHardwareManager:
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
                     #pdb.set_trace()
-                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence())
+                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence(), swing)
 
                 self.logger.debug('send CUDA_ADD_CHANNEL')
                 cmd.transmit()
@@ -701,13 +705,13 @@ class RadarHardwareManager:
 
         if synth_pulse:
             self.logger.debug('send CUDA_GENERATE_PULSE')
-            cmd = cuda_generate_pulse_command(self.cudasocks)
+            cmd = cuda_generate_pulse_command(self.cudasocks, swing)
             cmd.transmit()
             cmd.client_return()
             self.logger.debug('received respinse CUDA_GENERATE_PULSE')
 
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets)
+                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
 
         cmd.transmit()
         cmd.client_return()
