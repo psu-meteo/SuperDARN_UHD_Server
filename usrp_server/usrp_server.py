@@ -86,6 +86,7 @@ class RadarHardwareManager:
             sleepTime = 0.01 # used if state machine waits for one channel
            
             swing = 0 #  starting with one swing for everything, TODO: implement swing handling and delete this line
+            nSwings = 1 # TODO change this too
 
             while True:
                 self.state = self.next_state
