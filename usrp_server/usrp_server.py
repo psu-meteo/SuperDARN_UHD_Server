@@ -507,7 +507,7 @@ class RadarHardwareManager:
             self.logger.debug('send CUDA_REMOVE_CHANNEL')
             for iSwing in range(nSwings):
                try:
-                   cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence(), iSwing)
+                   cmd = cuda_remove_channel_command(self.cudasocks, sequence=channelObject.getSequence(), swing = iSwing)
                    cmd.transmit()
                    cmd.client_return()
                except AttributeError:
@@ -694,7 +694,7 @@ class RadarHardwareManager:
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
                     #pdb.set_trace()
-                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence(), swing)
+                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence(), swing = swing)
 
                 self.logger.debug('send CUDA_ADD_CHANNEL')
                 cmd.transmit()
