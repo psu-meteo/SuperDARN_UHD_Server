@@ -167,7 +167,7 @@ class RadarHardwareManager:
                     sm_logger.debug('start get_data()')
                     self.next_state = STATE_WAIT
 
-                    self.get_data(self.channels, swing )
+                    self.get_data(self.channels, swing)
 
                     for ch in self.channels:
                         if ch.state == STATE_GET_DATA: 
@@ -386,13 +386,7 @@ class RadarHardwareManager:
         cmd.transmit()
         self.logger.debug('sending USRP_READY_DATA command sent, waiting on READY_DATA status')
 
-        # alloc memory
-
-        # TODO: this is a bad idea, move it into the common channel parameters or something
-        nSamples_bb  = self.channels[0].nbb_rx_samples_per_integration_period
-        main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
-        back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
-        
+         
         # check status of usrp drivers
         for iUSRP, usrpsock in enumerate(self.usrpsocks):
             self.logger.debug('start receiving one USRP status')
@@ -428,6 +422,10 @@ class RadarHardwareManager:
         cmd = cuda_get_data_command(self.cudasocks, swing)
         cmd.transmit()
 
+        main_samples = None
+        back_samples = None
+        nSamples_bb = None
+
         for cudasock in self.cudasocks:
             nAntennas = recv_dtype(cudasock, np.uint32)
             for iChannel,channel in enumerate(allChannels):
@@ -435,11 +433,16 @@ class RadarHardwareManager:
 
                 for iAntenna in range(nAntennas):
                     antIdx = recv_dtype(cudasock, np.uint16)
-                    num_samples = recv_dtype(cudasock, np.uint32)
-                    
+                    nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
+
+                    if main_samples == None:
+                        # TODO: this is a bad idea, allocate this somewhere else.. 
+                        main_samples = [np.complex64(np.zeros((nMainAntennas, nSamples_bb))) for iCh in range(nChannels) ]
+                        back_samples = [np.complex64(np.zeros((nBackAntennas, nSamples_bb))) for iCh in range(nChannels) ] 
+
                     self.logger.warning('GET_DATA: stalling for 100 ms to avoid a race condition')
                     time.sleep(.1)
-                    samples = recv_dtype(cudasock, np.float32, num_samples)
+                    samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                     samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                     
                     if antIdx < nMainAntennas:
@@ -642,7 +645,6 @@ class RadarHardwareManager:
         # inform all channels with the number of pulses per integration period
         for ch in self.channels:
             ch.pulse_sequences_per_integration_period = num_pulse_sequences_per_integration_period
-            ch.nbb_rx_samples_per_integration_period = int(np.ceil(num_pulse_sequences_per_integration_period * pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
 
@@ -677,7 +679,9 @@ class RadarHardwareManager:
         # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
         # currently assumes all channels have the same pulse length, and all pulses within an integration period are the same length
         padded_nsamples_per_pulse = int(3 * self.channels[0].pulse_lens[0] / 1e6 * tx_sample_rate)
-       
+
+        for ch in self.channels:
+            ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
 
         for ch in self.channels:
             #pdb.set_trace()
@@ -829,7 +833,7 @@ class RadarChannelHandler:
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def getSequence(self):
-        return sequence(self.npulses_per_sequence, self.nbb_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
+        return sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, self.ctrlprm_struct.payload)
     
     def DefaultHandler(self, rmsg):
         self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))

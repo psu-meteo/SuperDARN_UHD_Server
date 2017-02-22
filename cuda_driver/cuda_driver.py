@@ -534,11 +534,10 @@ class ProcessingGPU(object):
                             self.logger.debug('synth_tx_rf_pulses: copying baseband signals from channel: {}, antenna: {}, pulse: {}'.format(iChannel, iAntenna, iPulse))
                             bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
                             bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
+                            self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
                         except:
                             self.logger.error('error while merging baseband tx vectors..')
                             pdb.set_trace()
-
-                        self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
 
         self._set_tx_mixerfreq(swing)
         self._set_tx_phasedelay(swing)
@@ -625,22 +624,17 @@ class ProcessingGPU(object):
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
         assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
-        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
-
+       
 #        # OLD: now we start with nSamples_rx_rf
 #        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
 #        # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
 #        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
-#        self.rx_rf_nSamples = int((rx_if_nSamples-1) * decimationRate_rf2if + self.ntaps_rfif)
-        self.rx_rf_nSamples = int(seq.nbb_rx_samples_per_integration_period)
+        
+        self.rx_rf_nSamples = int(seq.nrf_rx_samples_per_integration_period)
         rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif + 1 ) / decimationRate_rf2if + 1 )
         rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb + 1 ) / decimationRate_if2bb +1  )
 
         self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
-
-        # calculate rx sample decimation rates
-        rx_time = rx_bb_nSamples / rx_bb_samplingRate
-        
 
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nChannels, self.ntaps_rfif, 2]))
