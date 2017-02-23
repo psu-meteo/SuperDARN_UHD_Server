@@ -709,7 +709,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
                         
-                        rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay);
+                        rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
                             
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
