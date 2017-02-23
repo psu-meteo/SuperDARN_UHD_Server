@@ -618,6 +618,9 @@ class RadarHardwareManager:
         self.logger.debug('start RadarHardwareManager.pretrigger()')
         synth_pulse = False
         
+        self.logger.warning('TODO: where do we want to do gain control?')
+        self.gain_control_divide_by_nChannels()
+
 
         # determine the length of integration periods for all channels in seconds
         integration_periods = [(channel.integration_period_duration) for channel in self.channels]
