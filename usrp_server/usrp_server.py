@@ -11,6 +11,7 @@ import socket
 import time
 import configparser
 import copy
+import datetime
 
 sys.path.insert(0, '../python_include')
 
@@ -41,6 +42,93 @@ STATE_CLR_FREQ = 'CLR_FREQ_WAIT'
 STATE_GET_DATA = 'GET_DATA'
 
 debug = True
+
+
+class swingManager():
+    """ Class to handle
+        - which swing is active and processing
+        - last recorded clear frequency search raw data
+        - keep track of beam numbers and transmit frequencies """
+
+    def __init__(self):
+        self.activeSwing     = 0
+        self.processingSwing = 1
+        
+        self.last_clrFreq_data = None
+        self.last_clrFreq_time = None
+        
+        self.scan_beam_list          = []
+        self.scan_clrFreq_range_list = []
+        
+        self.current_period = 0
+        
+        self.current_clrFreq_result = None
+        self.next_clrFreq_result = None
+    
+    def switch_swings(self):
+        # switch swings
+        self.activeSwing     = 1 - self.activeSwing
+        self.processingSwing = 1 - self.processingSwing
+
+
+    def period_finished(self):
+        print("  period finished... ")
+        self.current_period += 1
+        
+        self.current_clrFreq_result = self.next_clrFreq_result
+        self.next_clrFreq_result = None
+        
+    def status(self):
+        print("current period: {: >2d}/{}, beam: {}, active swing: {}, processing swing: {}".format(self.current_period, len(self.scan_beam_list), self.current_beam, self.activeSwing, self.processingSwing))
+    
+    @property        
+    def current_beam(self):
+        return self.scan_beam_list[self.current_period]
+        
+    @property        
+    def next_beam(self):
+        if self.current_period == len(self.scan_beam_list) -1:
+            return None
+        else:
+            return self.scan_beam_list[self.current_period+1]
+            
+    def get_current_crlFreq_result(self):
+        if self.current_clrFreq_result is None:
+            print("  calc current clr_freq (period {})".format(self.current_period))
+            self.current_clrFreq_result = self.clrFreq_eval(self.current_period)
+        return self.current_clrFreq_result
+        
+    def get_next_crlFreq_result(self):
+        if self.next_clrFreq_result is None:
+            print("  calc next clr_freq (period {})".format(self.current_period+1))
+            self.next_clrFreq_result = self.clrFreq_eval(self.current_period+1)
+        return self.next_clrFreq_result        
+        
+    def clrFreq_eval(self, iPeriod):
+        return [self.scan_clrFreq_range_list[iPeriod]+1, 11, "clr_freq for period {: >2d}, data from {} ({:2.3f} s old)".format(iPeriod, self.last_clrFreq_time, (datetime.datetime.now() - self.last_clrFreq_time).total_seconds() ) ]
+    
+    def clrFreq_record(self):
+        self.last_clrFreq_data = [11,111]
+        self.last_clrFreq_time = datetime.datetime.now()
+        time.sleep(0.1)
+    
+    
+    def get_current_period_par(self):
+        return [self.current_beam, self.get_current_crlFreq_result()]
+        
+    def get_next_period_par(self):
+        return [self.next_beam, self.get_next_crlFreq_result()]
+        
+        
+    def _print_get_current_period_par(self):
+        cp = self.get_current_period_par()
+        print(" Get current par: beam {}, clr_freq_res: {}".format(cp[0], cp[1]))
+
+    def _print_get_next_period_par(self):
+        cp = self.get_next_period_par()
+        print(" Get next par: beam {}, clr_freq_res: {}".format(cp[0], cp[1]))
+        
+
 
 
 # handle arbitration with multiple channels accessing the usrp hardware
@@ -549,6 +637,103 @@ class RadarHardwareManager:
         self.logger.info('received exit command, cleaning up..')
 
         sys.exit(0)
+
+    @timeit
+    def trigger_next_swing(self, swing):
+        self.logger.debug('running trigger next swing')
+        swingManager = ...
+  
+        if swingManager.firstPeriod:
+            # CUDA_ADD_CHANNEL for each channel in first period
+            for channel in self.channels:
+                cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.getSequence(), swing = swingManager.activeSwing)
+                self.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
+                cmd.transmit()
+                cmd.client_return()      
+ 
+
+            # CUDA_GENERATE for first period
+            self.logger.debug('send CUDA_GENERATE_PULSE')
+            cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.activeSwing)
+            cmd.transmit()
+            cmd.client_return()
+            self.logger.debug('received response CUDA_GENERATE_PULSE')
+
+        # USRP_SETUP
+        # from line 678
+        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
+        cmd.transmit()
+        cmd.client_return()
+        self.logger.debug('received response USRP_SETUP')
+
+        # USRP_TRIGGER
+        # grab current usrp time from one usrp_driver
+        cmd = usrp_get_time_command(self.usrpsocks[0])
+        cmd.transmit()
+        
+        # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
+        # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
+        usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
+
+        usrp_time = cmd.recv_time(self.usrpsocks[0])
+        cmd.client_return()
+      
+        # provide sequence times for 
+        for channel in self.channels: 
+            channel.pulse_start_time_secs  = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
+            channel.pulse_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
+
+            for sidx in range(channel.pulse_sequences_per_integration_period):
+                pulse_start_time = usrp_integration_period_start_clock_time + sidx * self.nsamples_per_sequence / self.usrp_rf_rx_rate
+                channel.pulse_start_time_secs[sidx]  = int(pulse_start_time) 
+                channel.pulse_start_time_usecs[sidx] = pulse_start_time - int(pulse_start_time)
+
+        # broadcast the start of the next integration period to all usrp
+        trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
+        cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
+        self.logger.debug('sending trigger pulse command')
+        cmd.transmit()
+        # TODO: handle multiple usrps with trigger..
+        self.logger.debug('waiting for trigger return')
+        returns = cmd.client_return()
+
+        if TRIGGER_BUSY in returns:
+            self.logger.error('could not trigger, usrp driver is busy')
+            pdb.set_trace()
+
+        self.logger.debug('trigger return!')
+
+
+        if not swingManager.firstPeriod:
+            # CUDA_GET_DATA
+
+            # send back samples
+
+
+
+
+       # get next par
+      
+       # CUDA_ADD & CUDA_GENGERATE for processingSwing if something has changed
+
+       # USRP_READY_DATA for activeSwing 
+
+
+       swingManager.switch_swings()
+  
+       # CUDA_PROCESS for processingSwing
+
+
+       if swingManager.firstPeriod:
+          if swingManager.last_clrFreq_data is not None:
+             # record new clr data
+          # set ready for active channels
+          swingManager.firstPeriod = False
+
+
+
+
     
     @timeit
     def trigger(self, swing):
@@ -716,7 +901,7 @@ class RadarHardwareManager:
             cmd = cuda_generate_pulse_command(self.cudasocks, swing)
             cmd.transmit()
             cmd.client_return()
-            self.logger.debug('received respinse CUDA_GENERATE_PULSE')
+            self.logger.debug('received response CUDA_GENERATE_PULSE')
 
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                  npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
