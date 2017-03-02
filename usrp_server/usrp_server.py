@@ -659,10 +659,74 @@ class RadarHardwareManager:
             cmd.client_return()
             self.logger.debug('received response CUDA_GENERATE_PULSE')
 
-        # USRP_SETUP
+        # USRP_SETUP+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         # from line 678
+        synth_pulse = False
+        
+        self.logger.warning('TODO: where do we want to do gain control?')
+        self.gain_control_divide_by_nChannels()
+        
+        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
+        sampling_duration = self.commonChannelParameter['integration_period_duration'] - INTEGRATION_PERIOD_SYNC_TIME 
+
+        # calculate the pulse sequence period with padding
+        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] -  self.commonChannelParameter['pulse_sequence_offsets_vector'][0]
+        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+
+        # calculate the number of pulse sequences that fit in the available time within an integration period
+        nSequences_per_period = int(sampling_duration / pulse_sequence_period)
+        
+        # inform all channels with the number of pulses per integration period
+        for ch in self.channels:
+            ch.pulse_sequences_per_integration_period = nSequences_per_period
+            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
+
+        # find transmit sample rate
+        tx_sample_rate = self.usrp_rf_tx_rate
+
+        # then calculate sample indicies at which pulse sequences start within a pulse sequence
+        nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
+        pulse_sequence_offsets_vector  = self.commonChannelParameter['pulse_sequence_offsets_vector']
+        pulse_sequence_offsets_samples = pulse_sequence_offsets_vector * self.usrp_rf_tx_rate
+        self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
+
+        # then, calculate sample indicies at which pulses start within an integration period
+        integration_period_pulse_sample_offsets = np.zeros(nPulses_per_sequence * nSequences_per_period, dtype=np.uint64)
+        for iSequence in range(nSequences_per_period):
+            for iPulse in range(nPulses_per_sequence):
+                integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
+
+        for ch in self.channels:
+            ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
+
+        # calculate the number of RF transmit and receive samples 
+        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+       ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
+
+        npulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
+
+        nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
+        
+
+        for ch in self.channels:
+            ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
+            if ch.ctrlprm_struct.payload['tfreq'] != 0:
+                # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate TODO
+                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
+                # TODO add this check and readjusting of usrp_freqs in checkCompatibility?        
+                assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
+
+                # load sequence to cuda driver if it has a nonzero transmit frequency..
+                #time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
+                #self.logger.debug('after 50 ms of delay..')
+
+                if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
+                    self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
+                    #pdb.set_trace()
+
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
+                                 npulses_per_integration_period, num_requested_rx_samples, nSamples_per_pulse, integration_period_pulse_sample_offsets, swingManager.activeSwing)
         cmd.transmit()
         cmd.client_return()
         self.logger.debug('received response USRP_SETUP')
@@ -679,22 +743,24 @@ class RadarHardwareManager:
         usrp_time = cmd.recv_time(self.usrpsocks[0])
         cmd.client_return()
       
-        # provide sequence times for 
+        sequence_start_time_secs  = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
+        sequence_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
+
+        # provide sequence times for control program
+        for iSequence in range(channel.pulse_sequences_per_integration_period):
+            pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
+            sequence_start_time_secs[sidx]  = int(pulse_start_time) 
+            sequence_start_time_usecs[sidx] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
+
         for channel in self.channels: 
-            channel.pulse_start_time_secs  = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
-            channel.pulse_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
-
-            for sidx in range(channel.pulse_sequences_per_integration_period):
-                pulse_start_time = usrp_integration_period_start_clock_time + sidx * self.nsamples_per_sequence / self.usrp_rf_rx_rate
-                channel.pulse_start_time_secs[sidx]  = int(pulse_start_time) 
-                channel.pulse_start_time_usecs[sidx] = pulse_start_time - int(pulse_start_time)
-
+            channel.sequence_start_time_secs  = sequence_start_time_secs
+            channel.sequence_start_time_usecs = sequence_start_time_usecs
+ 
         # broadcast the start of the next integration period to all usrp
         trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
         cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
         self.logger.debug('sending trigger pulse command')
         cmd.transmit()
-        # TODO: handle multiple usrps with trigger..
         self.logger.debug('waiting for trigger return')
         returns = cmd.client_return()
 
@@ -703,6 +769,9 @@ class RadarHardwareManager:
             pdb.set_trace()
 
         self.logger.debug('trigger return!')
+
+
+
 
 
         if not swingManager.firstPeriod:
@@ -756,13 +825,13 @@ class RadarHardwareManager:
           
             # provide sequence times for 
             for channel in self.channels: 
-                channel.pulse_start_time_secs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
-                channel.pulse_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
+                channel.sequence_start_time_secs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
+                channel.sequence_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
 
                 for sidx in range(channel.pulse_sequences_per_integration_period):
                     pulse_start_time = usrp_integration_period_start_clock_time + sidx * self.nsamples_per_sequence / self.usrp_rf_rx_rate
-                    channel.pulse_start_time_secs[sidx] = int(pulse_start_time) 
-                    channel.pulse_start_time_usecs[sidx] = pulse_start_time - int(pulse_start_time)
+                    channel.sequence_start_time_secs[sidx] = int(pulse_start_time) 
+                    channel.sequence_start_time_usecs[sidx] = pulse_start_time - int(pulse_start_time)
 
             # broadcast the start of the next integration period to all usrp
             trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
@@ -798,123 +867,115 @@ class RadarHardwareManager:
     # TODO: Merge channel infomation here!
     # TODO: pretrigger cuda client return fails
     # key error: 0?
-    @timeit
-    def pretrigger(self, swing):
-        self.logger.debug('start RadarHardwareManager.pretrigger()')
-        synth_pulse = False
-        
-        self.logger.warning('TODO: where do we want to do gain control?')
-        self.gain_control_divide_by_nChannels()
+ ##   @timeit
+ ##   def pretrigger(self, swing):
+ ##       self.logger.debug('start RadarHardwareManager.pretrigger()')
+ ##       synth_pulse = False
+ ##       
+ ##       self.logger.warning('TODO: where do we want to do gain control?')
+ ##       self.gain_control_divide_by_nChannels()
+
+ ##       
+ ##       # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
+ ##       sampling_duration = self.commonChannelParameter['integration_period_duration'] - INTEGRATION_PERIOD_SYNC_TIME 
+
+ ##       # determine length of each pulse sequence in baseband samples and inter-pulse-sequence padding 
+ ##       sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] - self.channels[0].pulse_sequence_offsets_vector[0] for chan in self.channels] #TODO bug: list is filled with same value of channel 0
+ ##       sequence_length = sequence_lengths[0]
+ ##       for sl in sequence_lengths:
+ ##           assert sl == sequence_length, 'pulses must occur at the same time for all channels'
+
+ ##       # calculate the pulse sequence period with padding
+ ##       pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+
+ ##       # calculate the number of pulse sequences that fit in the available time within an integration period
+ ##       nSequences_per_period = int(sampling_duration / pulse_sequence_period)
+ ##       
+ ##       # inform all channels with the number of pulses per integration period
+ ##       for ch in self.channels:
+ ##           ch.pulse_sequences_per_integration_period = nSequences_per_period
+ ##           ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+ ##           assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
 
 
-        # determine the length of integration periods for all channels in seconds
-        integration_periods = [(channel.integration_period_duration) for channel in self.channels]
+ ##       # find transmit sample rate
+ ##       tx_sample_rate = self.usrp_rf_tx_rate
 
-        # for now, all integration periods must be the same length.. check if that is the case
-        integration_period = integration_periods[0]
-        for p in integration_periods:
-            assert p == integration_period, 'integration periods for all channels must be equal.'
-        
-        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-        sampling_duration = integration_period - INTEGRATION_PERIOD_SYNC_TIME 
+ ##       # then calculate sample indicies at which pulse sequences start within a pulse sequence
+ ##       pulse_sequence_offsets_samples = self.channels[0].pulse_sequence_offsets_vector * tx_sample_rate  
+ ##       pulse_sequence_offsets_vector = self.channels[0].pulse_sequence_offsets_vector # TODO: verify this is uniform across channels
+ ##       self.nsamples_per_sequence = pulse_sequence_period * tx_sample_rate
+ ##       npulses_per_sequence = self.channels[0].npulses_per_sequence # TODO: verify this is uniform across channels
 
-        # determine length of each pulse sequence in baseband samples and inter-pulse-sequence padding 
-        sequence_lengths = [self.channels[0].pulse_sequence_offsets_vector[-1] - self.channels[0].pulse_sequence_offsets_vector[0] for chan in self.channels]
-        sequence_length = sequence_lengths[0]
-        for sl in sequence_lengths:
-            assert sl == sequence_length, 'pulses must occur at the same time for all channels'
+ ##       # then, calculate sample indicies at which pulses start within an integration period
+ ##       integration_period_pulse_sample_offsets = np.zeros(npulses_per_sequence * nSequences_per_period, dtype=np.uint64)
+ ##       
+ ##       for sidx in range(nSequences_per_period):
+ ##           for pidx in range(npulses_per_sequence):
+ ##               integration_period_pulse_sample_offsets[sidx * npulses_per_sequence + pidx] = sidx * self.nsamples_per_sequence + pulse_sequence_offsets_samples[pidx]
 
-        # calculate the pulse sequence period with padding
-        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+ ##       for ch in self.channels:
+ ##           ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
 
-        # calculate the number of pulse sequences that fit in the available time within an integration period
-        num_pulse_sequences_per_integration_period = int(sampling_duration / pulse_sequence_period)
-        
-        # inform all channels with the number of pulses per integration period
-        for ch in self.channels:
-            ch.pulse_sequences_per_integration_period = num_pulse_sequences_per_integration_period
-            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
-            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
+ ##       # calculate the number of RF transmit and receive samples 
+ ##       ctrlprm = self.channels[0].ctrlprm_struct.payload
+ ##       num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+ ##       tx_time = self.channels[0].tx_time
+ ##       num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (tx_time / 1e6)))
 
+ ##       npulses_per_integration_period = npulses_per_sequence * nSequences_per_period
+ ##       # calculate pulse length in rf-rate samples
+ ##       # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
+ ##       # currently assumes all channels have the same pulse length, and all pulses within an integration period are the same length
+ ##       padded_nsamples_per_pulse = int(3 * self.channels[0].pulse_lens[0] / 1e6 * tx_sample_rate)
 
-        # find transmit sample rate
-        tx_sample_rate = self.usrp_rf_tx_rate
+ ##       for ch in self.channels:
+ ##           ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
 
-        # then calculate sample indicies at which pulse sequences start within a pulse sequence
-        pulse_sequence_offsets_samples = self.channels[0].pulse_sequence_offsets_vector * tx_sample_rate  
-        pulse_sequence_offsets_vector = self.channels[0].pulse_sequence_offsets_vector # TODO: verify this is uniform across channels
-        self.nsamples_per_sequence = pulse_sequence_period * tx_sample_rate
-        npulses_per_sequence = self.channels[0].npulses_per_sequence # TODO: verify this is uniform across channels
+ ##       for ch in self.channels:
+ ##           #pdb.set_trace()
+ ##           if ch.ctrlprm_struct.payload['tfreq'] != 0:
+ ##               # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate TODO
+ ##               self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
+ ##               
+ ##               assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
-        # then, calculate sample indicies at which pulses start within an integration period
-        integration_period_pulse_sample_offsets = np.zeros(npulses_per_sequence * num_pulse_sequences_per_integration_period, dtype=np.uint64)
-        
-        for sidx in range(num_pulse_sequences_per_integration_period):
-            for pidx in range(npulses_per_sequence):
-                integration_period_pulse_sample_offsets[sidx * npulses_per_sequence + pidx] = sidx * self.nsamples_per_sequence + pulse_sequence_offsets_samples[pidx]
+ ##               # load sequence to cuda driver if it has a nonzero transmit frequency..
+ ##               #time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
+ ##               #self.logger.debug('after 50 ms of delay..')
 
-        for ch in self.channels:
-            ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
+ ##               if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
+ ##                   self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
+ ##                   #pdb.set_trace()
+ ##               cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence(), swing = swing)
 
-        # calculate the number of RF transmit and receive samples 
-        ctrlprm = self.channels[0].ctrlprm_struct.payload
-        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
-        tx_time = self.channels[0].tx_time
-        num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (tx_time / 1e6)))
+ ##               self.logger.debug('send CUDA_ADD_CHANNEL')
+ ##               cmd.transmit()
 
-        npulses_per_integration_period = npulses_per_sequence * num_pulse_sequences_per_integration_period
-        # calculate pulse length in rf-rate samples
-        # padded on either side with the length of pulse.., tx_worker.cpp needs padding because of how it sends transmit pulses.. 
-        # currently assumes all channels have the same pulse length, and all pulses within an integration period are the same length
-        padded_nsamples_per_pulse = int(3 * self.channels[0].pulse_lens[0] / 1e6 * tx_sample_rate)
+ ##               cmd.client_return()
+ ##               ch.update_channel = False
+ ##               self.logger.debug('receiver response CUDA_ADD_CHANNEL')
+ ##               synth_pulse = True
 
-        for ch in self.channels:
-            ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
+ ##       if synth_pulse:
+ ##           self.logger.debug('send CUDA_GENERATE_PULSE')
+ ##           cmd = cuda_generate_pulse_command(self.cudasocks, swing)
+ ##           cmd.transmit()
+ ##           cmd.client_return()
+ ##           self.logger.debug('received response CUDA_GENERATE_PULSE')
 
-        for ch in self.channels:
-            #pdb.set_trace()
-            if ch.ctrlprm_struct.payload['tfreq'] != 0:
-                # check that we are actually able to transmit at that frequency given the USRP center frequency and sampling rate TODO
-                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
-                
-                assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
+ ##       cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+ ##                                npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
 
-                # load sequence to cuda driver if it has a nonzero transmit frequency..
-                #time.sleep(.05) # TODO: investigate race condition.. why does adding a sleep here help
-                #self.logger.debug('after 50 ms of delay..')
+ ##       cmd.transmit()
+ ##       cmd.client_return()
+ ##       self.logger.debug('received response USRP_SETUP')
 
-                if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
-                    self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
-                    #pdb.set_trace()
-                cmd = cuda_add_channel_command(self.cudasocks, sequence=ch.getSequence(), swing = swing)
+ ##       for ch in self.channels:
+ ##           if ch.state == STATE_PRETRIGGER: # only reset PRETRIGGER , not TRIGGER
+ ##               ch.state = STATE_WAIT
 
-                self.logger.debug('send CUDA_ADD_CHANNEL')
-                cmd.transmit()
-
-                cmd.client_return()
-                ch.update_channel = False
-                self.logger.debug('receiver response CUDA_ADD_CHANNEL')
-                synth_pulse = True
-
-        if synth_pulse:
-            self.logger.debug('send CUDA_GENERATE_PULSE')
-            cmd = cuda_generate_pulse_command(self.cudasocks, swing)
-            cmd.transmit()
-            cmd.client_return()
-            self.logger.debug('received response CUDA_GENERATE_PULSE')
-
-        cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                 npulses_per_integration_period, num_requested_rx_samples, padded_nsamples_per_pulse, integration_period_pulse_sample_offsets, swing)
-
-        cmd.transmit()
-        cmd.client_return()
-        self.logger.debug('received response USRP_SETUP')
-
-        for ch in self.channels:
-            if ch.state == STATE_PRETRIGGER: # only reset PRETRIGGER , not TRIGGER
-                ch.state = STATE_WAIT
-
-        self.logger.debug('end RadarHardwareManager.pretrigger()')
+ ##       self.logger.debug('end RadarHardwareManager.pretrigger()')
 
 class RadarChannelHandler:
     def __init__(self, conn, parent_RadarHardwareManager):
@@ -1230,11 +1291,11 @@ class RadarChannelHandler:
         self.logger.debug('checking channel compatibility for channel {}'.format(self.cnum))
         hardwareManager = self.parent_RadarHardwareManager
         commonParList_ctrl = ['number_of_samples', 'baseband_samplerate' ]
-        commonParList_seq  = [ 'npulses_per_sequence', 'pulse_sequence_offsets_vector',  'tr_to_pulse_delay' ]
+        commonParList_seq  = [ 'npulses_per_sequence', 'pulse_sequence_offsets_vector',  'tr_to_pulse_delay', 'integration_period_duration', 'tx_time']
         if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
             pulseLength = self.pulse_lens[0]
         else:
-            self.logger.error("Pulse lengths has the be the same! ") # TODO raise error?
+            self.logger.error("Pulse lengths has to be the equal! ") # TODO raise error?
             pdb.set_trace()
             return False
         
@@ -1248,7 +1309,7 @@ class RadarChannelHandler:
             return True
 
         else:   # not first channel => check if new parameters are compatible
-            parCompatibleList_seq = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
+            parCompatibleList_seq  = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
             parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
 
             idxOffsetVec = commonParList_seq.index('pulse_sequence_offsets_vector')  # convert vector of bool to scalar
@@ -1332,8 +1393,8 @@ class RadarChannelHandler:
         for sidx in range(self.pulse_sequences_per_integration_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
             
-            transmit_dtype(self.conn, self.pulse_start_time_secs[sidx], np.uint32)
-            transmit_dtype(self.conn, self.pulse_start_time_usecs[sidx], np.uint32)
+            transmit_dtype(self.conn, self.sequence_start_time_secs[sidx], np.uint32)
+            transmit_dtype(self.conn, self.sequence_start_time_usecs[sidx], np.uint32)
 
             # calculate the baseband sample index for the start and end of a pulse sequence
             # within a block of beamformed samples over the entire integration period
