@@ -165,9 +165,27 @@ def get_cuda_driver_processes():
               cudaProcesses.append(dict(pid=int(wordList[1]) ))
     return cudaProcesses
 
+def get_process_ids(processShortName):
+    if processShortName == "cuda":
+       processMatchString = "/usr/bin/python3 ./cuda_driver.py" 
+    elif processShortName == "usrp_server":
+       processMatchString = "/usr/bin/python3 ./usrp_server.py"
+    else:
+       ValueError("unknown process short name {}".format(processShortName))
+     
+    processList = get_processes()
+    cudaProcesses = []
+    for line in processList:
+        wordList = [word for word in line.split(" " ) if word != ""]
+        if len(wordList):
+           commandString = " ".join(wordList[10:])
+           if commandString.startswith(processMatchString ):
+              cudaProcesses.append(dict(pid=int(wordList[1]) ))
+    return cudaProcesses
+
 def stop_cuda_driver():
     myPrint(" Stopping cuda_driver...")
-    cudaProcesses = get_cuda_driver_processes()
+    cudaProcesses = get_process_ids("cuda")
     if len(cudaProcesses):
        for process in cudaProcesses:
             myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
@@ -226,7 +244,9 @@ def start_cuda_driver():
 
 def start_usrp_server():
     myPrint("Starting usrp_server...")
-    myPrint("not implemented jet")
+    os.chdir(os.path.join(basePath, "usrp_server") )   
+    subprocess.Popen(['./usrp_server.py' ])
+    os.chdir(basePath)
 
 
 
@@ -252,6 +272,7 @@ else:
          myPrint("Starting all...")
          start_cuda_driver()
          start_usrp_driver()
+         time.sleep(10)
          start_usrp_server()
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          start_usrp_driver()

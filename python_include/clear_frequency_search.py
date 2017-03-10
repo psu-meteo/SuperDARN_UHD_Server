@@ -150,6 +150,38 @@ def fft_clrfreq_samples(samples):
     power_spectrum = np.fft.fftshift(np.abs(np.fft.fft(samples, norm = 'ortho')) ** 2)
     return power_spectrum 
 
+def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):
+    dbPrint("enter record_clrfreq_raw_samples")
+    output_samples_list     = []
+    output_antenna_idx_list = []
+    clrfreq_rate_actual = 0
+
+    # gather current UHD time
+    dbPrint("send usrp_get_time")
+    gettime_cmd = usrp_get_time_command(usrp_sockets[0])
+    gettime_cmd.transmit()
+     
+    usrptime  = gettime_cmd.recv_time(usrp_sockets[0])
+    gettime_cmd.client_return()
+
+    # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
+    dbPrint(" send clrfreq_command")
+
+    clrfreq_time = usrptime + MIN_CLRFREQ_DELAY
+    clrfreq_cmd = usrp_clrfreq_command(usrp_sockets, num_clrfreq_samples, clrfreq_time, center_freq, clrfreq_rate_requested)
+    clrfreq_cmd.transmit()
+
+    # grab raw samples, apply beamforming
+    for usrpsock in usrp_sockets:
+        output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
+        clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
+        assert clrfreq_rate_actual == clrfreq_rate_requested
+        samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
+        output_samples_list.append( samples[0::2] + 1j * samples[1::2])
+        
+    clrfreq_cmd.client_return()
+    return output_samples_list, output_antenna_idx_list
+
 def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):
     dbPrint("enter grap_usrp_clrfreq_samples")
     # gather current UHD time
