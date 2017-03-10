@@ -67,49 +67,29 @@ CS_BUSY          = 'CHANNEL_STATE_BUSY'
 CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
 
 
-class clearFrequencyManager():
-    """ 
+class clearFrequencyRawDataManager():
+    """ Buffers the raw clearfrequency data for all channels
     """
     def __init__(self):
-        self.last_clrFreq_data = None
-        self.last_clrFreq_time = None
+        self.rawData    = None
+        self.recordTime = None
+        self.metaData   = None
         self.raw_data_available_from_this_period = False
-        
-        self.current_clrFreq_result = None
-        self.next_clrFreq_result = None
-
-        self.scan_clrFreq_range_list = []
 
     def period_finished(self):
-        
-        self.current_clrFreq_result = self.next_clrFreq_result
-        self.next_clrFreq_result = None
         self.raw_data_available_from_this_period = False
-
-    def get_current_clearFreq_result(self, beamNo):
-        if self.current_clrFreq_result is None:
-            print("  calc current clr_freq (period {})".format(self.current_period))
-            self.current_clrFreq_result = self.clrFreq_eval(self.current_period, beamNo)
-        return self.current_clrFreq_result
-        
-    def get_next_clearFreq_result(self, beamNo):
-        if self.next_clrFreq_result is None:
-            print("  calc next clr_freq (period {})".format(self.current_period+1))
-            self.next_clrFreq_result = self.clrFreq_eval(self.current_period+1,beamNo)
-        return self.next_clrFreq_result        
-        
-    def evaluate_clear_freq(self, iPeriod, beamNo):
-        if self.last_clrFreq_data is None:
-           self.record_clear_freq_raw_data()
-
-        clearFreq = oh_jonny_calc_the_frequency(self.last_clrFreq_data, self.scan_clrFreq_range_list[iPeriod],beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
-        noise = 1.0
-        return [clearFreq, noise, time.time() ]
     
-    def record_clear_freq_raw_data(self):
-        self.last_clrFreq_data = oh_jonny_give_me_some_data() #[11,111]
-        self.last_clrFreq_time = time.time()
+    def record_new_data(self):
+        self.rawData, self.metaData = oh_jonny_give_me_some_data() #[11,111]
+        self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
+
+    def get_raw_data(self):
+        if self.rawData is None or not self.raw_data_available_from_this_period:
+           self.record_new_data()
+        else:
+           print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
+        return self.rawData, self.metaData
 
 
 class swingManager():
@@ -122,10 +102,13 @@ class swingManager():
         self.activeSwing     = 0
         self.processingSwing = 1
         
-        self.scan_beam_list          = []
-        
+        self.scan_beam_list        = []
+        self.clear_freq_range_list = []
         self.current_period = 0
-        
+       
+        self.current_clrFreq_result = None
+        self.next_clrFreq_result    = None 
+        self.get_clr_freq_raw_data  = None # handel to RHM:ClearFrequencyRawDatamanager.get_raw_data()
     
     def switch_swings(self):
         # switch swings
@@ -134,7 +117,9 @@ class swingManager():
 
 
     def period_finished(self):
-        print("  period finished... ")
+        print("swing manager period finished... ")
+        self.current_clrFreq_result = self.next_clrFreq_result
+        self.next_clrFreq_result = None
         self.current_period += 1
         
     def status(self):
@@ -150,7 +135,24 @@ class swingManager():
             return None
         else:
             return self.scan_beam_list[self.current_period+1]
+
             
+    def get_current_clearFreq_result(self):
+        if self.current_clrFreq_result is None:
+            print("  calc current clr_freq (period {})".format(self.current_period))
+            self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
+        return self.current_clrFreq_result
+        
+    def get_next_clearFreq_result(self):
+        if self.next_clrFreq_result is None:
+            print("  calc next clr_freq (period {})".format(self.current_period+1))
+            self.next_clrFreq_result = self.clrFreq_eval(self.current_period+1,self.next_beam)
+        return self.next_clrFreq_result        
+        
+    def evaluate_clear_freq(self, iPeriod, beamNo):
+        rawData, metaData = self.get_clr_freq_raw_data()
+        clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.cear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
+        return [clearFreq, noise ]
     
     
         
@@ -177,7 +179,7 @@ class RadarHardwareManager:
 
         self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
         self.nRegisteredChannels = 0
-        self.clearFreqManager = clearFrequencyManager()
+        self.clearFreqRawDataManager = clearFrequencyRawDataManager()
 
     def run(self):
         def spawn_channel(conn):
@@ -225,15 +227,16 @@ class RadarHardwareManager:
                             break
                         
 
-                if self.state == STATE_CLR_FREQ:
+                if self.state == RSM_CLR_FREQ:
                     sm_logger.debug('start clearFreqSearch()')
-                    # do a clear frequency search for channel requesting one
+                    self.record_new_data()
+                    # reset states
                     for ch in self.channels:
-                        if ch.state == STATE_CLR_FREQ:
-                            self.clrfreq(ch)
+                        if ch.state == CS_CLR_FREQ:
                             ch.state = STATE_WAIT
+                            # TODO reset starte to previous (init or wait)
                     self.next_state = STATE_WAIT
-                    sm_logger.debug('start clearFreqSearch()')
+                    sm_logger.debug('end clearFreqSearch()')
 
 
 
@@ -456,6 +459,7 @@ class RadarHardwareManager:
     
     def setup(self, chan):
         pass
+
 
     def clrfreq(self, chan):
         self.logger.debug('running clrfreq for channel {}'.format(chan.cnum))
@@ -1105,6 +1109,7 @@ class RadarChannelHandler:
         self.cnum = 'unknown'
 
         self.swingManager = swingManager()
+        self.swingManager.get_clr_freq_raw_data = self.parent_RadarHardwaremanager.clearFreqRawDataManager.get_raw_data
 
         # TODO: initialize ctlrprm_struct with site infomation
         #self.ctrlprm_struct.set_data('rbeamwidth', 3)
