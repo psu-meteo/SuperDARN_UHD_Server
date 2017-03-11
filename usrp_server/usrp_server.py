@@ -828,8 +828,8 @@ class RadarHardwareManager:
 
 
 
-       # get next par
-       # is this implicitly done?
+       # PERIOD FINISHED
+       self.next_period_RHM()
  
        # CUDA_ADD & CUDA_GENGERATE for processingSwing if something has changed
        for channel in self.channels:
@@ -889,7 +889,11 @@ class RadarHardwareManager:
           # set ready for active channels
           swingManager.firstPeriod = False
 
-
+    def next_period_RHM(self):
+        self.clearFreqRawDatamanager.period_finished()
+        for ch in self.channels:
+           if ch is not None:
+              ch.swingManager.period_finished()
 
 
     
