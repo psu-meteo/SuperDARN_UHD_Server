@@ -199,7 +199,7 @@ class RadarHardwareManager:
         def radar_state_machine():
             sm_logger = logging.getLogger('StateMachine')
             sm_logger.info('starting radar hardware state machine')
-            self.next_state = RSW_WAIT
+            self.next_state = RSM_WAIT
             self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
             statePriorityOrder = [ CS_CLR_FREQ, CS_TRIGGER]
           
@@ -674,74 +674,74 @@ class RadarHardwareManager:
 
 
        # PERIOD FINISHED
-       self.next_period_RHM()
+        self.next_period_RHM()
  
-       # CUDA_ADD & CUDA_GENGERATE for processingSwing 
-       for channel in self.channels:
-           if channel.scanManager.endOfScan:
-              cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-              self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-              channel.next_processing_state = CS_INACTIVE
-           else:
-              cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-              self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-              channel.next_processing_state = CS_READY
+        # CUDA_ADD & CUDA_GENGERATE for processingSwing 
+        for channel in self.channels:
+            if channel.scanManager.endOfScan:
+               cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+               self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+               channel.next_processing_state = CS_INACTIVE
+            else:
+               cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+               self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+               channel.next_processing_state = CS_READY
 
+            cmd.transmit()
+            cmd.client_return()      
+ 
+
+        # CUDA_GENERATE
+        synthNewPulses = True # TODO keep track of changes to do this only if necessary
+        if synthNewPulses:
+           self.logger.debug('send CUDA_GENERATE_PULSE')
+           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.activeSwing) 
            cmd.transmit()
-           cmd.client_return()      
+           cmd.client_return()
+           self.logger.debug('received response CUDA_GENERATE_PULSE')
+
+
+        # USRP_READY_DATA for activeSwing 
+        self.logger.debug('sending USRP_READY_DATA command ')
+        cmd = usrp_ready_data_command(self.usrpsocks, swingManager.activeSwing)
+        cmd.transmit()
  
+        # check status of usrp drivers
+        for iUSRP, usrpsock in enumerate(self.usrpsocks):
+            self.logger.debug('start receiving one USRP status')
+            ready_return = cmd.recv_metadata(usrpsock)
+            rx_status                = ready_return['status']
+            self.fault_status[iUSRP] = ready_return["fault"]
 
-       # CUDA_GENERATE
-       synthNewPulses = True # TODO keep track of changes to do this only if necessary
-       if synthNewPulses:
-          self.logger.debug('send CUDA_GENERATE_PULSE')
-          cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.activeSwing) 
-          cmd.transmit()
-          cmd.client_return()
-          self.logger.debug('received response CUDA_GENERATE_PULSE')
+            self.logger.debug('GET_DATA rx status {}'.format(rx_status))
+            if rx_status != 2:
+                self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
+                #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
+            self.logger.debug('end receiving one USRP status')
 
+        self.logger.debug('start waiting for USRP_DATA return')
+        cmd.client_return()
+        self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
+        self.logger.debug('end waiting for USRP_DATA return')
 
-       # USRP_READY_DATA for activeSwing 
-       self.logger.debug('sending USRP_READY_DATA command ')
-       cmd = usrp_ready_data_command(self.usrpsocks, swingManager.activeSwing)
-       cmd.transmit()
- 
-       # check status of usrp drivers
-       for iUSRP, usrpsock in enumerate(self.usrpsocks):
-           self.logger.debug('start receiving one USRP status')
-           ready_return = cmd.recv_metadata(usrpsock)
-           rx_status                = ready_return['status']
-           self.fault_status[iUSRP] = ready_return["fault"]
-
-           self.logger.debug('GET_DATA rx status {}'.format(rx_status))
-           if rx_status != 2:
-               self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
-               #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
-           self.logger.debug('end receiving one USRP status')
-
-       self.logger.debug('start waiting for USRP_DATA return')
-       cmd.client_return()
-       self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
-       self.logger.debug('end waiting for USRP_DATA return')
-
-       # SWITCH SWINGS
-       swingManager.switch_swings()
+        # SWITCH SWINGS
+        swingManager.switch_swings()
   
-       # CUDA_PROCESS for processingSwing
-       self.logger.debug('start CUDA_PROCESS')
-       cmd = cuda_process_command(self.cudasocks, swingManager.processingSwing)
-       cmd.transmit()
-       cmd.client_return()
-       self.logger.debug('end CUDA_PROCESS')
+        # CUDA_PROCESS for processingSwing
+        self.logger.debug('start CUDA_PROCESS')
+        cmd = cuda_process_command(self.cudasocks, swingManager.processingSwing)
+        cmd.transmit()
+        cmd.client_return()
+        self.logger.debug('end CUDA_PROCESS')
 
-       # repeat CLR_FREQ record for 2nd period (if executed for 1st)
-       for ch,iChannel in enumerate( self.channels):
-          if ch.scanManager.repeat_clrfrq_recording:
-             self.next_active_state = self.active_state 
-             self.active_state      = CS_CLR_FREQ 
-             ch.scanManager.repeat_clrfrq_recording = False 
-             self.logger.debug("Repeat reset state of {}. channel to CLR_FREQ (from {}) for second period".format(iChannel, self.next_active_state))
-       
+        # repeat CLR_FREQ record for 2nd period (if executed for 1st)
+        for ch,iChannel in enumerate( self.channels):
+           if ch.scanManager.repeat_clrfrq_recording:
+              self.next_active_state = self.active_state 
+              self.active_state      = CS_CLR_FREQ 
+              ch.scanManager.repeat_clrfrq_recording = False 
+              self.logger.debug("Repeat reset state of {}. channel to CLR_FREQ (from {}) for second period".format(iChannel, self.next_active_state))
+        
 
     def next_period_RHM(self):
         self.clearFreqRawDatamanager.period_finished()
@@ -828,7 +828,7 @@ class RadarChannelHandler:
     @property
     def next_processing_state(self):
         return self.next_state[self.swingManager.processingSwing]
-    @next_processing_state
+    @next_processing_state.setter
     def next_processing_state(self, value):
         self.next_state[self.swingManager.processingSwing] = value 
  
@@ -917,7 +917,7 @@ class RadarChannelHandler:
         ctrlprm = self.ctrlprm_struct.payload
         ctrlprm.set_data('rbeam', self.scanManager.current_beam)
         ctrlprm.set_data('tbeam', self.scanManager.current_beam)
-        clrFreqList = self.scanManager.get_current_clrFreq_result())
+        clrFreqList = self.scanManager.get_current_clrFreq_result()
         ctrlprm.set_data('rfreq', clrFreqList[0] )
         ctrlprm.set_data('tfreq', clrFreqList[0] )
         self.ctrlprm_struct.payload = ctrlprm  # TODO is this necessary?
@@ -933,7 +933,7 @@ class RadarChannelHandler:
         ctrlprm = self.ctrlprm_struct.payload
         ctrlprm.set_data('rbeam', self.scanManager.next_beam)
         ctrlprm.set_data('tbeam', self.scanManager.next_beam)
-        clrFreqList = self.scanManager.get_next_clrFreq_result())
+        clrFreqList = self.scanManager.get_next_clrFreq_result()
         ctrlprm.set_data('rfreq', clrFreqList[0] )
         ctrlprm.set_data('tfreq', clrFreqList[0] )
 
