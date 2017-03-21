@@ -23,10 +23,8 @@ import socket
 import time
 import configparser
 import copy
-import datetime
 
 sys.path.insert(0, '../python_include')
-
 
 from phasing_utils import *
 from socket_utils import *
@@ -44,27 +42,25 @@ RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
-
-STATE_INIT = 'INIT'
-STATE_RESET = 'RESET'
-STATE_WAIT = 'WAIT'
-STATE_PRETRIGGER = 'PRETRIGGER'
-STATE_TRIGGER = 'TRIGGER'
-STATE_CLR_FREQ = 'CLR_FREQ_WAIT'
-STATE_GET_DATA = 'GET_DATA'
+nSwings = 2 
 
 debug = True
 
+# states for Radar State Machine (of RadarHardwareManager) 
 RSM_WAIT     = 'RADAR_STATE_MACHINE_WAIT'
 RSM_CLR_FREQ = 'RADAR_STATE_MACHINE_CLR_FREQ'
 RSM_TRIGGER  = 'RADAR_STATE_MACHINE_TRIGGER'
+RSM_RESET    = 'RADAR_STATE_MACHINE_RESET'
 
-CS_INCATIVE      = 'CHANNEL_STATE_INACTIVE'
+# states for each channel 
+CS_INACTIVE      = 'CHANNEL_STATE_INACTIVE'
 CS_READY         = 'CHANNEL_STATE_READY'
 CS_TRIGGER       = 'CHANNEL_STATE_TRIGGER'
 CS_CLR_FREQ      = 'CHANNEL_STATE_CLR_FREQ'
 CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
 CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
+
+
 
 
 class clearFrequencyRawDataManager():
@@ -203,23 +199,17 @@ class RadarHardwareManager:
         def radar_state_machine():
             sm_logger = logging.getLogger('StateMachine')
             sm_logger.info('starting radar hardware state machine')
-            self.state      = STATE_INIT
-            self.next_state = STATE_INIT
+            self.next_state = RSW_WAIT
             self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
             statePriorityOrder = [ CS_CLR_FREQ, CS_TRIGGER]
           
             sleepTime = 0.01 # used if state machine waits for one channel
            
-            swing = 0 #  starting with one swing for everything, TODO: implement swing handling and delete this line
-            nSwings = 1 # TODO change this too
+
 
             while True:
                 self.state = self.next_state
-                self.next_state = STATE_RESET
-
-                if self.state == STATE_INIT:
-                    # TODO: write init code?
-                    self.next_state = STATE_WAIT
+                self.next_state = RSM_RESET
 
 
                 # DETERMINE RADAR STATE MACHINE (RSM) STATE BY LOOKING AT CHANNEL STATES
@@ -271,17 +261,17 @@ class RadarHardwareManager:
                                 time.sleep(sleepTime)
                                 self.next_state = RHM_TRIGGER
 
-                    # if all channels are TRIGGER, then TRIGGER and return to STATE_WAIT
-                    if self.next_state == STATE_WAIT:
+                    # if all channels are TRIGGER, then TRIGGER and return to RSM_WAIT
+                    if self.next_state == RSM_WAIT:
                         sm_logger.debug('start RHM.trigger_next_swing()')
                         self.trigger_next_swing()
                         sm_logger.debug('end RHM.trigger_next_swing()')
 
 
-                if self.state == STATE_RESET:
-                    sm_logger.error('stuck in STATE_RESET?!')
+                if self.state == RSM_RESET:
+                    sm_logger.error('stuck in RSM_RESET state?!')
                     pdb.set_trace()
-                    self.next_state = STATE_INIT
+                    self.next_state = RSM_WAIT
 
 
         self.client_sock.listen(MAX_CHANNELS)
@@ -466,24 +456,11 @@ class RadarHardwareManager:
     def setup(self, chan):
         pass
 
-
-##    def clrfreq(self, chan):
-##        self.logger.debug('running clrfreq for channel {}'.format(chan.cnum))
-##        tbeamnum = chan.ctrlprm_struct.get_data('tbeam')
-##        tbeamwidth = chan.ctrlprm_struct.get_data('tbeamwidth') 
-##        print('todo: verify that tbeamwidth is 3.24ish')
-##
-##        chan.tfreq, chan.noise = clrfreq_search(chan.clrfreq_struct, self.usrpsocks, self.restricted_frequencies, tbeamnum, tbeamwidth, int(self.ini_array_settings['nbeams']), self.array_x_spacing) 
-##        chan.tfreq /= 1000 # clear frequency search stored in kHz for compatibility with control programs..
-##        self.logger.debug('clrfreq for channel {} found {} kHz'.format(chan.cnum, chan.tfreq))
-
-
-
-
     def deleteRadarChannel(self, channelObject):
         if channelObject in self.channels:
-            # don't delete channel in middle of trigger, pretrigger, or ....
-            channelObject._waitForState(STATE_WAIT) 
+       # this is only called if something went wrong or crtl program quit => so don't care about channel states ? 
+       #    # don't delete channel in middle of trigger, pretrigger, or ....
+       #     channelObject._waitForState([CS_READY, CS_INACTIVE])  
             self.logger.info('deleteRadarChannel() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
             # remove channel from cuda
@@ -949,12 +926,6 @@ class RadarChannelHandler:
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def get_current_sequence(self):
         self.update_ctrlprm_with_current_par()
-##        ctrlprm = self.ctrlprm_struct.payload
-##        ctrlprm.set_data('rbeam', self.scanManager.current_beam)
-##        ctrlprm.set_data('tbeam', self.scanManager.current_beam)
-##        clrFreqList = self.scanManager.get_current_clrFreq_result())
-##        ctrlprm.set_data('rfreq', clrFreqList[0] )
-##        ctrlprm.set_data('tfreq', clrFreqList[0] )
 
         return sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, ctrlprm)
     
