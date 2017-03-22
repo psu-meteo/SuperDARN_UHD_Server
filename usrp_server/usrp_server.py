@@ -85,7 +85,7 @@ class clearFrequencyRawDataManager():
            self.record_new_data()
         else:
            print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
-        return self.rawData, self.metaData
+        return self.rawData, self.metaData, self.recordTime
 
 class swingManager():
     """ Class to handle which swing is active and processing """
@@ -153,9 +153,9 @@ class scanManager():
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
-        rawData, metaData = self.get_clr_freq_raw_data()
+        rawData, metaData, recordTime = self.get_clr_freq_raw_data()
         clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.cear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
-        return [clearFreq, noise ]
+        return [clearFreq, noise, recordTime ]
     
     
         
@@ -790,7 +790,7 @@ class RadarChannelHandler:
         self.parent_RadarHardwareManager = parent_RadarHardwareManager
         self.logger = logging.getLogger("ChManager")
         self.state      = [CS_INACTIVE, CS_INACTIVE]
-        self.next_state = [CS_INACTIVW, CS_INACTIVE]
+        self.next_state = [CS_INACTIVE, CS_INACTIVE]
 
         self.ctrlprm_struct = ctrlprm_struct(self.conn)
         self.seqprm_struct  = seqprm_struct(self.conn)
@@ -802,9 +802,13 @@ class RadarChannelHandler:
         self.cnum = 'unknown'
 
         self.scanManager  = scanManager()
-        self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwaremanager.clearFreqRawDataManager.get_raw_data
+        self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
 
+        # DELETE THIS!
+        self.logger.warning("Scan information only set for debugging")
+        self.scanManager.scan_beam_list = [i for i in range(16)]
+        self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
     @property
@@ -914,13 +918,13 @@ class RadarChannelHandler:
                 break
 
     def update_ctrlprm_with_current_par(self):
-        ctrlprm = self.ctrlprm_struct.payload
+        ctrlprm = self.ctrlprm_struct
         ctrlprm.set_data('rbeam', self.scanManager.current_beam)
         ctrlprm.set_data('tbeam', self.scanManager.current_beam)
-        clrFreqList = self.scanManager.get_current_clrFreq_result()
+        clrFreqList = self.scanManager.get_current_clearFreq_result()
         ctrlprm.set_data('rfreq', clrFreqList[0] )
         ctrlprm.set_data('tfreq', clrFreqList[0] )
-        self.ctrlprm_struct.payload = ctrlprm  # TODO is this necessary?
+#        self.ctrlprm_struct.payload = ctrlprm  # TODO is this necessary?
 
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
@@ -1226,7 +1230,7 @@ class RadarChannelHandler:
     @timeit
     def GetParametersHandler(self, rmsg):
         # TODO: return bad status if negative radar or channel
-        self.scanManager.get_current_ctrlprm_struct_and_send_it_questionamark
+        self.update_ctrlprm_with_current_par()
         self.ctrlprm_struct.transmit()
         return RMSG_SUCCESS
     
@@ -1342,10 +1346,11 @@ class RadarChannelHandler:
 
     def SetActiveHandler(self, rmsg):
         # TODO: return failure if rnum and cnum are not set
-        # TODO: why is active only set if it is already set?
         if not self.active:
             self.active = True
             self.ready = False
+
+
         return RMSG_SUCCESS
 
     def SetInactiveHandler(self, rmsg):
