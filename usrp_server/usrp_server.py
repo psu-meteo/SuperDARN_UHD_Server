@@ -667,7 +667,11 @@ class RadarHardwareManager:
             beamformed_samples      = calc_beamforming(self.channels, main_samples, back_samples)
             for iChannel, channel in enumerate(self.channels):
                if channel.processingState is CS_PROCESSING:
-                  channel.main_beamformed  = beamformed_samples[iChannel]
+                  # copy samples and ctrlprm to transmit later to control program
+                  channel.main_beamformed          = beamformed_samples[iChannel]
+                  channel.update_ctrlprm_class("current")
+                  channel.ctrlprm_data_for_results = self.ctrlprm_struct.dataqueue
+
                   channel.processing_state = CS_SAMPLES_READY
                   channel.swingManager.lastSwingWithData = swingManager.processingSwing 
 
@@ -917,31 +921,34 @@ class RadarChannelHandler:
                 pdb.set_trace()
                 break
 
-    def update_ctrlprm_with_current_par(self):
-        ctrlprm = self.ctrlprm_struct
-        ctrlprm.set_data('rbeam', self.scanManager.current_beam)
-        ctrlprm.set_data('tbeam', self.scanManager.current_beam)
-        clrFreqList = self.scanManager.get_current_clearFreq_result()
-        ctrlprm.set_data('rfreq', clrFreqList[0] )
-        ctrlprm.set_data('tfreq', clrFreqList[0] )
-#        self.ctrlprm_struct.payload = ctrlprm  # TODO is this necessary?
-
+    
+    def update_ctrlprm_class(self, sequence):
+        if sequence == "current":
+           beam = self.scanManager.current_beam
+           freq = self.scnaManager.get_current_clearFreq_result()[0]
+        elif sequence == "next":
+           beam = self.scanManager.next_beam
+           freq = self.scnaManager.get_next_clearFreq_result()[0]
+        else:
+            self.logger.error("unknown sequence specifier: {} (valid: current or next )".) 
+       
+        parNameList  = ['rbeam', 'tbeam', 'rfreq', 'tfreq'] 
+        parValueList = [ beam  ,  beam  ,  freq  ,  freq  ]
+     
+        for par, iPar in parNameList:
+           self.ctrlprm_struct.set_data(par, parValueList[iPar])
+           self.ctrlprm_struct.payload[par] = parValueList[iPar]
 
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def get_current_sequence(self):
-        self.update_ctrlprm_with_current_par()
+        self.update_ctrlprm_class('current')
+        seq = sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        return seq
 
-        return sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, ctrlprm)
-    
     def get_next_sequence(self):
-        ctrlprm = self.ctrlprm_struct.payload
-        ctrlprm.set_data('rbeam', self.scanManager.next_beam)
-        ctrlprm.set_data('tbeam', self.scanManager.next_beam)
-        clrFreqList = self.scanManager.get_next_clrFreq_result()
-        ctrlprm.set_data('rfreq', clrFreqList[0] )
-        ctrlprm.set_data('tfreq', clrFreqList[0] )
-
-        return sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor, ctrlprm)
+        self.update_ctrlprm_class('next')
+        seq = sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        return seq
 
     def DefaultHandler(self, rmsg):
         self.logger.error("Unexpected command: {}".format(chr(rmsg.payload['type'])))
@@ -1122,14 +1129,20 @@ class RadarChannelHandler:
         #    what to do they are not equal?
         # - does not affect state, right?
 
-        # TODO: compare set paramater with used parameter!
         # TODO: check if new freq is possible with usrp_centerFreq
+        
+        isFirstSequence = self.scanManager.period == 0 # TODO is this definition the same as active_state is CS_INACTIVE ???
+
+        if not isFirstSequence:
+           self.update_ctrlprm_class("next")
+           ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
+
         self.ctrlprm_struct.receive(self.conn)
        
         if self.active_state is CS_INACTIVE:
             channel = self
             RHM = self.parent_RadarHardwareManager
-            # CUDA_ADD_CHANNEL for each channel in first period
+            # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
             self.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
             cmd.transmit()
@@ -1139,9 +1152,15 @@ class RadarChannelHandler:
             # CUDA_GENERATE for first period
             self.logger.debug('send CUDA_GENERATE_PULSE')
             cmd = cuda_generate_pulse_command(RHM.cudasocks, channel.swingManager.activeSwing)
-        cmd.transmit()
-        cmd.client_return()
-        self.logger.debug('received response CUDA_GENERATE_PULSE')
+            cmd.transmit()
+            cmd.client_return()
+            self.logger.debug('received response CUDA_GENERATE_PULSE')
+       
+        # compare received paramter with predicted parameter
+        if not isFirstSequence:
+           for key in ctrlprm_old.keys():
+              if ctrlprm_old[key] != self.ctrlprm_struct.payload[key]:
+                 self.logger.error("received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
 
 ##        self._waitForState(STATE_WAIT)
 ##        self.logger.debug('channel {} starting PRETRIGGER'.format(self.cnum))
@@ -1230,13 +1249,14 @@ class RadarChannelHandler:
     @timeit
     def GetParametersHandler(self, rmsg):
         # TODO: return bad status if negative radar or channel
-        self.update_ctrlprm_with_current_par()
+        self.update_ctrlprm_class("current")
         self.ctrlprm_struct.transmit()
         return RMSG_SUCCESS
     
     @timeit
     def GetDataHandler(self, rmsg):
         self.logger.debug('entering channelHanlder:GetDataHandler')
+        self.update_ctrlprm_class("current")
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
         self.dataprm_struct.transmit()
@@ -1280,8 +1300,12 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, txstatus_lowpwr,  np.int32) # length num_transmitters
         
         # send back ctrlprm
-        self.scanManager.transmit_current_crtlprm() # TODO: implement 
-        self.ctrlprm_struct.transmit()
+        for item in self.ctrlprm_data_for_results:
+            item.transmit(self.ctrlprm_struct.clients[0])
+
+#        self.scanManager.transmit_current_crtlprm() # TODO: implement 
+#        self.update_ctrlprm_class("")
+#        self.ctrlprm_struct.transmit()
     
         # send back samples with pulse start times 
         for sidx in range(self.pulse_sequences_per_integration_period):
