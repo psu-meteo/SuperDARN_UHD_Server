@@ -686,6 +686,7 @@ class RadarHardwareManager:
                   channel.ctrlprm_data_for_results = self.ctrlprm_struct.dataqueue
 
                   channel.processing_state = CS_SAMPLES_READY
+                  channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_SAMPLES_READY".format(self.swingManager.processingSwing, channel.cnum )) 
                   channel.swingManager.lastSwingWithData = swingManager.processingSwing 
 
 
@@ -698,12 +699,13 @@ class RadarHardwareManager:
             if channel.scanManager.endOfScan:
                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               channel.processing_state = CS_INACTIVE
+               channel.next_processing_state = CS_INACTIVE
+               channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_INACTIVE".format(self.swingManager.processingSwing, channel.cnum )) 
             else:
                cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               channel.processing_state = CS_READY
-
+               channel.next_processing_state = CS_READY
+               channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum )) 
             cmd.transmit()
             cmd.client_return()      
  
@@ -743,6 +745,7 @@ class RadarHardwareManager:
 
         # SWITCH SWINGS
         swingManager.switch_swings()
+        self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
   
         # CUDA_PROCESS for processingSwing
         self.logger.debug('start CUDA_PROCESS')
@@ -758,11 +761,11 @@ class RadarHardwareManager:
               self.next_active_state = CS_TRIGGER 
               self.active_state      = CS_CLR_FREQ 
               ch.scanManager.repeat_clrfreq_recording = False 
-              self.logger.debug("Repeat reset state of {}. channel to CLR_FREQ (from {}) for second period".format(iChannel, self.next_active_state))
+              self.logger.debug("Repeat reset state of cnum {} to CLR_FREQ (from {}) for second period".format(ch.cnum, self.next_active_state))
 
            elif ch.scanManager.current_period == 1:  # first period but no CLR_FREQ
-              self.logger.debug('setting active state to CS_TRIGGER to start second period')
-              self.active_state = CS_TRIGGER 
+              ch.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(ch.cnum, self.swingManager.activeSwing))
+              ch.active_state = CS_TRIGGER 
               
         
 
@@ -934,6 +937,8 @@ class RadarChannelHandler:
         wait_start = time.time()
 
         while self.state[swing] not in state:
+            if state == CS_SAMPLES_READY:
+               self.logger.debug("_waitForState CS_SAMPLES_READY. state is {}".format(self.state[swing]))
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT')
@@ -1282,7 +1287,7 @@ class RadarChannelHandler:
     
     #@timeit
     def GetDataHandler(self, rmsg):
-        self.logger.debug('entering channelHanlder:GetDataHandler')
+        self.logger.debug('start channelHanlder:GetDataHandler')
         self.update_ctrlprm_class("current")
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
@@ -1294,15 +1299,16 @@ class RadarChannelHandler:
             return RMSG_FAILURE
 
         # TODO investigate possible race conditions
-        self.logger.debug('waiting for channel to idle before GET_DATA')
 
         finishedSwing = self.swingManager.lastSwingWithData 
+        self.logger.debug('channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(finishedSwing))
         self._waitForState(finishedSwing, CS_SAMPLES_READY)
 
-        self.logger.debug('returning samples')
+        self.logger.debug('channelHanlder:GetDataHandler returning samples')
         self.send_results_to_control_program()
 
         self.state[finshedSwing] = self.next_swing[finishedSwing]
+        self.logger.debug('end channelHanlder:GetDataHandler')
 
         return RMSG_SUCCESS
 
