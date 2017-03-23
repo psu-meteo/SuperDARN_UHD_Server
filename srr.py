@@ -45,6 +45,15 @@ print(basePrintLine)
 myPrint(" ")
 
 
+def waitFor(nSeconds):
+   print("||> Waiting for {} second(s): ".format(nSeconds), end="", flush=True)
+   for i in range(nSeconds):
+      print('.', end="", flush=True)
+      time.sleep(1)
+   else:
+      print
+
+
 ######################
 ## Processes:
 
@@ -56,7 +65,7 @@ def get_processes():
    return processList
 
 def print_status():
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan"]
     processList = get_processes()
     srrProcesses = []
     for line in processList:
@@ -271,6 +280,12 @@ def start_usrp_server():
     subprocess.Popen(['./usrp_server.py' ])
     os.chdir(basePath)
 
+def start_uafscan_fixfreq():
+    myPrint("Starting uafscan fixfreq...")
+#    os.chdir(os.path.join(basePath, "usrp_server") )   
+    subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000', '--debug' ])
+#    os.chdir(basePath)
+
 
 
 
@@ -306,12 +321,16 @@ else:
          start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          start_usrp_server()
+      elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
+         start_uafscan_fixfreq()
       else:
          myPrint("unknown process to start")
 
    elif firstArg == "restart":
       if nArguments == 1 or inputArg[1].lower == "all":
          myPrint("Restarting all...")
+         stop_usrp_server()
+         waitFor(2)
          stop_usrp_driver()
          stop_cuda_driver()
          myPrint("waiting for {} sec".format(nSecs_restart_pause))
@@ -319,21 +338,29 @@ else:
          start_cuda_driver()
          start_usrp_driver()
 #         start_usrp_server()
+
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
          myPrint("waiting for {} sec".format(nSecs_restart_pause))
          time.sleep(nSecs_restart_pause)
          start_usrp_driver()
+
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()
          start_cuda_driver()
+
       elif inputArg[1].lower() == "driver":
+         stop_usrp_server() # this does not work....
+         waitFor(2)
          stop_usrp_driver()
          stop_cuda_driver()
+         waitFor(nSecs_restart_pause)
          start_cuda_driver()
          start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
+         stop_usrp_server()
          start_usrp_server()
+
       else:
          myPrint("unknown process to restart")
 
@@ -341,8 +368,11 @@ else:
    elif firstArg == "stop":
       if nArguments == 1 or inputArg[1].lower == "all":
          myPrint("Stopping all...")
-         stop_usrp_driver()
+         stop_usrp_server()
+         time.sleep(1)
          stop_cuda_driver()
+         time.sleep(2)
+         stop_usrp_driver()
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:

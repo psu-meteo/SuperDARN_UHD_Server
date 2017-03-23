@@ -61,6 +61,10 @@ CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
 CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
 
 
+def oh_jonny_give_me_some_data():
+    return [11,111]
+def oh_jonny_calc_the_frequency(rawData, metaData,clearFreqPar, beamNo):
+    return clearFreqPar[0], 11
 
 
 class clearFrequencyRawDataManager():
@@ -149,12 +153,12 @@ class scanManager():
     def get_next_clearFreq_result(self):
         if self.next_clrFreq_result is None:
             print("  calc next clr_freq (period {})".format(self.current_period+1))
-            self.next_clrFreq_result = self.clrFreq_eval(self.current_period+1,self.next_beam)
+            self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
         rawData, metaData, recordTime = self.get_clr_freq_raw_data()
-        clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.cear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
+        clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.clear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
         return [clearFreq, noise, recordTime ]
     
     
@@ -202,6 +206,7 @@ class RadarHardwareManager:
             self.next_state = RSM_WAIT
             self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
             statePriorityOrder = [ CS_CLR_FREQ, CS_TRIGGER]
+            channelState_to_RSMstate_dict = {CS_TRIGGER:RSM_TRIGGER, CS_CLR_FREQ:RSM_CLR_FREQ}
           
             sleepTime = 0.01 # used if state machine waits for one channel
            
@@ -210,7 +215,8 @@ class RadarHardwareManager:
             while True:
                 self.state = self.next_state
                 self.next_state = RSM_RESET
-
+               
+   #             sm_logger.debug("State is " + self.state)
 
                 # DETERMINE RADAR STATE MACHINE (RSM) STATE BY LOOKING AT CHANNEL STATES
                 if self.state == RSM_WAIT:
@@ -219,15 +225,18 @@ class RadarHardwareManager:
                     # 1st priority is stateOrder, 2nd is channel number
                     for iState in statePriorityOrder:
                         if self.next_state == RSM_WAIT:      # if next state still not found
-                            for iChannel in self.channels:
-                                if iChannel.active_state == iState:
-                                    self.next_state = 'RHM' + iState[2:]
+                            for channel in self.channels:
+                                print("active state is {}, active swing; {}".format(channel.active_state, channel.swingManager.activeSwing))
+                                if channel.active_state == iState:
+                                    self.next_state = channelState_to_RSMstate_dict[iState]
                                     break
                         else:
                             break
 
                     if self.next_state == RSM_WAIT:
-                       time.sleep(RADAR_STATE_TIME)
+                       time.sleep(RADAR_STATE_TIME+1*debug) 
+                    else:
+                       sm_logger.debug("Next state is " + self.next_state)
                            
 
                 if self.state == RSM_CLR_FREQ:
@@ -249,7 +258,7 @@ class RadarHardwareManager:
 
 
                 if self.state == RSM_TRIGGER:
-                    self.next_state = CS_WAIT
+                    self.next_state = RSM_WAIT
                     # wait for all channels to be in TRIGGER state
                     for ch in self.channels:
                         if  ch.active_state is not CS_TRIGGER:
@@ -390,7 +399,7 @@ class RadarHardwareManager:
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again..')
                 time.sleep(1)
 
-    @timeit
+    #@timeit
     def rxfe_init(self):
         activeStrings = ['true', '1', 'on']
         amp1 = self.ini_rxfe_settings['enable_amp1'].lower() in activeStrings
@@ -507,7 +516,47 @@ class RadarHardwareManager:
 
         sys.exit(0)
 
-    @timeit
+    def _calc_period_details(self):
+        """ calculate details for integration period and save it in channel objects"""
+        # calculate the pulse sequence period with padding
+        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] -  self.commonChannelParameter['pulse_sequence_offsets_vector'][0]
+        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
+        sampling_duration = self.commonChannelParameter['integration_period_duration'] - INTEGRATION_PERIOD_SYNC_TIME 
+        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+
+        # calculate the number of pulse sequences that fit in the available time within an integration period
+        nSequences_per_period = int(sampling_duration / pulse_sequence_period)
+
+        # calculate the number of RF transmit and receive samples 
+        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+       ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
+
+        self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
+
+        # then calculate sample indicies at which pulse sequences start within a pulse sequence
+        nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
+        pulse_sequence_offsets_samples = self.commonChannelParameter['pulse_sequence_offsets_vector'] * self.usrp_rf_tx_rate
+
+        # then, calculate sample indicies at which pulses start within an integration period
+        integration_period_pulse_sample_offsets = np.zeros(nPulses_per_sequence *  nSequences_per_period, dtype=np.uint64)
+        for iSequence in range(nSequences_per_period):
+            for iPulse in range(nPulses_per_sequence):
+                integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
+
+        self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
+
+        # inform all channels with the number of pulses per integration period        
+        for ch in self.channels:
+            ch.nSequences_per_period = nSequences_per_period
+            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
+            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
+            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
+            ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
+            
+        
+
+    #@timeit
     def trigger_next_swing(self):
         self.logger.debug('running trigger next swing')
         swingManager = self.swingManager
@@ -517,51 +566,11 @@ class RadarHardwareManager:
         self.logger.warning('TODO: where do we want to do gain control?')
         self.gain_control_divide_by_nChannels()
         
-        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-        sampling_duration = self.commonChannelParameter['integration_period_duration'] - INTEGRATION_PERIOD_SYNC_TIME 
-
-        # calculate the pulse sequence period with padding
-        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] -  self.commonChannelParameter['pulse_sequence_offsets_vector'][0]
-        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
-
-        # calculate the number of pulse sequences that fit in the available time within an integration period
-        nSequences_per_period = int(sampling_duration / pulse_sequence_period)
-        
-        # inform all channels with the number of pulses per integration period
-        for ch in self.channels:
-            ch.pulse_sequences_per_integration_period = nSequences_per_period
-            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
-            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
-
-        # find transmit sample rate
-        tx_sample_rate = self.usrp_rf_tx_rate
-
-        # then calculate sample indicies at which pulse sequences start within a pulse sequence
-        nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
-        pulse_sequence_offsets_vector  = self.commonChannelParameter['pulse_sequence_offsets_vector']
-        pulse_sequence_offsets_samples = pulse_sequence_offsets_vector * self.usrp_rf_tx_rate
-        self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
-
-        # then, calculate sample indicies at which pulses start within an integration period
-        integration_period_pulse_sample_offsets = np.zeros(nPulses_per_sequence * nSequences_per_period, dtype=np.uint64)
-        for iSequence in range(nSequences_per_period):
-            for iPulse in range(nPulses_per_sequence):
-                integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
-
-        for ch in self.channels:
-            ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
-
-        # calculate the number of RF transmit and receive samples 
-        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
-       ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
-
-        npulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
+        self._calc_period_details()
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
-        
-
+      
         for ch in self.channels:
-            ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
             if ch.ctrlprm_struct.payload['tfreq'] != 0: 
                 self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
                 # load sequence to cuda driver if it has a nonzero transmit frequency..
@@ -570,10 +579,14 @@ class RadarHardwareManager:
 
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
-                    #pdb.set_trace()
-
+        
+        # look for one active channel
+        for channel in self.channels:
+           if channel is not None: 
+              break
+        
         cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                 npulses_per_integration_period, num_requested_rx_samples, nSamples_per_pulse, integration_period_pulse_sample_offsets, swingManager.activeSwing)
+                                 self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
         cmd.transmit()
         cmd.client_return()
         self.logger.debug('received response USRP_SETUP')
@@ -589,14 +602,14 @@ class RadarHardwareManager:
         usrp_time = cmd.recv_time(self.usrpsocks[0])
         cmd.client_return()
       
-        sequence_start_time_secs  = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint64)
-        sequence_start_time_usecs = np.zeros(channel.pulse_sequences_per_integration_period, dtype=np.uint32)
+        sequence_start_time_secs  = np.zeros(channel.nSequences_per_period, dtype=np.uint64)
+        sequence_start_time_usecs = np.zeros(channel.nSequences_per_period, dtype=np.uint32)
 
         # provide sequence times for control program
-        for iSequence in range(channel.pulse_sequences_per_integration_period):
+        for iSequence in range(channel.nSequences_per_period):
             pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
-            sequence_start_time_secs[sidx]  = int(pulse_start_time) 
-            sequence_start_time_usecs[sidx] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
+            sequence_start_time_secs[iSequence]  = int(pulse_start_time) 
+            sequence_start_time_usecs[iSequence] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
 
         for channel in self.channels: 
             channel.sequence_start_time_secs  = sequence_start_time_secs
@@ -685,11 +698,11 @@ class RadarHardwareManager:
             if channel.scanManager.endOfScan:
                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               channel.next_processing_state = CS_INACTIVE
+               channel.processing_state = CS_INACTIVE
             else:
                cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               channel.next_processing_state = CS_READY
+               channel.processing_state = CS_READY
 
             cmd.transmit()
             cmd.client_return()      
@@ -739,16 +752,22 @@ class RadarHardwareManager:
         self.logger.debug('end CUDA_PROCESS')
 
         # repeat CLR_FREQ record for 2nd period (if executed for 1st)
-        for ch,iChannel in enumerate( self.channels):
-           if ch.scanManager.repeat_clrfrq_recording:
-              self.next_active_state = self.active_state 
+        for iChannel,ch in enumerate( self.channels):
+           print(ch.scanManager.current_period )
+           if ch.scanManager.repeat_clrfreq_recording:
+              self.next_active_state = CS_TRIGGER 
               self.active_state      = CS_CLR_FREQ 
-              ch.scanManager.repeat_clrfrq_recording = False 
+              ch.scanManager.repeat_clrfreq_recording = False 
               self.logger.debug("Repeat reset state of {}. channel to CLR_FREQ (from {}) for second period".format(iChannel, self.next_active_state))
+
+           elif ch.scanManager.current_period == 1:  # first period but no CLR_FREQ
+              self.logger.debug('setting active state to CS_TRIGGER to start second period')
+              self.active_state = CS_TRIGGER 
+              
         
 
     def next_period_RHM(self):
-        self.clearFreqRawDatamanager.period_finished()
+        self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
            if ch is not None:
               ch.scanManager.period_finished()
@@ -922,20 +941,24 @@ class RadarChannelHandler:
                 break
 
     
-    def update_ctrlprm_class(self, sequence):
-        if sequence == "current":
+    def update_ctrlprm_class(self, period):
+        if len(self.scanManager.scan_beam_list) == 0:
+           self.logger.warning("scan_beam_list is empty. unable to update ctrlprm_class!")
+           return
+
+        if period == "current":
            beam = self.scanManager.current_beam
-           freq = self.scnaManager.get_current_clearFreq_result()[0]
-        elif sequence == "next":
+           freq = self.scanManager.get_current_clearFreq_result()[0]
+        elif period == "next":
            beam = self.scanManager.next_beam
-           freq = self.scnaManager.get_next_clearFreq_result()[0]
+           freq = self.scanManager.get_next_clearFreq_result()[0]
         else:
-            self.logger.error("unknown sequence specifier: {} (valid: current or next )".) 
+            self.logger.error("unknown period specifier: {} (valid: current or next )".format(period)) 
        
         parNameList  = ['rbeam', 'tbeam', 'rfreq', 'tfreq'] 
         parValueList = [ beam  ,  beam  ,  freq  ,  freq  ]
      
-        for par, iPar in parNameList:
+        for iPar, par in enumerate(parNameList):
            self.ctrlprm_struct.set_data(par, parValueList[iPar])
            self.ctrlprm_struct.payload[par] = parValueList[iPar]
 
@@ -972,7 +995,7 @@ class RadarChannelHandler:
     def PingHandler(self, rmsg):
         return RMSG_SUCCESS
     
-    @timeit
+    #@timeit
     def RequestAssignedFreqHandler(self, rmsg):
       ##  # wait for clear frequency search to end, hardware manager will set channel state to WAIT
       ##  self._waitForState(STATE_WAIT) 
@@ -984,7 +1007,7 @@ class RadarChannelHandler:
         self.logger.info('clr frequency search raw data age: {} s'.format(time.time() - clrFreqResult[2]))
         return RMSG_SUCCESS
 
-    @timeit
+    #@timeit
     def RequestClearFreqSearchHandler(self, rmsg):
         self._waitForState(self.swingManager.activeSwing, [CS_READY, CS_INACTIVE]) 
         self.clrfreq_struct.receive(self.conn)
@@ -1003,14 +1026,14 @@ class RadarChannelHandler:
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
         self._waitForState(self.swingManager.activeSwing, CS_READY)
-        transmit_dtype(self.conn, self.pulse_sequences_per_integration_period, np.uint32) # TODO mgu transmit here nSeq ?
+        transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?
         self.active_state = CS_TRIGGER
         # send trigger command
         self.ready = True
 #       self._waitForState(STATE_WAIT) # TODO now in new swing design, right?
         return RMSG_SUCCESS
     
-    @timeit
+    #@timeit
     def RegisterSeqHandler(self, rmsg):
         # function to get the indexes of rising edges going from zero to a nonzero value in array ar
 
@@ -1121,7 +1144,7 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
     
     # receive a ctrlprm struct
-    @timeit
+    #@timeit
     def SetParametersHandler(self, rmsg):
         # TODO new design:
         # - for first run, set part
@@ -1131,17 +1154,19 @@ class RadarChannelHandler:
 
         # TODO: check if new freq is possible with usrp_centerFreq
         
-        isFirstSequence = self.scanManager.period == 0 # TODO is this definition the same as active_state is CS_INACTIVE ???
+        isFirstSequence = self.scanManager.current_period == 0 # TODO is this definition the same as active_state is CS_INACTIVE ???
 
         if not isFirstSequence:
            self.update_ctrlprm_class("next")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
         self.ctrlprm_struct.receive(self.conn)
+        self.CheckChannelCompatibility()
        
         if self.active_state is CS_INACTIVE:
             channel = self
             RHM = self.parent_RadarHardwareManager
+            RHM._calc_period_details()  
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
             self.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
@@ -1155,6 +1180,8 @@ class RadarChannelHandler:
             cmd.transmit()
             cmd.client_return()
             self.logger.debug('received response CUDA_GENERATE_PULSE')
+
+            channel.active_state = CS_READY
        
         # compare received paramter with predicted parameter
         if not isFirstSequence:
@@ -1246,14 +1273,14 @@ class RadarChannelHandler:
 
 
     # send ctrlprm struct
-    @timeit
+    #@timeit
     def GetParametersHandler(self, rmsg):
         # TODO: return bad status if negative radar or channel
         self.update_ctrlprm_class("current")
         self.ctrlprm_struct.transmit()
         return RMSG_SUCCESS
     
-    @timeit
+    #@timeit
     def GetDataHandler(self, rmsg):
         self.logger.debug('entering channelHanlder:GetDataHandler')
         self.update_ctrlprm_class("current")
@@ -1308,7 +1335,7 @@ class RadarChannelHandler:
 #        self.ctrlprm_struct.transmit()
     
         # send back samples with pulse start times 
-        for sidx in range(self.pulse_sequences_per_integration_period):
+        for sidx in range(self.nSequences_per_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
             
             transmit_dtype(self.conn, self.sequence_start_time_secs[sidx],  np.uint32)
@@ -1328,7 +1355,7 @@ class RadarChannelHandler:
 
 
     
-    @timeit
+    #@timeit
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
