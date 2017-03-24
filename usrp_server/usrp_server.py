@@ -248,7 +248,7 @@ class RadarHardwareManager:
                             ch.active_state = ch.next_active_state # TODO good practice would be to change next_active_state, but to what?
 
                             # if CLR_FREQ has been requested for the 1st period, repeat it for the 2nd (automatically tiggered sequence)
-                            if ch.active_state is CS_INIT:
+                            if ch.active_state == CS_INIT:
                                ch.scanManager.repeat_clrfreq_recording = True 
                     
 
@@ -261,10 +261,10 @@ class RadarHardwareManager:
                     self.next_state = RSM_WAIT
                     # wait for all channels to be in TRIGGER state
                     for ch in self.channels:
-                        if  ch.active_state is not CS_TRIGGER:
-                            if ch.active_state is CS_CLR_FREQ:
-                                sm_logger.info('setting state back to {} from {}'.format(ch.active_state, self.state))
-                                self.next_state = ch.state
+                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
+                            if ch.active_state == CS_CLR_FREQ:
+                                sm_logger.info('setting state back to RSM_CLR_FREQ from RSM_TRIGGER')
+                                self.next_state = RSM_CLR_FREQ
                             else:
                                 sm_logger.debug('remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.active_state))
                                 time.sleep(sleepTime)
@@ -623,9 +623,9 @@ class RadarHardwareManager:
 
         # set state of channel to CS_PROCESSING
         for ch in self.channels:
-            if ch.active_state is CS_READY:
-               ch.active_stae = CS_PROCESSING
-
+            if ch.active_state == CS_TRIGGER:
+               ch.active_state = CS_PROCESSING
+               ch.logger.debug("Changing active channel state to CS_PROCESSING (cnum: {}, swing {})".format(ch.cnum, self.swingManager.activeSwing))
         self.logger.debug('waiting for trigger return')
         returns = cmd.client_return()
 
@@ -645,8 +645,10 @@ class RadarHardwareManager:
             cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
             cmd.transmit()
 
-            main_samples = np.zeros((nChannels, nMainAntennas, nSamples_bb), dtype=np.complex64)
-            back_samples = np.zeros((nChannels, nBackAntennas, nSamples_bb),dtype=np.complex64 )
+            # TODO get this from somewhere else
+            nMainAntennas = 16
+            nBackAntennas = 4
+            main_samples = None
 
             for cudasock in self.cudasocks:
                 nAntennas = recv_dtype(cudasock, np.uint32)
@@ -658,6 +660,10 @@ class RadarHardwareManager:
                         for iAntenna in range(nAntennas):
                             antIdx = recv_dtype(cudasock, np.uint16)
                             nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
+                            if main_samples is None:
+                               main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
+                               back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
+
 
                             self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
                             time.sleep(.1)
@@ -677,17 +683,18 @@ class RadarHardwareManager:
             self.logger.debug('end get_data() transfering rx data via socket')
 
             # BEAMFORMING
-            beamformed_samples      = calc_beamforming(self.channels, main_samples, back_samples)
+            beamformed_samples      = self.calc_beamforming( main_samples, back_samples)
             for iChannel, channel in enumerate(self.channels):
-               if channel.processingState is CS_PROCESSING:
+               if channel.processing_state is CS_PROCESSING:
                   # copy samples and ctrlprm to transmit later to control program
                   channel.main_beamformed          = beamformed_samples[iChannel]
                   channel.update_ctrlprm_class("current")
-                  channel.ctrlprm_data_for_results = self.ctrlprm_struct.dataqueue
+                  channel.ctrlprm_data_for_results = channel.ctrlprm_struct.dataqueue
 
                   channel.processing_state = CS_SAMPLES_READY
                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_SAMPLES_READY".format(self.swingManager.processingSwing, channel.cnum )) 
-                  channel.swingManager.lastSwingWithData = swingManager.processingSwing 
+               # this is too late. GetDataHandler has already read this variable
+               #  channel.swingManager.lastSwingWithData = channel.swingManager.processingSwing 
 
 
 
@@ -704,8 +711,12 @@ class RadarHardwareManager:
             else:
                cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               channel.next_processing_state = CS_READY
-               channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum )) 
+               if channel.processing_state == CS_INACTIVE: # first use of swing 1
+                   channel.processing_state = CS_READY
+                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
+               else: 
+                   channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
+                   channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum )) 
             cmd.transmit()
             cmd.client_return()      
  
@@ -784,22 +795,23 @@ class RadarHardwareManager:
     # BEAMFORMING
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
+        nSamples = main_samples.shape[2]
         beamformed_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
     
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
                 bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
-                clrFreqResult = channel.scanManager.get_current_clrFreq_result()
-                pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., self.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+                clrFreqResult = channel.scanManager.get_current_clearFreq_result()
+                pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
     
-                phasingMatrix = np.array([rad_to_rect(a * pshift) for a in self.antenna_index_list])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.array([rad_to_rect(a * pshift) for a in RHM.antenna_index_list])  # calculate a complex number representing the phase shift for each antenna
                #phasingMatrix_back = np.ones(len(MAIN_ANTENNAS))
     
                 for iSample in range(nSamples):
                     itemp = 0
                     qtemp = 0
     
-                    for iAntenna in range(len(antenna_index_list)):
+                    for iAntenna in range(len(RHM.antenna_index_list)):
                        itemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna]) - np.imag(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna])
                        qtemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna]) + np.imag(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna])
                     beamformed_samples[iChannel][iSample] = complex_int32_pack(itemp, qtemp)
@@ -935,10 +947,11 @@ class RadarChannelHandler:
             state = [state]
 
         wait_start = time.time()
-
+        counter = 0
         while self.state[swing] not in state:
-            if state == CS_SAMPLES_READY:
-               self.logger.debug("_waitForState CS_SAMPLES_READY. state is {}".format(self.state[swing]))
+            counter = (counter + 1) % 10000
+            if state[0] == CS_SAMPLES_READY and counter == 1:
+               self.logger.debug("_waitForState CS_SAMPLES_READY. state is {} (swing {})".format(self.state[swing], swing))
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT')
@@ -1020,6 +1033,7 @@ class RadarChannelHandler:
         # request clear frequency search time from hardware manager
         self.next_active_state = self.active_state 
         self.active_state      = CS_CLR_FREQ
+        self.logger.debug("RequestClearFreqSearchHandler: setting active state: {} and next active state {}".format(self.active_state, self.next_active_state))        
 
         return RMSG_SUCCESS
 
@@ -1031,7 +1045,8 @@ class RadarChannelHandler:
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
         self._waitForState(self.swingManager.activeSwing, CS_READY)
-        transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?
+        transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
+        self.logger.debug("SetReadyFlagHandler: setting active channel state (swing {}) to CS_TRIGGER".format(self.swingManager.activeSwing))
         self.active_state = CS_TRIGGER
         # send trigger command
         self.ready = True
@@ -1191,7 +1206,7 @@ class RadarChannelHandler:
         # compare received paramter with predicted parameter
         if not isFirstSequence:
            for key in ctrlprm_old.keys():
-              if ctrlprm_old[key] != self.ctrlprm_struct.payload[key]:
+              if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
                  self.logger.error("received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
 
 ##        self._waitForState(STATE_WAIT)
@@ -1307,8 +1322,11 @@ class RadarChannelHandler:
         self.logger.debug('channelHanlder:GetDataHandler returning samples')
         self.send_results_to_control_program()
 
-        self.state[finshedSwing] = self.next_swing[finishedSwing]
+        self.logger.debug('channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.next_state[finishedSwing], finishedSwing))
+        self.state[finishedSwing] = self.next_state[finishedSwing]
         self.logger.debug('end channelHanlder:GetDataHandler')
+
+        self.swingManager.lastSwingWithData = 1 - finishedSwing   # alternate swing
 
         return RMSG_SUCCESS
 
