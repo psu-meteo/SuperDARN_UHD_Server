@@ -41,3 +41,23 @@ def calc_phase_increment(bmazm, tfreq, x_spacing):
 def calc_beamforming_phase_rect(antenna, pshift):
     beamforming_phase = rad_to_rect(antenna * pshift)
     return beamforming_phase
+
+def beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas, pack_uint32):
+    beamformed_samples = np.ones(n_samples)
+
+    for i in range(n_samples):
+        itemp = np.int16(0)
+        qtemp = np.int16(0)
+
+        for aidx in range(len(antennas)):
+            itemp += np.real(samples[aidx][i]) * np.real(phasing_matrix[aidx]) - \
+                np.imag(samples[aidx][i]) * np.imag(phasing_matrix[aidx])
+            qtemp += np.real(samples[aidx][i]) * np.imag(phasing_matrix[aidx]) + \
+                np.imag(samples[aidx][i]) * np.real(phasing_matrix[aidx])
+        if pack_uint32:
+            beamformed_samples[i] = complex_int32_pack(itemp, qtemp)
+        else:
+            beamformed_samples[i] = itemp + 1j * qtemp
+
+    return beamformed_samples
+

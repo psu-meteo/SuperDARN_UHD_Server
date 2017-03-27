@@ -49,6 +49,32 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
+def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, clear_freq_range, beam_angle, restricted_frequencies):
+    # apply phasing
+    pdb.set_trace()
+    phasing_matrix = 0 # TODO
+    num_samples = 0 # TODO
+    antennas = [0] # TODO
+    beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
+
+    # apply spectral estimation (takes about 20-40 ms)
+    spectrum_power = fft_clrfreq_samples(raw_samples)
+   
+    # mask restricted frequencies
+    if restricted_frequencies:
+        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+    
+    # TODO: calculate these from sample_meta_data 
+    fstart_actual = 10.5e6  
+    fstop_actual =  15.5e6
+
+    # search for clear frequency(s) 
+    spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
+    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
+
+    return tfreq, noise
+
+# stale clear frequency search, used before we added in proper swing buffer support..
 def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_number, tbeam_width_deg, nBeams, x_spacing):
     dbPrint("enter clrfreq_search")
     # unpack clear frequency search parameters
@@ -171,15 +197,16 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     clrfreq_cmd = usrp_clrfreq_command(usrp_sockets, num_clrfreq_samples, clrfreq_time, center_freq, clrfreq_rate_requested)
     clrfreq_cmd.transmit()
 
-    # grab raw samples, apply beamforming
+    # grab raw samples
     for usrpsock in usrp_sockets:
         output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
         clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
         assert clrfreq_rate_actual == clrfreq_rate_requested
         samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
         output_samples_list.append( samples[0::2] + 1j * samples[1::2])
-        
+    
     clrfreq_cmd.client_return()
+
     return output_samples_list, output_antenna_idx_list
 
 def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):
@@ -193,7 +220,7 @@ def grab_usrp_clrfreq_samples(usrp_sockets, num_clrfreq_samples, center_freq, cl
     
     clrfreq_rate_actual = 0
   
-    usrptime  = gettime_cmd.recv_time(usrp_sockets[0])
+    usrptime = gettime_cmd.recv_time(usrp_sockets[0])
 
     gettime_cmd.client_return()
 
