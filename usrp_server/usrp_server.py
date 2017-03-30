@@ -65,7 +65,7 @@ CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
-    def __init__(self):
+    def __init__(self, antenna_spacing):
         self.rawData    = None
         self.recordTime = None
 
@@ -76,34 +76,38 @@ class clearFrequencyRawDataManager():
         self.sampling_rate = None
         self.number_of_samples = None
     
-        self.metaData = None
+        self.metaData = {}
         self.rawData = None
-        self.antennaList = None
+        
+        self.metaData['x_spacing'] = antenna_spacing 
+
 
     def set_usrp_driver_connections(self, usrp_driver_socks):
         self.usrp_socks = usrp_driver_socks
     
     def set_clrfreq_search_span(self, center_freq, clrfreq_sampling_rate, number_of_clrfreq_samples):
         self.center_freq = center_freq
+
         self.sampling_rate = clrfreq_sampling_rate
         self.number_of_samples = number_of_clrfreq_samples
 
+        self.metaData['usrp_fcenter'] = self.center_freq 
+        self.metaData['number_of_samples'] = self.number_of_samples 
+        self.metaData['usrp_rf_rate'] = self.sampling_rate 
+
     def period_finished(self):
         self.raw_data_available_from_this_period = False
-    
+   
     def record_new_data(self):
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
         self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
+        self.metaData['antenna_list'] = self.antenna_list
 
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
 
-    # self.metaData is information for beamforming 
-    # what metaData?
-    # n samples, antennas, phasing matrix
-    # beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas):
     def get_raw_data(self):
         if self.rawData is None or not self.raw_data_available_from_this_period:
            self.record_new_data()
@@ -132,7 +136,7 @@ class scanManager():
         created for each RadarChannelHandler """
         
 
-    def __init__(self, restricted_frequency_list):
+    def __init__(self, restricted_frequency_list, beamSep, numBeams):
         self.scan_beam_list        = None # populated in SetActiveHandler
         self.clear_freq_range_list = None # populated in SetActiveHandler
         
@@ -142,13 +146,16 @@ class scanManager():
         self.current_period = 0
         self.endOfScan = False
         self.repeat_clrfreq_recording = False # 2nd period is triggered automatically before ROS finishes 1st. if CLR_FRQ was requested for 1st => also do record on 2nd
-       
+        
+        self.beamSep = beamSep
+        self.numBeams = numBeams
+
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
 
         self.restricted_frequency_list = restricted_frequency_list
-   
+  
     def update_freq_list(self, freq_range_list):
         # update the clear freq range list
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
@@ -201,8 +208,7 @@ class scanManager():
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
-        beam_angle = beamNo * 3.6 # TODO: calculate beam angle
-        print("  TODO: calculate beam angle properly!")
+        beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
         return (clearFreq, noise)
     
@@ -226,9 +232,11 @@ class RadarHardwareManager:
         self.cuda_init()
 
         self.nRegisteredChannels = 0
-        self.clearFreqRawDataManager = clearFrequencyRawDataManager()
+        self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpsocks)
         self.clearFreqRawDataManager.set_clrfreq_search_span(self.usrp_rx_cfreq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+
+
         self.swingManager            = swingManager()
 
     def run(self):
@@ -876,7 +884,7 @@ class RadarChannelHandler:
         self.channelScalingFactor = 0
         self.cnum = 'unknown'
 
-        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE))
+        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.array_beam_sep, self.array_n_beams)
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
 
