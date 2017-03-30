@@ -281,7 +281,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_remove_channel_command([self.sock])
         cmd.receive(self.sock)
-        swing = cmp.payload['swing']
+        swing = cmd.payload['swing']
 
         sequence = cmd.sequence
         channelNumber = sequence.ctrlprm['channel']
@@ -463,6 +463,9 @@ class ProcessingGPU(object):
         # number of taps for baseband and if filters
         self.ntaps_rfif = int(ntapsrx_rfif)
         self.ntaps_ifbb = int(ntapsrx_ifbb)
+
+        if (self.ntaps_rfif % 2) != 0:
+            ValueError("Number of filter taps for rf=>if has to be even number! (NTapsRX_rfif in driver_config.ini)")
 
         # rf to if downsampling ratio 
         self.rx_rf2if_downsamplingRate = int(rfifrate)

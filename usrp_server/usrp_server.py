@@ -71,7 +71,7 @@ class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
     def __init__(self):
-        self.rawData    = None
+        self.rawData    = NoneIT
         self.recordTime = None
         self.metaData   = None
         self.raw_data_available_from_this_period = False
@@ -126,7 +126,7 @@ class scanManager():
         self.current_clrFreq_result = self.next_clrFreq_result
         self.next_clrFreq_result = None
         self.current_period += 1
-        if self.current_period >= len(self.scan_beam_list):
+        if self.current_period >= len(self.scan_beam_list) - 1:
             self.endOfScan = True
         
     def status(self):
@@ -158,7 +158,8 @@ class scanManager():
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
         rawData, metaData, recordTime = self.get_clr_freq_raw_data()
-        clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.clear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1 
+        clearFreq, noise = oh_jonny_calc_the_frequency(rawData, metaData, self.clear_freq_range_list[iPeriod], beamNo) #self.scan_clrFreq_range_list[iPeriod]+1
+        print("clear freq result for beam {} (period {}): {} kHz, noise: {} (search freq: {} range {})".format(beamNo, iPeriod, clearFreq, noise, self.clear_freq_range_list[iPeriod][0], self.clear_freq_range_list[iPeriod][1] )) 
         return [clearFreq, noise, recordTime ]
     
     
@@ -331,6 +332,8 @@ class RadarHardwareManager:
         self.ini_rxfe_settings  = array_config['rxfe']
         self.totalScalingFactor = float(array_config['gain_control']['total_scaling_factor'])
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
+        self.nMainAntennas   = int(  self.ini_array_settings['main_ants'] )
+        self.nBackAntennas   = int(  self.ini_array_settings['back_ants'] )
         self.array_nBeams    = int(  self.ini_array_settings['nbeams'] )
         self.array_x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
 
@@ -443,7 +446,6 @@ class RadarHardwareManager:
     def cuda_init(self):
         #time.sleep(.05)
 
-        self.tx_upsample_rate = int(self.ini_cuda_settings['TXUpsampleRate']) # TODO: delete because unused
         # connect cuda_driver servers
         cuda_driver_socks = []
 
@@ -645,9 +647,8 @@ class RadarHardwareManager:
             cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
             cmd.transmit()
 
-            # TODO get this from somewhere else
-            nMainAntennas = 16
-            nBackAntennas = 4
+            nMainAntennas = self.nMainAntennas
+            nBackAntennas = self.nBackAntennas
             main_samples = None
 
             for cudasock in self.cudasocks:
@@ -704,7 +705,7 @@ class RadarHardwareManager:
         # CUDA_ADD & CUDA_GENGERATE for processingSwing 
         for channel in self.channels:
             if channel.scanManager.endOfScan:
-               cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+               cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
                channel.next_processing_state = CS_INACTIVE
                channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_INACTIVE".format(self.swingManager.processingSwing, channel.cnum )) 
@@ -1050,7 +1051,7 @@ class RadarChannelHandler:
         self.active_state = CS_TRIGGER
         # send trigger command
         self.ready = True
-#       self._waitForState(STATE_WAIT) # TODO now in new swing design, right?
+
         return RMSG_SUCCESS
     
     #@timeit
@@ -1166,11 +1167,6 @@ class RadarChannelHandler:
     # receive a ctrlprm struct
     #@timeit
     def SetParametersHandler(self, rmsg):
-        # TODO new design:
-        # - for first run, set part
-        # - compare parameter with active swing
-        #    what to do they are not equal?
-        # - does not affect state, right?
 
         # TODO: check if new freq is possible with usrp_centerFreq
         
@@ -1186,7 +1182,18 @@ class RadarChannelHandler:
         if self.active_state is CS_INACTIVE:
             channel = self
             RHM = self.parent_RadarHardwareManager
-            RHM._calc_period_details()  
+            RHM._calc_period_details() 
+
+            allOtherChannels = [ch for ch in RHM.channels if ch is not self]
+            if len(allOtherChannels) == 0:
+                self.logger.info("This is first channel. Adding channel.")
+            else:
+                self.logger.info("This is {}. channel. Waiting to add channel.".format(len(allOtherChannels)+1))
+                for otherChannel in allOtherChannels:
+                    otherChannel._waitFor(0, [CS_INACTIVE, CS_READY, CS_SAMPELS_READY, CS_CLR])
+                    self.logger.debug("Channel {} is {}".format(otherChannel.cnum, otherChannel.active_state))
+                self.logger.debug("Finished waiting. Adding channel...")
+            
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
             self.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
