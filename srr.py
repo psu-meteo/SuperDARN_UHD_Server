@@ -7,6 +7,7 @@
 
 #  TODO:
 # restart is processes already running?
+# get all differnt call types "python3 cuda_driver.py" ".../python3 ./cuda_driver.py"
 
 import sys
 import os
@@ -22,9 +23,13 @@ import signal
 
 # TODO: get from config
 CUDADriverPort = 55420
-USRPDriverPort = 54420
 CUDA_EXIT = ord('e')
+
+USRPDriverPort = 54420
 UHD_EXIT = ord('e')
+
+USRP_SERVER_PORT = 45000
+USRP_SERVER_QUIT  = '.'
 
 
 basePath = os.path.dirname(os.path.realpath(__file__))
@@ -40,6 +45,15 @@ print(basePrintLine)
 myPrint(" ")
 
 
+def waitFor(nSeconds):
+   print("||> Waiting for {} second(s): ".format(nSeconds), end="", flush=True)
+   for i in range(nSeconds):
+      print('.', end="", flush=True)
+      time.sleep(1)
+   else:
+      print
+
+
 ######################
 ## Processes:
 
@@ -51,7 +65,7 @@ def get_processes():
    return processList
 
 def print_status():
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "/usr/bin/python3 ./usrp_server"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan"]
     processList = get_processes()
     srrProcesses = []
     for line in processList:
@@ -161,15 +175,18 @@ def get_cuda_driver_processes():
         wordList = [word for word in line.split(" " ) if word != ""]
         if len(wordList):
            commandString = " ".join(wordList[10:])
-           if commandString.startswith("/usr/bin/python3 ./cuda_driver.py" ):
+           print(commandString)
+           if commandString in ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]:
               cudaProcesses.append(dict(pid=int(wordList[1]) ))
     return cudaProcesses
 
 def get_process_ids(processShortName):
     if processShortName == "cuda":
-       processMatchString = "/usr/bin/python3 ./cuda_driver.py" 
+       processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
+       nWords = 2 
     elif processShortName == "usrp_server":
-       processMatchString = "/usr/bin/python3 ./usrp_server.py"
+       processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
+       nWords = 2
     else:
        ValueError("unknown process short name {}".format(processShortName))
      
@@ -178,8 +195,8 @@ def get_process_ids(processShortName):
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
         if len(wordList):
-           commandString = " ".join(wordList[10:])
-           if commandString.startswith(processMatchString ):
+           commandString = " ".join(wordList[10:11+nWords])
+           if commandString in processMatchString:
               cudaProcesses.append(dict(pid=int(wordList[1]) ))
     return cudaProcesses
 
@@ -199,6 +216,21 @@ def stop_cuda_driver():
     else:
        myPrint("  No cuda_driver processes found...")
     
+def stop_usrp_server():
+    myPrint(" Stopping usrp_server...")
+    serverProcesses = get_process_ids("usrp_server")
+    if len(serverProcesses):
+       for process in serverProcesses:
+            myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect(('localhost',USRP_SERVER_PORT))
+            sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
+        
+       time.sleep(1)
+       # terminate processes if they still exis
+       terminate_all(serverProcesses)
+    else:
+       myPrint("  No usrp_server processes found...")
     
     
 
@@ -248,6 +280,12 @@ def start_usrp_server():
     subprocess.Popen(['./usrp_server.py' ])
     os.chdir(basePath)
 
+def start_uafscan_fixfreq():
+    myPrint("Starting uafscan fixfreq...")
+#    os.chdir(os.path.join(basePath, "usrp_server") )   
+    subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000', '--debug' ])
+#    os.chdir(basePath)
+
 
 
 
@@ -283,12 +321,16 @@ else:
          start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          start_usrp_server()
+      elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
+         start_uafscan_fixfreq()
       else:
          myPrint("unknown process to start")
 
    elif firstArg == "restart":
       if nArguments == 1 or inputArg[1].lower == "all":
          myPrint("Restarting all...")
+         stop_usrp_server()
+         waitFor(2)
          stop_usrp_driver()
          stop_cuda_driver()
          myPrint("waiting for {} sec".format(nSecs_restart_pause))
@@ -296,21 +338,29 @@ else:
          start_cuda_driver()
          start_usrp_driver()
 #         start_usrp_server()
+
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
          myPrint("waiting for {} sec".format(nSecs_restart_pause))
          time.sleep(nSecs_restart_pause)
          start_usrp_driver()
+
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()
          start_cuda_driver()
+
       elif inputArg[1].lower() == "driver":
+         stop_usrp_server() # this does not work....
+         waitFor(2)
          stop_usrp_driver()
          stop_cuda_driver()
+         waitFor(nSecs_restart_pause)
          start_cuda_driver()
          start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
+         stop_usrp_server()
          start_usrp_server()
+
       else:
          myPrint("unknown process to restart")
 
@@ -318,12 +368,17 @@ else:
    elif firstArg == "stop":
       if nArguments == 1 or inputArg[1].lower == "all":
          myPrint("Stopping all...")
-         stop_usrp_driver()
+         stop_usrp_server()
+         time.sleep(1)
          stop_cuda_driver()
+         time.sleep(2)
+         stop_usrp_driver()
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()
       elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
          stop_cuda_driver()
+      elif inputArg[1].lower() in ["usrp_server", "server"]:
+         stop_usrp_server()
       elif inputArg[1].lower() == "driver":
          stop_usrp_driver()
          stop_cuda_driver()

@@ -13,7 +13,7 @@
 
 from drivermsg_library import *
 from rosmsg import *
-from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect
+from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, beamform_uhd_samples
 from radar_config_constants import *
 import matplotlib.pyplot as plt
 import numpy as np
@@ -50,11 +50,20 @@ def read_restrict_file(restrict_file):
     return restricted_frequencies; 
 
 def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, clear_freq_range, beam_angle, restricted_frequencies):
-    # apply phasing
-    pdb.set_trace()
-    phasing_matrix = 0 # TODO
-    num_samples = 0 # TODO
-    antennas = [0] # TODO
+    # unpack meta data 
+    antennas = sample_meta_data['antenna_list']
+    num_samples = sample_meta_data['number_of_samples']
+    tfreq = np.mean(clear_freq_range)
+    x_spacing = sample_meta_data['x_spacing']
+
+    usrp_center_freq = sample_meta_data['usrp_fcenter']
+    usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
+
+    # calculate phasing matrix 
+    phase_increment = calc_phase_increment(beam_angle, tfreq, x_spacing)
+    phasing_matrix = [rad_to_rect(ant * phase_increment ) for ant in antennas]
+
+    # apply beamforming 
     beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
 
     # apply spectral estimation (takes about 20-40 ms)
@@ -63,13 +72,15 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, clear_freq_ran
     # mask restricted frequencies
     if restricted_frequencies:
         spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
-    
-    # TODO: calculate these from sample_meta_data 
-    fstart_actual = 10.5e6  
-    fstop_actual =  15.5e6
-
-    # search for clear frequency(s) 
+   
+    # calculate spectrum range of rf samples given sampling rate and center frequency
+    fstart_actual = usrp_center_freq - usrp_sampling_rate / 2.0 
+    fstop_actual = usrp_center_freq + usrp_sampling_rate / 2.0 
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
+
+    # search for a clear frequency within the given frequency range
+    fstart = np.min(clear_freq_range)
+    fstop = np.max(clear_freq_range)
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
 
     return tfreq, noise
@@ -176,7 +187,7 @@ def fft_clrfreq_samples(samples):
     power_spectrum = np.fft.fftshift(np.abs(np.fft.fft(samples, norm = 'ortho')) ** 2)
     return power_spectrum 
 
-def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested, pshift_per_antenna):
+def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested):
     dbPrint("enter record_clrfreq_raw_samples")
     output_samples_list     = []
     output_antenna_idx_list = []
@@ -202,7 +213,7 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
         output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
         clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
         assert clrfreq_rate_actual == clrfreq_rate_requested
-        samples = recv_dtype(usrpsock, np.int16, 2 * num_clrfreq_samples)
+        samples = recv_dtype(usrpsock, np.int16, 2 * int(num_clrfreq_samples))
         output_samples_list.append( samples[0::2] + 1j * samples[1::2])
     
     clrfreq_cmd.client_return()

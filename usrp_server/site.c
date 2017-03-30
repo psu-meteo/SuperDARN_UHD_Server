@@ -556,12 +556,18 @@ int SiteRosSetupRadar() {
 }
 
 
-int SiteRosStartScan() {
+int SiteRosStartScan(int periods_per_scan, int *scan_beam_list, int *clrfreq_fstart_list, int *clrfreq_bandwidth_list) {
     struct ROSMsg smsg,rmsg;
-    smsg.type=SET_ACTIVE;
-    TCPIPMsgSend(sock, &smsg, sizeof(struct ROSMsg));
-    TCPIPMsgRecv(sock, &rmsg, sizeof(struct ROSMsg));
+    smsg.type=SET_ACTIVE; /* set active only used in SiteRosStartScan */
 
+    TCPIPMsgSend(sock, &smsg, sizeof(struct ROSMsg));
+    
+    TCPIPMsgSend(sock, &periods_per_scan, sizeof(int));    /* start frequency of clrfreq */
+    TCPIPMsgSend(sock, &clrfreq_fstart_list, periods_per_scan * sizeof(int));    /* start frequency of clrfreq */
+    TCPIPMsgSend(sock, &clrfreq_bandwidth_list, periods_per_scan * sizeof(int));    /* bandwidth of clrfreq in hertz */
+    TCPIPMsgSend(sock, &scan_beam_list, periods_per_scan * sizeof(int));    /* start frequency of clrfreq */
+    
+    TCPIPMsgRecv(sock, &rmsg, sizeof(struct ROSMsg));
     return 0;
 }
 
@@ -1496,11 +1502,6 @@ int SiteRosEndScan(int bsc,int bus) {
         SiteRosExit(0);
         gettimeofday(&tick,NULL);
     }
-    /*
-       smsg.type=SET_ACTIVE;
-       TCPIPMsgSend(sock, &smsg, sizeof(struct ROSMsg));
-       TCPIPMsgRecv(sock, &rmsg, sizeof(struct ROSMsg));
-       */
     return 0;
 }
 
