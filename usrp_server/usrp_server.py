@@ -45,7 +45,7 @@ CHANNEL_STATE_TIMEOUT = 12000
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 nSwings = 2 
 
-debug = True
+debug = 100
 
 # states for Radar State Machine (of RadarHardwareManager) 
 RSM_WAIT     = 'RADAR_STATE_MACHINE_WAIT'
@@ -102,7 +102,7 @@ class clearFrequencyRawDataManager():
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
         self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
-        self.metaData['antenna_list'] = self.antenna_list
+        self.metaData['antenna_list'] = self.antennaList
 
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
@@ -884,7 +884,7 @@ class RadarChannelHandler:
         self.channelScalingFactor = 0
         self.cnum = 'unknown'
 
-        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.array_beam_sep, self.array_n_beams)
+        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager.array_beam_sep, self.parent_RadarHardwareManager.array_nBeams)
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
 

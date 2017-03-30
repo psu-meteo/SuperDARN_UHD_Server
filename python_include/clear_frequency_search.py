@@ -49,7 +49,7 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, clear_freq_range, beam_angle, restricted_frequencies):
+def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle):
     # unpack meta data 
     antennas = sample_meta_data['antenna_list']
     num_samples = sample_meta_data['number_of_samples']
@@ -61,23 +61,23 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, clear_freq_ran
 
     # calculate phasing matrix 
     phase_increment = calc_phase_increment(beam_angle, tfreq, x_spacing)
-    phasing_matrix = [rad_to_rect(ant * phase_increment ) for ant in antennas]
+    phasing_matrix = [rad_to_rect(ant * phase_increment) for ant in antennas]
 
     # apply beamforming 
     beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
 
-    # apply spectral estimation (takes about 20-40 ms)
-    spectrum_power = fft_clrfreq_samples(raw_samples)
-   
-    # mask restricted frequencies
-    if restricted_frequencies:
-        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+    # apply spectral estimation (takes about 20-40 ms) TODO: why [0]?
+    spectrum_power = fft_clrfreq_samples(raw_samples)[0]
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
     fstart_actual = usrp_center_freq - usrp_sampling_rate / 2.0 
     fstop_actual = usrp_center_freq + usrp_sampling_rate / 2.0 
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
-
+ 
+    # mask restricted frequencies
+    if restricted_frequencies:
+        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+  
     # search for a clear frequency within the given frequency range
     fstart = np.min(clear_freq_range)
     fstop = np.max(clear_freq_range)
@@ -156,6 +156,7 @@ def clrfreq_search(clrfreq_struct, usrp_sockets, restricted_frequencies, tbeam_n
     return tfreq, noise
 
 def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies):
+    import pdb
     for freq in restricted_frequencies:
         restricted_mask = np.logical_and(spectrum_freqs > freq[0], spectrum_freqs < freq[1])
         spectrum_power[restricted_mask] = RESTRICTED_POWER
@@ -176,6 +177,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     spectrum_freqs = spectrum_freqs[usable_mask]
 
     # find lowest power channel
+    pdb.set_trace()
     clrfreq_idx = np.argmin(channel_power) 
     
     clrfreq = spectrum_freqs[clrfreq_idx]
