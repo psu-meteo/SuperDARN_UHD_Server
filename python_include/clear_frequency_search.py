@@ -72,7 +72,6 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     # calculate spectrum range of rf samples given sampling rate and center frequency
     fstart_actual = usrp_center_freq - usrp_sampling_rate / 2.0 
     fstop_actual = usrp_center_freq + usrp_sampling_rate / 2.0 
-    pdb.set_trace()
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
  
     # mask restricted frequencies
@@ -172,8 +171,8 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     channel_filter = np.ones(clear_bw / CLRFREQ_RES)
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
     
+    return 13100, 10 # hardcocde clrfreq return
     print("TODO: why is fstart 10 MHz?")
-    pdb.set_trace()
     # mask channel power spectrum to between fstart and fstop
     usable_mask = (spectrum_freqs > fstart) * (spectrum_freqs < fstop)
     channel_power = channel_power[usable_mask]
@@ -184,6 +183,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     
     clrfreq = spectrum_freqs[clrfreq_idx]
     noise = channel_power[clrfreq_idx]
+        
     return clrfreq, noise
 
 def fft_clrfreq_samples(samples):

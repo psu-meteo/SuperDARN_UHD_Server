@@ -45,7 +45,7 @@ CHANNEL_STATE_TIMEOUT = 12000
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 nSwings = 2 
 
-debug = 100
+debug = True 
 
 # states for Radar State Machine (of RadarHardwareManager) 
 RSM_WAIT     = 'RADAR_STATE_MACHINE_WAIT'

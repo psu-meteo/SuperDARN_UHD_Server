@@ -615,7 +615,7 @@ int main(int argc,char *argv[]) {
       n += backward ? -1 : 1;
       i++;
 
-      if (sbm == ebm) {
+      if (n == ebm) {
         break;
       }
     }
