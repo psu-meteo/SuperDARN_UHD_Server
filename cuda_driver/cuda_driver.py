@@ -185,6 +185,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         nbeams    = int(self.array_info['nbeams'])
         x_spacing = float(self.array_info['x_spacing']) # meters
         beamnum   = ctrlprm['tbeam']
+        self.logger.debug("generating bb samples for beam {}.".format(beamnum))
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
