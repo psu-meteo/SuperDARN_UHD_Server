@@ -210,7 +210,7 @@ class scanManager():
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
-        return (clearFreq, noise)
+        return (clearFreq, noise, recordTime)
     
 
 # handle arbitration with multiple channels accessing the usrp hardware
@@ -235,7 +235,6 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpsocks)
         self.clearFreqRawDataManager.set_clrfreq_search_span(self.usrp_rx_cfreq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
-
 
         self.swingManager            = swingManager()
 
@@ -291,7 +290,7 @@ class RadarHardwareManager:
 
                 if self.state == RSM_CLR_FREQ:
                     sm_logger.debug('start RHM.clearFreqSearch()')
-                    self.record_new_data()
+                    self.clearFreqRawDataManager.record_new_data()
                     # reset states
                     for ch in self.channels:
                         if ch.active_state == CS_CLR_FREQ:
@@ -1059,15 +1058,14 @@ class RadarChannelHandler:
     
     #@timeit
     def RequestAssignedFreqHandler(self, rmsg):
-      ##  # wait for clear frequency search to end, hardware manager will set channel state to WAIT
-      ##  self._waitForState(STATE_WAIT) 
-        clrFreqResult = self.scanManager.get_current_clearFreq_result()
+        # wait for clear frequency search to end, hardware manager will set channel state to WAIT
+            # self._waitForState(STATE_WAIT) 
+            clrFreqResult = self.scanManager.get_current_clearFreq_result()
 
-        transmit_dtype(self.conn, clrFreqResult[0], np.int32)
-        transmit_dtype(self.conn, clrFreqResult[1], np.float32)
-
-        self.logger.info('clr frequency search raw data age: {} s'.format(time.time() - clrFreqResult[2]))
-        return RMSG_SUCCESS
+            transmit_dtype(self.conn, clrFreqResult[0], np.int32)
+            transmit_dtype(self.conn, clrFreqResult[1], np.float32)
+            self.logger.info('clr frequency search raw data age: {} s'.format(time.time() - clrFreqResult[2])) # YYY
+            return RMSG_SUCCESS
 
     #@timeit
     def RequestClearFreqSearchHandler(self, rmsg):
@@ -1481,8 +1479,8 @@ class RadarChannelHandler:
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.swingManager.update_freq_list(freq_range_list)
-        self.swingManager.update_beam_list(scan_beam_list)
+        self.scanManager.update_freq_list(freq_range_list)
+        self.scanManager.update_beam_list(scan_beam_list)
 
         return RMSG_SUCCESS
 

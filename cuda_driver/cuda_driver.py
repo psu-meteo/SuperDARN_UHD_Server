@@ -115,10 +115,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         bb_signal    = [None for c in range(nChannels)] 
         for chIndex, currentSequence in enumerate(self.gpu.sequences[swing]):
             if currentSequence != None:
-                bb_signal[chIndex]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
+                bb_signal[chIndex] = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
-
         self.logger.warning('TODO: refactor cuda_generate_pulse_handler to fix accessing rx bb samples per integration period by hardcoded first sequence')
         self.gpu.synth_channels(bb_signal, swing)
 
@@ -171,7 +170,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
-        nPulses   = len(channel.pulse_lens)
+        nPulses   = 1 # TODO, don't hardcode this and support differing pulses within a sequence?
         nAntennas = len(self.antennas)
         
         # tbuffer is the time between tr gate and transmit pulse 
