@@ -98,8 +98,10 @@ class swingManager():
         self.activeSwing       = 0
         self.processingSwing   = 1
 
+        # async buffers for control program handlers
         # a/p swing status is switched in state machine async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
-        self.lastSwingWithData = self.activeSwing  
+        self.lastSwingWithData  = self.activeSwing  
+        self.nextSwingToTrigger = self.activeSwing
 
     def switch_swings(self):
         self.activeSwing     = 1 - self.activeSwing
@@ -205,6 +207,7 @@ class RadarHardwareManager:
         self.restricted_frequencies = read_restrict_file(RESTRICT_FILE)
         self.nRegisteredChannels = 0
         self.clearFreqRawDataManager = clearFrequencyRawDataManager()
+        self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
 
     def run(self):
@@ -266,7 +269,7 @@ class RadarHardwareManager:
                             ch.active_state = ch.next_active_state # TODO good practice would be to change next_active_state, but to what?
 
                             # if CLR_FREQ has been requested for the 1st period, repeat it for the 2nd (automatically tiggered sequence)
-                            if ch.active_state == CS_INIT:
+                            if ch.active_state == CS_INACTIVE:
                                ch.scanManager.repeat_clrfreq_recording = True 
                     
 
@@ -612,6 +615,8 @@ class RadarHardwareManager:
            # USRP_TRIGGER
            cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
+        
+           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
            
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
@@ -1062,10 +1067,10 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
-        self._waitForState(self.swingManager.activeSwing, CS_READY)
+        self._waitForState(self.swingManager.nextSwingToTrigger, CS_READY)
         transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
-        self.logger.debug("SetReadyFlagHandler: setting active channel state (swing {}) to CS_TRIGGER".format(self.swingManager.activeSwing))
-        self.active_state = CS_TRIGGER
+        self.logger.debug("SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.swingManager.nextSwingToTrigger))
+        self.state[self.swingManager.nextSwingToTrigger] = CS_TRIGGER
         # send trigger command
         self.ready = True
 
