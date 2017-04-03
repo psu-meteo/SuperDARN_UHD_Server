@@ -56,6 +56,7 @@ RSM_RESET    = 'RADAR_STATE_MACHINE_RESET'
 # states for each channel 
 CS_INACTIVE      = 'CHANNEL_STATE_INACTIVE'
 CS_READY         = 'CHANNEL_STATE_READY'
+CS_INIT          = 'CHANNEL_STATE_INIT'
 CS_TRIGGER       = 'CHANNEL_STATE_TRIGGER'
 CS_CLR_FREQ      = 'CHANNEL_STATE_CLR_FREQ'
 CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
@@ -296,8 +297,9 @@ class RadarHardwareManager:
                         if ch.active_state == CS_CLR_FREQ:
                             ch.active_state = ch.next_active_state # TODO good practice would be to change next_active_state, but to what?
 
+                            sm_logger.debug('RHM_CLR_FREQ checking for CS_INIT, CS_INIT only used here!')
                             # if CLR_FREQ has been requested for the 1st period, repeat it for the 2nd (automatically tiggered sequence)
-                            if ch.active_state == CS_INIT:
+                            if ch.active_state == CS_INIT: 
                                ch.scanManager.repeat_clrfreq_recording = True 
                     
 
