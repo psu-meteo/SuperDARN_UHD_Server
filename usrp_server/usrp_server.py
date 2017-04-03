@@ -119,11 +119,17 @@ class scanManager():
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.get_clr_freq_raw_data  = None # handel to RHM:ClearFrequencyRawDatamanager.get_raw_data()
+        
+        self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
     
     def period_finished(self):
         print("swing manager period finished... ")
         self.current_clrFreq_result = self.next_clrFreq_result
         self.next_clrFreq_result = None
+        if self.isPrePeriod:
+           self.isPrePeriod = False
+           return
+
         if not self.isLastPeriod:
             self.current_period += 1
 
@@ -163,7 +169,7 @@ class scanManager():
         return [clearFreq, noise, recordTime ]
 
     @property
-    def isFirstPeriod(self):
+    def isFirstPeriod(self): # TODO delete if unused
         return self.current_period == 0
 
     @property
@@ -778,14 +784,13 @@ class RadarHardwareManager:
 
            # repeat CLR_FREQ record for 2nd period (if executed for 1st)
            for iChannel,ch in enumerate( self.channels):
-              print(ch.scanManager.current_period )
               if ch.scanManager.repeat_clrfreq_recording:
                  self.next_active_state = CS_TRIGGER 
                  self.active_state      = CS_CLR_FREQ 
                  ch.scanManager.repeat_clrfreq_recording = False 
                  self.logger.debug("Repeat reset state of cnum {} to CLR_FREQ (from {}) for second period".format(ch.cnum, self.next_active_state))
    
-              elif ch.scanManager.current_period == 1:  # first period but no CLR_FREQ
+              elif ch.scanManager.current_period == 0:  # first period but no CLR_FREQ
                  ch.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(ch.cnum, self.swingManager.activeSwing))
                  ch.active_state = CS_TRIGGER 
               
@@ -795,7 +800,7 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
            if ch is not None: 
-              if (not ch.scanManager.isFirstPeriod):
+          #    if (not ch.scanManager.isFirstPeriod):
           #    if (not ch.scanManager.isLastPeriod) and (not ch.scanManager.isFirstPeriod):
                   ch.scanManager.period_finished()
 
@@ -1189,6 +1194,7 @@ class RadarChannelHandler:
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
         self.ctrlprm_struct.receive(self.conn)
+        self.logger.debug("Received from ROS: tbeam={}, rbeam={}".format(self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam']))
         self.CheckChannelCompatibility()
        
         if self.active_state is CS_INACTIVE:
