@@ -92,7 +92,7 @@ class timeSpans():
         
 # %% parse log files
 
-server = logEntries('server.log')          
+server = logEntries('../log/server.log')          
 timSpansServer = timeSpans(server)
 
 # %% plot data

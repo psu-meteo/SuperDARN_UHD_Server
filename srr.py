@@ -283,7 +283,7 @@ def start_usrp_server():
 def start_uafscan_fixfreq():
     myPrint("Starting uafscan fixfreq...")
 #    os.chdir(os.path.join(basePath, "usrp_server") )   
-    subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000', '--debug' ])
+    subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000','--fast',  '--debug' ])
 #    os.chdir(basePath)
 
 
