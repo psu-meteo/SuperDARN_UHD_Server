@@ -46,17 +46,10 @@ nSwings = 2
 
 debug = True
 
-# states for Radar State Machine (of RadarHardwareManager) 
-RSM_WAIT     = 'RADAR_STATE_MACHINE_WAIT'
-RSM_CLR_FREQ = 'RADAR_STATE_MACHINE_CLR_FREQ'
-RSM_TRIGGER  = 'RADAR_STATE_MACHINE_TRIGGER'
-RSM_RESET    = 'RADAR_STATE_MACHINE_RESET'
-
 # states for each channel 
 CS_INACTIVE      = 'CHANNEL_STATE_INACTIVE'
 CS_READY         = 'CHANNEL_STATE_READY'
 CS_TRIGGER       = 'CHANNEL_STATE_TRIGGER'
-CS_CLR_FREQ      = 'CHANNEL_STATE_CLR_FREQ'
 CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
 CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
 
@@ -75,6 +68,8 @@ class clearFrequencyRawDataManager():
         self.recordTime = None
         self.metaData   = None
         self.raw_data_available_from_this_period = False
+        self.outstanding_request = False     # Flag set by the RadarChannelHandlers 
+        self.repeat_request_for_2nd_period = False
 
     def period_finished(self):
         self.raw_data_available_from_this_period = False
@@ -83,6 +78,7 @@ class clearFrequencyRawDataManager():
         self.rawData, self.metaData = oh_jonny_give_me_some_data() #[11,111]
         self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
+        self.outstanding_request = False
 
     def get_raw_data(self):
         if self.rawData is None or not self.raw_data_available_from_this_period:
@@ -224,84 +220,45 @@ class RadarHardwareManager:
         def radar_state_machine():
             sm_logger = logging.getLogger('StateMachine')
             sm_logger.info('starting radar hardware state machine')
-            self.next_state = RSM_WAIT
             self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
-            statePriorityOrder = [ CS_CLR_FREQ, CS_TRIGGER]
-            channelState_to_RSMstate_dict = {CS_TRIGGER:RSM_TRIGGER, CS_CLR_FREQ:RSM_CLR_FREQ}
           
             sleepTime = 0.01 # used if state machine waits for one channel
            
-
-
             while True:
-                self.state = self.next_state
-                self.next_state = RSM_RESET
-               
-   #             sm_logger.debug("State is " + self.state)
 
-                # DETERMINE RADAR STATE MACHINE (RSM) STATE BY LOOKING AT CHANNEL STATES
-                if self.state == RSM_WAIT:
-                    self.next_state = RSM_WAIT
+                # do CLR_FREQ recoring when ever requested (independent of swing, state or channel)
+                if self.clearFreqRawDataManager.outstanding_request:
+                    sm_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
+                    self.clearFreqRawDataManager.record_new_data()
 
-                    # 1st priority is stateOrder, 2nd is channel number
-                    for iState in statePriorityOrder:
-                        if self.next_state == RSM_WAIT:      # if next state still not found
-                            for channel in self.channels:
-                                channel.logger.debug("RSM: channel {}: active state is {}, active swing; {}".format(channel.cnum, channel.active_state, channel.swingManager.activeSwing))
-                                if channel.active_state == iState:
-                                    self.next_state = channelState_to_RSMstate_dict[iState]
-                                    break
-                        else:
-                            break
+                    # check if CLR_FREQ has to be repeated
+                    if CS_INACTIVE in [ch.active_state for ch in self.channels]:
+                       smlogger.debug("Repeating CLR_FREQ for next integation period")
+                       self.clearFreqRawDataManager.repeat_request_for_2nd_period = True
+                
 
-                    if self.next_state == RSM_WAIT:
-                       time.sleep(RADAR_STATE_TIME+1*debug) 
-                    else:
-                       sm_logger.debug("Next state is {} (active swing is {})".format(self.next_state, self.swingManager.activeSwing))
+                    sm_logger.debug('end self.clearFreqRawDataManager.record_new_data()')
                            
 
-                if self.state == RSM_CLR_FREQ:
-                    sm_logger.debug('start RHM.clearFreqSearch()')
-                    self.record_new_data()
-                    # reset states
-                    for ch in self.channels:
-                        if ch.active_state == CS_CLR_FREQ:
-                            ch.active_state = ch.next_active_state # TODO good practice would be to change next_active_state, but to what?
-
-                            # if CLR_FREQ has been requested for the 1st period, repeat it for the 2nd (automatically tiggered sequence)
-                            if ch.active_state == CS_INACTIVE:
-                               ch.scanManager.repeat_clrfreq_recording = True 
-                    
-
-                    self.next_state = RSM_WAIT
-                    sm_logger.debug('end RHM.clearFreqSearch()')
-
-
-
-                if self.state == RSM_TRIGGER:
-                    self.next_state = RSM_WAIT
+                # if any channel is in CS_TRIGGER
+                if CS_TRIGGER in [ch.active_state for ch in self.channels]:
                     # wait for all channels to be in TRIGGER state
+                    executeTrigger = True
                     for ch in self.channels:
                         if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
-                            if ch.active_state == CS_CLR_FREQ:
-                                sm_logger.info('setting state back to RSM_CLR_FREQ from RSM_TRIGGER')
-                                self.next_state = RSM_CLR_FREQ
-                            else:
-                                sm_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
-                                time.sleep(sleepTime)
-                                self.next_state = RSM_TRIGGER
+                            sm_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
+                            time.sleep(sleepTime)
+                            executeTrigger = False
 
-                    # if all channels are TRIGGER, then TRIGGER and return to RSM_WAIT
-                    if self.next_state == RSM_WAIT:
+                    # if all channels are TRIGGER, then TRIGGER
+                    if executeTrigger:
                         sm_logger.debug('start RHM.trigger_next_swing()')
                         self.trigger_next_swing()
                         sm_logger.debug('end RHM.trigger_next_swing()')
 
+                else:
+                    time.sleep(RADAR_STATE_TIME+1*debug) # sleep to reduce load of this while loop
 
-                if self.state == RSM_RESET:
-                    sm_logger.error('stuck in RSM_RESET state?!')
-                    pdb.set_trace()
-                    self.next_state = RSM_WAIT
 
 
         self.client_sock.listen(MAX_CHANNELS)
@@ -795,16 +752,15 @@ class RadarHardwareManager:
            self.logger.debug('end CUDA_PROCESS')
 
            # repeat CLR_FREQ record for 2nd period (if executed for 1st)
-           for iChannel,ch in enumerate( self.channels):
-              if ch.scanManager.repeat_clrfreq_recording and ch.active:
-                 self.next_active_state = CS_TRIGGER 
-                 self.active_state      = CS_CLR_FREQ 
-                 ch.scanManager.repeat_clrfreq_recording = False 
-                 self.logger.debug("Repeat reset state of cnum {} to CLR_FREQ (from {}) for second period".format(ch.cnum, self.next_active_state))
-   
-              elif ch.scanManager.current_period == 0:  # first period but no CLR_FREQ
-                 ch.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(ch.cnum, self.swingManager.activeSwing))
-                 ch.active_state = CS_TRIGGER 
+           if self.clearFreqRawDataManager.repeat_request_for_2nd_period:
+              self.clearFreqRawDataManager.repeat_request_for_2nd_period = False
+              self.clearFreqRawDataManager.outstanding_request = True
+              
+           # automatic trigger of second period (without ROS:SET_READY)
+           for channel in  self.channels:
+              if channel.scanManager.current_period == 0:  # first period 
+                 channel.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(channel.cnum, self.swingManager.activeSwing))
+                 channel.active_state = CS_TRIGGER 
               
         
 
@@ -1057,13 +1013,11 @@ class RadarChannelHandler:
 
     #@timeit
     def RequestClearFreqSearchHandler(self, rmsg):
-        self._waitForState(self.swingManager.activeSwing, [CS_READY, CS_INACTIVE]) 
         self.clrfreq_struct.receive(self.conn)
 
-        # request clear frequency search time from hardware manager
-        self.next_active_state = self.active_state 
-        self.active_state      = CS_CLR_FREQ
-        self.logger.debug("RequestClearFreqSearchHandler: setting active state: {} and next active state {}".format(self.active_state, self.next_active_state))        
+        # set request flat from RadarHardwareManager:clearFreqRawDatamanager
+        self.parent_RadarHardwareManager.clearFreqRawDataManager.outstanding_request = True
+        self.logger.debug("RequestClearFreqSearchHandler: setting request CLR_FREQ flag in clearFreqRawDataManager")        
 
         return RMSG_SUCCESS
 
@@ -1220,7 +1174,7 @@ class RadarChannelHandler:
             else:
                 self.logger.info("This is {}. channel (cnum {}). Waiting to add channel.".format(len(allOtherChannels)+1, self.cnum))
                 for otherChannel in allOtherChannels:
-                    otherChannel._waitForState(0, [CS_INACTIVE, CS_READY, CS_SAMPLES_READY, CS_CLR_FREQ]) # always starting with swing 0
+                    otherChannel._waitForState(0, [CS_INACTIVE, CS_READY, CS_SAMPLES_READY]) # always starting with swing 0
                     self.logger.debug("Channel {} is {}".format(otherChannel.cnum, otherChannel.active_state))
                 self.logger.debug("Finished waiting. Adding channel...")
             
