@@ -247,7 +247,7 @@ class RadarHardwareManager:
                     for iState in statePriorityOrder:
                         if self.next_state == RSM_WAIT:      # if next state still not found
                             for channel in self.channels:
-                                print("active state is {}, active swing; {}".format(channel.active_state, channel.swingManager.activeSwing))
+                                channel.logger.debug("RSM: channel {}: active state is {}, active swing; {}".format(channel.cnum, channel.active_state, channel.swingManager.activeSwing))
                                 if channel.active_state == iState:
                                     self.next_state = channelState_to_RSMstate_dict[iState]
                                     break
@@ -257,7 +257,7 @@ class RadarHardwareManager:
                     if self.next_state == RSM_WAIT:
                        time.sleep(RADAR_STATE_TIME+1*debug) 
                     else:
-                       sm_logger.debug("Next state is " + self.next_state)
+                       sm_logger.debug("Next state is {} (active swing is {})".format(self.next_state, self.swingManager.activeSwing))
                            
 
                 if self.state == RSM_CLR_FREQ:
@@ -287,7 +287,7 @@ class RadarHardwareManager:
                                 sm_logger.info('setting state back to RSM_CLR_FREQ from RSM_TRIGGER')
                                 self.next_state = RSM_CLR_FREQ
                             else:
-                                sm_logger.debug('remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.active_state))
+                                sm_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
                                 time.sleep(sleepTime)
                                 self.next_state = RSM_TRIGGER
 
@@ -676,7 +676,7 @@ class RadarHardwareManager:
                 nAntennas = recv_dtype(cudasock, np.uint32)
                 for iChannel,channel in enumerate(self.channels):
 
-                    if allProcessingChannelStates[iChannel] is CS_PROCESSING:
+                    if channel.processing_state == CS_PROCESSING:
                         transmit_dtype(cudasock, channel.cnum, np.int32)
 
                         for iAntenna in range(nAntennas):
@@ -729,17 +729,24 @@ class RadarHardwareManager:
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
                channel.next_processing_state = CS_INACTIVE
                channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_INACTIVE".format(self.swingManager.processingSwing, channel.cnum )) 
+               cmd.transmit()
+               cmd.client_return()      
             else:
-               cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-               self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               if channel.processing_state == CS_INACTIVE: # first use of swing 1
-                   channel.processing_state = CS_READY
-                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
-               else: 
-                   channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
-                   channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum )) 
-            cmd.transmit()
-            cmd.client_return()      
+               if channel.active:
+                  cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+                  self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+                  cmd.transmit()
+                  cmd.client_return()      
+   
+                  if channel.processing_state == CS_INACTIVE: # first use of swing 1
+                      channel.processing_state = CS_READY
+                      channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
+                  else: 
+                      channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
+                      channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum ))
+               else:
+                  self.logger.debug("ch {}: channel not active => not calling CUDA_ADD".format(channel.cnum))
+            
  
 
         # CUDA_GENERATE
@@ -789,7 +796,7 @@ class RadarHardwareManager:
 
            # repeat CLR_FREQ record for 2nd period (if executed for 1st)
            for iChannel,ch in enumerate( self.channels):
-              if ch.scanManager.repeat_clrfreq_recording:
+              if ch.scanManager.repeat_clrfreq_recording and ch.active:
                  self.next_active_state = CS_TRIGGER 
                  self.active_state      = CS_CLR_FREQ 
                  ch.scanManager.repeat_clrfreq_recording = False 
@@ -804,7 +811,7 @@ class RadarHardwareManager:
     def next_period_RHM(self):
         self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
-           if ch is not None: 
+           if ch is not None and ch.active: 
           #    if (not ch.scanManager.isFirstPeriod):
           #    if (not ch.scanManager.isLastPeriod) and (not ch.scanManager.isFirstPeriod):
                   ch.scanManager.period_finished()
@@ -1211,7 +1218,7 @@ class RadarChannelHandler:
             if len(allOtherChannels) == 0:
                 self.logger.info("This is first channel. Adding channel.")
             else:
-                self.logger.info("This is {}. channel. Waiting to add channel.".format(len(allOtherChannels)+1))
+                self.logger.info("This is {}. channel (cnum {}). Waiting to add channel.".format(len(allOtherChannels)+1, self.cnum))
                 for otherChannel in allOtherChannels:
                     otherChannel._waitForState(0, [CS_INACTIVE, CS_READY, CS_SAMPLES_READY, CS_CLR_FREQ]) # always starting with swing 0
                     self.logger.debug("Channel {} is {}".format(otherChannel.cnum, otherChannel.active_state))
@@ -1431,6 +1438,7 @@ class RadarChannelHandler:
         self.ctrlprm_struct.set_data('radar',  self.rnum)
 
         # TODO: how to handle channel contention?
+        # self.logger.name = "ChManager {}".format(self.cnum)
         self.logger.debug('radar num: {}, radar chan: {}'.format(self.rnum, self.cnum))
 
         # TODO: set RMSG_FAILURE if radar channel is unavailable

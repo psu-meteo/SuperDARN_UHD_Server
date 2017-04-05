@@ -296,6 +296,19 @@ def start_uafscan_fixfreq():
     subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000','--fast',  '--debug' ])
 #    os.chdir(basePath)
 
+
+def start_normalscan():
+    command = 'normalscan -stid mcm -xcf 1 -fast -df 10400 -nf 10400 -c 4'
+    myPrint("Starting normalscan...({})".format(command))
+    subprocess.Popen(command.split(" "))
+def start_2normalscans():
+    command = 'normalscan -stid mcm -xcf 1 -fast -df 10400 -nf 10400 -c 3'
+    myPrint("Starting first (of two) normalscan...({})".format(command))
+    subprocess.Popen(command.split(" "))
+    command = 'normalscan -stid mcm -xcf 1 -fast -df 10400 -nf 10400 -c 4'
+    myPrint("Starting second (of two) normalscan...({})".format(command))
+    subprocess.Popen(command.split(" "))
+
 def start_rtserver():
     myPrint("Starting rtserver on port 1401...")
     subprocess.Popen(['rtserver', '-rp', '41104', '-ep', '41000', '-tp', '1401' ])
@@ -336,6 +349,10 @@ else:
          start_usrp_server()
       elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
          start_uafscan_fixfreq()
+      elif inputArg[1].lower() in ["normalscan"]:
+         start_normalscan()
+      elif inputArg[1].lower() in ["2normalscans"]:
+         start_2normalscans()
       elif inputArg[1].lower() in ["rtserver"]:
          start_rtserver()
       else:
