@@ -175,7 +175,6 @@ def get_cuda_driver_processes():
         wordList = [word for word in line.split(" " ) if word != ""]
         if len(wordList):
            commandString = " ".join(wordList[10:])
-           print(commandString)
            if commandString in ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]:
               cudaProcesses.append(dict(pid=int(wordList[1]) ))
     return cudaProcesses
@@ -187,6 +186,9 @@ def get_process_ids(processShortName):
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
        nWords = 2
+    elif processShortName == "rtserver":
+       processMatchString = ["rtserver"]
+       nWords = 0
     else:
        ValueError("unknown process short name {}".format(processShortName))
      
@@ -231,6 +233,14 @@ def stop_usrp_server():
        terminate_all(serverProcesses)
     else:
        myPrint("  No usrp_server processes found...")
+    
+def stop_rtserver():
+    myPrint(" Stopping rtserver...")
+    serverProcesses = get_process_ids("rtserver")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+    else:
+       myPrint("  No rtserver processes found...")
     
     
 
@@ -286,6 +296,9 @@ def start_uafscan_fixfreq():
     subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000','--fast',  '--debug' ])
 #    os.chdir(basePath)
 
+def start_rtserver():
+    myPrint("Starting rtserver on port 1401...")
+    subprocess.Popen(['rtserver', '-rp', '41104', '-ep', '41000', '-tp', '1401' ])
 
 
 
@@ -323,6 +336,8 @@ else:
          start_usrp_server()
       elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
          start_uafscan_fixfreq()
+      elif inputArg[1].lower() in ["rtserver"]:
+         start_rtserver()
       else:
          myPrint("unknown process to start")
 
@@ -379,6 +394,8 @@ else:
          stop_cuda_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          stop_usrp_server()
+      elif inputArg[1].lower() in ["rtserver"]:
+         stop_rtserver()
       elif inputArg[1].lower() == "driver":
          stop_usrp_driver()
          stop_cuda_driver()

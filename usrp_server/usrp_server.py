@@ -289,7 +289,7 @@ class RadarHardwareManager:
                             else:
                                 sm_logger.debug('remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.active_state))
                                 time.sleep(sleepTime)
-                                self.next_state = RHM_TRIGGER
+                                self.next_state = RSM_TRIGGER
 
                     # if all channels are TRIGGER, then TRIGGER and return to RSM_WAIT
                     if self.next_state == RSM_WAIT:
@@ -1213,7 +1213,7 @@ class RadarChannelHandler:
             else:
                 self.logger.info("This is {}. channel. Waiting to add channel.".format(len(allOtherChannels)+1))
                 for otherChannel in allOtherChannels:
-                    otherChannel._waitFor(0, [CS_INACTIVE, CS_READY, CS_SAMPELS_READY, CS_CLR])
+                    otherChannel._waitForState(0, [CS_INACTIVE, CS_READY, CS_SAMPLES_READY, CS_CLR_FREQ]) # always starting with swing 0
                     self.logger.debug("Channel {} is {}".format(otherChannel.cnum, otherChannel.active_state))
                 self.logger.debug("Finished waiting. Adding channel...")
             
@@ -1294,6 +1294,7 @@ class RadarChannelHandler:
             return True
 
         else:   # not first channel => check if new parameters are compatible
+            
             parCompatibleList_seq  = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
             parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
 
@@ -1420,6 +1421,11 @@ class RadarChannelHandler:
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
+
+        if self.cnum in [ch.cnum for ch in self.parent_RadarHardwareManager.channels if ch is not None and ch is not self]:
+           self.logger.error("New channel (cnum {}) can not be added beause channel with this cnum already active.".format(self.cnum))
+           return RMSG_FAILURE
+        
         
         self.ctrlprm_struct.set_data('channel', self.cnum)
         self.ctrlprm_struct.set_data('radar',  self.rnum)
