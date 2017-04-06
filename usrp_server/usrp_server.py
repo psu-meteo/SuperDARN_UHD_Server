@@ -6,8 +6,7 @@
 # - communicates with the control program and changes the state of the channel
 #
 # RadarHardwareManager class (RHM)
-# - has one state machine for the whole radar that is controled by all channel states
-# - the state machine triggers functions that control usrp_driver and cuda_driver
+# - has a radar_main_control_loop() that executes clear freq search, adding new channels and triggering
 #
 
 # TODO: write mock arbyserver that can handle these commands
@@ -46,12 +45,12 @@ nSwings = 2
 
 debug = True
 
-# states for each channel 
-CS_INACTIVE      = 'CHANNEL_STATE_INACTIVE'
-CS_READY         = 'CHANNEL_STATE_READY'
-CS_TRIGGER       = 'CHANNEL_STATE_TRIGGER'
-CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
-CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
+# channel states (CS) for each channel
+CS_INACTIVE      = 'CS_INACTIVE'
+CS_READY         = 'CS_READY'
+CS_TRIGGER       = 'CS_TRIGGER'
+CS_PROCESSING    = 'CS_PROCESSING'
+CS_SAMPLES_READY = 'CS_SAMPLES_READY'
 
 
 def oh_jonny_give_me_some_data():
@@ -95,7 +94,7 @@ class swingManager():
         self.processingSwing   = 1
 
         # async buffers for control program handlers
-        # a/p swing status is switched in state machine async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
+        # a/p swing status is switched in main loop async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
         self.lastSwingWithData  = self.activeSwing  
         self.nextSwingToTrigger = self.activeSwing
 
@@ -218,25 +217,25 @@ class RadarHardwareManager:
                 self.unregister_channel_from_HardwareManager(channel)
 
         # TODO: add lock support
-        def radar_state_machine():
-            sm_logger = logging.getLogger('StateMachine')
-            sm_logger.info('starting radar hardware state machine')
+        def radar_main_conrol_loop():
+            controlLoop_logger = logging.getLogger('Control Loop')
+            controlLoop_logger.info('Starting RHM.radar_main_control_loop() ')
           
-            sleepTime = 0.01 # used if state machine waits for one channel
+            sleepTime = 0.01 # used if control loop waits for one channel
            
             while True:
 
                 # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
                 if self.clearFreqRawDataManager.outstanding_request:
-                    sm_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
+                    controlLoop_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
                     self.clearFreqRawDataManager.record_new_data()
 
                     # check if CLR_FREQ has to be repeated
                     if CS_INACTIVE in [ch.active_state for ch in self.channels]:
-                       sm_logger.debug("Repeating CLR_FREQ for next integation period")
+                       controlLoop_logger.debug("Repeating CLR_FREQ for next integation period")
                        self.clearFreqRawDataManager.repeat_request_for_2nd_period = True              
 
-                    sm_logger.debug('end self.clearFreqRawDataManager.record_new_data()')
+                    controlLoop_logger.debug('end self.clearFreqRawDataManager.record_new_data()')
 
 
                 # FRIST CUDA_ADD FOR NEW CHANNELS
@@ -250,19 +249,20 @@ class RadarHardwareManager:
                     executeTrigger = True
                     for ch in self.channels:
                         if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
-                            sm_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
+                            controlLoop_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
                             time.sleep(sleepTime)
                             executeTrigger = False
 
                     # if all channels are TRIGGER, then TRIGGER
                     if executeTrigger:
-                        sm_logger.debug('start RHM.trigger_next_swing()')
+                        controlLoop_logger.debug('start RHM.trigger_next_swing()')
                         self.trigger_next_swing()
-                        sm_logger.debug('end RHM.trigger_next_swing()')
+                        controlLoop_logger.debug('end RHM.trigger_next_swing()')
 
                 else:
                     time.sleep(RADAR_STATE_TIME+1*debug) # sleep to reduce load of this while loop
-        # end of StateMachine
+
+        # end of radar_main_control_loop()
 
 
         self.client_sock.listen(MAX_CHANNELS)
@@ -270,7 +270,7 @@ class RadarHardwareManager:
         self.channels = []
         usrp_server_logger = logging.getLogger('usrp_server')
 
-        ct = threading.Thread(target=radar_state_machine)
+        ct = threading.Thread(target=radar_main_control_loop)
         ct.start()
         while True:
             usrp_server_logger.info('waiting for control program')
