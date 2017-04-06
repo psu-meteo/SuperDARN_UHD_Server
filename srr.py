@@ -8,6 +8,9 @@
 #  TODO:
 # restart is processes already running?
 # get all differnt call types "python3 cuda_driver.py" ".../python3 ./cuda_driver.py"
+# add return argument to stop commands and don't wait on restart if nothing has been shut down
+# 
+
 
 import sys
 import os
