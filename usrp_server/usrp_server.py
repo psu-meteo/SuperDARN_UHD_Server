@@ -863,6 +863,7 @@ class RadarHardwareManager:
     # BEAMFORMING
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
+        nSamples = main_samples.shape[2]
         beamformed_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
     
         for iChannel, channel in enumerate(RHM.channels):
