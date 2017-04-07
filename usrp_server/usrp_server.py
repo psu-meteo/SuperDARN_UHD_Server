@@ -22,6 +22,7 @@ import socket
 import time
 import configparser
 import copy
+import posix_ipc
 
 sys.path.insert(0, '../python_include')
 
@@ -57,6 +58,72 @@ def oh_jonny_give_me_some_data():
     return [11,111]
 def oh_jonny_calc_the_frequency(rawData, metaData,clearFreqPar, beamNo):
     return clearFreqPar[0], 11
+
+class usrpCenterFreqManager():
+  
+    def __init__(self):
+       self.semaphore = posix_ipc.Semaphore('usrp_center_freq', posix_ipc.O_CREAT)
+       self.release()
+       self.channelRangeList    = []
+       self.channelList         = []
+       self.current_center_freq = None
+       self.usrp_bandwidth      = None
+
+    def add_new_freq_band(self, channel):
+       if self.usrp_bandwidth is None or self.current_center_freq is None:
+          channel.logger.error("center_freq or usrp_bandwith have not been initilaizen in usrpCenterFreqManager ")
+          ValueError("no center_freq or bandwidth")
+
+       newLower, newUpper = self.get_range_of_channel(channel)
+
+       channel.logger.debug("ch {}: waiting for semaphore of usrpCenterFreqManager")
+       self.semaphore.acquire()
+       channel.logger.debug("ch {}: acquired semaphore of usrpCenterFreqManager")
+   
+       if newLower > (self.current_center_freq - self.usrp_bandwidth/2) and newUpper < (self.current_center_freq + self.usrp_bandwidth/2):
+          channel.logger.degug("channel range is within USRP bandwidth")
+          self.channelRangeList.append([newLower, newUpper])
+          self.channelList.append(channel)
+          return True
+       else:
+          #determine range of all channels
+          allCh_lower = newLower
+          allCh_upper = newUpper
+   
+          for otherChRange in self.channelRangeList:
+             allCh_lower = min(allCh_lower, otherChRange[0])
+             allCh_upper = max(allCh_upper, otherChRange[1])
+
+
+          if (allCh_upper - allCh_lower) > self.usrp_bandwith:
+             channel.logger.error("new channel can not be added. USPR bandwidth too small")
+             return False
+          else:
+             newCenterFreq = (allCh_upper - allCh_lower)/2 + allCh_lower
+             channel.logger.info("calculated new usrp center frequency: {} kHz (old was {} kHz)".format(newCenterFreq, self.current_center_freq))
+             # adjust center freq that everything is in overall bandwidth
+             RADAR_FREQ_RANGE = [8000 18000] # TODO move to config file or read from restricted freq file
+             newCenterFreq = max(newCenterFreq, RADAR_FREQ_RANGE[0]+self.usrp_bandwidth/2)
+             newCenterFreq = min(newCenterFreq, RADAR_FREQ_RANGE[1]-self.usrp_bandwidth/2)
+             
+             
+ #            TODO set new cfreq and trigger CUDA_generate
+
+
+      
+
+      # what if freq changes?
+       self.semaphore.release()
+       channel.logger.debug("ch {}: released semaphore of usrpCenterFreqManager")
+
+    def get_range_of_channel(self, channel):
+       rangeList = channel.scanManager.clear_freq_range_list
+       lower = rangList[0][0] 
+       upper = rangeList[0][1]
+       for periodRange in rangeList[1:]:
+          lower = min(lower, periodRange[0])
+          upper = max(lower, periodRange[1])
+       return lower, upper
 
 
 class clearFrequencyRawDataManager():
@@ -217,7 +284,7 @@ class RadarHardwareManager:
                 self.unregister_channel_from_HardwareManager(channel)
 
         # TODO: add lock support
-        def radar_main_conrol_loop():
+        def radar_main_control_loop():
             controlLoop_logger = logging.getLogger('Control Loop')
             controlLoop_logger.info('Starting RHM.radar_main_control_loop() ')
           
