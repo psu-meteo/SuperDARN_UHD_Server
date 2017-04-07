@@ -47,17 +47,10 @@ nSwings = 2
 
 debug = True 
 
-# states for Radar State Machine (of RadarHardwareManager) 
-RSM_WAIT     = 'RADAR_STATE_MACHINE_WAIT'
-RSM_CLR_FREQ = 'RADAR_STATE_MACHINE_CLR_FREQ'
-RSM_TRIGGER  = 'RADAR_STATE_MACHINE_TRIGGER'
-RSM_RESET    = 'RADAR_STATE_MACHINE_RESET'
-
 # states for each channel 
 CS_INACTIVE      = 'CHANNEL_STATE_INACTIVE'
 CS_READY         = 'CHANNEL_STATE_READY'
 CS_TRIGGER       = 'CHANNEL_STATE_TRIGGER'
-CS_CLR_FREQ      = 'CHANNEL_STATE_CLR_FREQ'
 CS_PROCESSING    = 'CHANNEL_STATE_PROCESSING'
 CS_SAMPLES_READY = 'CHANNEL_STATE_SAMPLES_READY'
 
@@ -70,6 +63,8 @@ class clearFrequencyRawDataManager():
         self.recordTime = None
 
         self.raw_data_available_from_this_period = False
+        self.outstanding_request = False     # Flag set by the RadarChannelHandlers 
+        self.repeat_request_for_2nd_period = False
 
         self.usrp_socks = None
         self.center_freq = None
@@ -107,6 +102,7 @@ class clearFrequencyRawDataManager():
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
+        self.outstanding_request = False
 
     def get_raw_data(self):
         if self.rawData is None or not self.raw_data_available_from_this_period:
@@ -139,9 +135,6 @@ class scanManager():
         
 
     def __init__(self, restricted_frequency_list, beamSep, numBeams):
-        self.scan_beam_list        = None # populated in SetActiveHandler
-        self.clear_freq_range_list = None # populated in SetActiveHandler
-        
         self.scan_beam_list        = []
         self.clear_freq_range_list = []
         
@@ -173,7 +166,9 @@ class scanManager():
         # switch swings
         self.activeSwing     = 1 - self.activeSwing
         self.processingSwing = 1 - self.processingSwing
-
+    
+    # XXX store current freqencies in clrfreq manager,
+    # add to restricted
     def period_finished(self):
         print("swing manager period finished... ")
         self.current_clrFreq_result = self.next_clrFreq_result
@@ -253,6 +248,7 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpsocks)
         self.clearFreqRawDataManager.set_clrfreq_search_span(self.usrp_rx_cfreq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+        self.newChannelList      = []
         self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
 
@@ -264,90 +260,54 @@ class RadarHardwareManager:
                 channel.run()
             except socket.error:
                 self.logger.error("RadarChannelHandler: Socket error => Deleting channel... ")
-                self.deleteRadarChannel(channel)
+                self.unregister_channel_from_HardwareManager(channel)
 
         # TODO: add lock support
         def radar_state_machine():
             sm_logger = logging.getLogger('StateMachine')
             sm_logger.info('starting radar hardware state machine')
-            self.next_state = RSM_WAIT
-            self.addingNewChannelsAllowed = True    # no new channel should be added between PRETRIGGER and GET_DATA
-            statePriorityOrder = [ CS_CLR_FREQ, CS_TRIGGER]
-            channelState_to_RSMstate_dict = {CS_TRIGGER:RSM_TRIGGER, CS_CLR_FREQ:RSM_CLR_FREQ}
           
             sleepTime = 0.01 # used if state machine waits for one channel
            
-
-
             while True:
-                self.state = self.next_state
-                self.next_state = RSM_RESET
-               
-   #             sm_logger.debug("State is " + self.state)
 
-                # DETERMINE RADAR STATE MACHINE (RSM) STATE BY LOOKING AT CHANNEL STATES
-                if self.state == RSM_WAIT:
-                    self.next_state = RSM_WAIT
+                # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
+                if self.clearFreqRawDataManager.outstanding_request:
+                    sm_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
+                    self.clearFreqRawDataManager.record_new_data()
 
-                    # 1st priority is stateOrder, 2nd is channel number
-                    for iState in statePriorityOrder:
-                        if self.next_state == RSM_WAIT:      # if next state still not found
-                            for channel in self.channels:
-                                print("active state is {}, active swing; {}".format(channel.active_state, channel.swingManager.activeSwing))
-                                if channel.active_state == iState:
-                                    self.next_state = channelState_to_RSMstate_dict[iState]
-                                    break
-                        else:
-                            break
+                    # check if CLR_FREQ has to be repeated
+                    if CS_INACTIVE in [ch.active_state for ch in self.channels]:
+                       sm_logger.debug("Repeating CLR_FREQ for next integation period")
+                       self.clearFreqRawDataManager.repeat_request_for_2nd_period = True              
 
-                    if self.next_state == RSM_WAIT:
-                       time.sleep(RADAR_STATE_TIME+1*debug) 
-                    else:
-                       sm_logger.debug("Next state is " + self.next_state)
+                    sm_logger.debug('end self.clearFreqRawDataManager.record_new_data()')
+
+
+                # FRIST CUDA_ADD FOR NEW CHANNELS
+                if len(self.newChannelList) != 0:
+                   self.initialize_channel()
                            
 
-                if self.state == RSM_CLR_FREQ:
-                    sm_logger.debug('start RHM.clearFreqSearch()')
-                    self.clearFreqRawDataManager.record_new_data()
-                    # reset states
-                    for ch in self.channels:
-                        if ch.active_state == CS_CLR_FREQ:
-                            ch.active_state = ch.next_active_state # TODO good practice would be to change next_active_state, but to what?
-
-                            # if CLR_FREQ has been requested for the 1st period, repeat it for the 2nd (automatically tiggered sequence)
-                            if ch.active_state == CS_INACTIVE:
-                               ch.scanManager.repeat_clrfreq_recording = True 
-                    
-
-                    self.next_state = RSM_WAIT
-                    sm_logger.debug('end RHM.clearFreqSearch()')
-
-
-
-                if self.state == RSM_TRIGGER:
-                    self.next_state = RSM_WAIT
+                # TRIGGER if any channel is in CS_TRIGGER
+                if CS_TRIGGER in [ch.active_state for ch in self.channels]:
                     # wait for all channels to be in TRIGGER state
+                    executeTrigger = True
                     for ch in self.channels:
                         if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
-                            if ch.active_state == CS_CLR_FREQ:
-                                sm_logger.info('setting state back to RSM_CLR_FREQ from RSM_TRIGGER')
-                                self.next_state = RSM_CLR_FREQ
-                            else:
-                                sm_logger.debug('remaining in TRIGGER because channel {} state is {}, '.format(ch.cnum, ch.active_state))
-                                time.sleep(sleepTime)
-                                self.next_state = RHM_TRIGGER
+                            sm_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
+                            time.sleep(sleepTime)
+                            executeTrigger = False
 
-                    # if all channels are TRIGGER, then TRIGGER and return to RSM_WAIT
-                    if self.next_state == RSM_WAIT:
+                    # if all channels are TRIGGER, then TRIGGER
+                    if executeTrigger:
                         sm_logger.debug('start RHM.trigger_next_swing()')
                         self.trigger_next_swing()
                         sm_logger.debug('end RHM.trigger_next_swing()')
 
-
-                if self.state == RSM_RESET:
-                    sm_logger.error('stuck in RSM_RESET state?!')
-                    pdb.set_trace()
-                    self.next_state = RSM_WAIT
+                else:
+                    time.sleep(RADAR_STATE_TIME+1*debug) # sleep to reduce load of this while loop
+        # end of StateMachine
 
 
         self.client_sock.listen(MAX_CHANNELS)
@@ -532,13 +492,45 @@ class RadarHardwareManager:
     
     def setup(self, chan):
         pass
+  
+    def initialize_channel(RHM):
+        """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
 
-    def deleteRadarChannel(self, channelObject):
+        newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
+        RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
+        for channel in newChannelList:
+     
+            # CUDA_ADD_CHANNEL in first period
+            cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
+            RHM.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
+            cmd.transmit()
+            cmd.client_return()      
+            if channel.active_state == CS_INACTIVE: 
+               RHM.logger.debug("initialize_channel() is setting ch {} from CS_INACTIVE to CS_READY".format(channel.cnum))
+               channel.active_state = CS_READY # channel not really ready until CUDA_GENERATE, but there will be no trigger in parallel to this function
+            else:
+               RHM.logger.debug("initialize_channel() ch {} state stays {}".format(channel.cnum, channel.active_state))
+
+
+            if channel not in RHM.channels:
+               RHM.channels.append(channel)
+               RHM.logger.debug("Adding channel {} to RHM.channels".format(channel.cnum))
+            RHM.newChannelList.remove(channel)
+
+        # CUDA_GENERATE for first period
+        RHM.logger.debug('send CUDA_GENERATE_PULSE')
+        cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing)
+        cmd.transmit()
+        cmd.client_return()
+        RHM.logger.debug('received response CUDA_GENERATE_PULSE')
+
+
+    def unregister_channel_from_HardwareManager(self, channelObject):
         if channelObject in self.channels:
        # this is only called if something went wrong or crtl program quit => so don't care about channel states ? 
        #    # don't delete channel in middle of trigger, pretrigger, or ....
        #     channelObject._waitForState([CS_READY, CS_INACTIVE])  
-            self.logger.info('deleteRadarChannel() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
+            self.logger.info('unregister_channel_from_HardwareManager() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
             self.channels.remove(channelObject)
             # remove channel from cuda
             self.logger.debug('send CUDA_REMOVE_CHANNEL')
@@ -550,18 +542,16 @@ class RadarHardwareManager:
                except AttributeError:
                    # catch errors where channel.getSequence() fails because npulses_per_sequence is uninitialized
                    # TODO: discover why this happens..
-                   self.logger.error('deleteRadarChannel() failed to remove channel from HardwareManager')
+                   self.logger.error('unregister_channel_from_HardwareManager() failed to remove channel from HardwareManager')
                 
-            self.logger.debug('RHM:deleteRadarChannel {} channels left'.format(len(self.channels)))
-            if (len(self.channels) == 0) and not self.addingNewChannelsAllowed:  # reset flag for adding new channels  if last channel has been deleted between PRETRIGGER and GET_DATA
-                self.addingNewChannelsAllowed = True
+            self.logger.debug('RHM:unregister_channel_from_HardwareManager {} channels left'.format(len(self.channels)))
 
             self.nRegisteredChannels -= 1
             if self.nRegisteredChannels == 0:  
                 self.commonChannelParameter = {}
 
         else:
-            self.logger.warning('deleteRadarChannel() channel already deleted')
+            self.logger.warning('unregister_channel_from_HardwareManager() channel already deleted')
 
 
         
@@ -584,7 +574,7 @@ class RadarHardwareManager:
 
         sys.exit(0)
 
-    def _calc_period_details(self):
+    def _calc_period_details(self, newChannels=[]):
         """ calculate details for integration period and save it in channel objects"""
         # calculate the pulse sequence period with padding
         sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] -  self.commonChannelParameter['pulse_sequence_offsets_vector'][0]
@@ -614,7 +604,7 @@ class RadarHardwareManager:
         self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
 
         # inform all channels with the number of pulses per integration period        
-        for ch in self.channels:
+        for ch in self.channels+newChannels:
             ch.nSequences_per_period = nSequences_per_period
             ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
@@ -722,7 +712,7 @@ class RadarHardwareManager:
                 nAntennas = recv_dtype(cudasock, np.uint32)
                 for iChannel,channel in enumerate(self.channels):
 
-                    if allProcessingChannelStates[iChannel] is CS_PROCESSING:
+                    if channel.processing_state == CS_PROCESSING:
                         transmit_dtype(cudasock, channel.cnum, np.int32)
 
                         for iAntenna in range(nAntennas):
@@ -774,17 +764,24 @@ class RadarHardwareManager:
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
                channel.next_processing_state = CS_INACTIVE
                channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_INACTIVE".format(self.swingManager.processingSwing, channel.cnum )) 
+               cmd.transmit()
+               cmd.client_return()      
             else:
-               cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-               self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-               if channel.processing_state == CS_INACTIVE: # first use of swing 1
-                   channel.processing_state = CS_READY
-                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
-               else: 
-                   channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
-                   channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum )) 
-            cmd.transmit()
-            cmd.client_return()      
+               if channel.active:
+                  cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+                  self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+                  cmd.transmit()
+                  cmd.client_return()      
+   
+                  if channel.processing_state == CS_INACTIVE: # first use of swing 1
+                      channel.processing_state = CS_READY
+                      channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
+                  else: 
+                      channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
+                      channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum ))
+               else:
+                  self.logger.debug("ch {}: channel not active => not calling CUDA_ADD".format(channel.cnum))
+            
  
 
         # CUDA_GENERATE for first period
@@ -833,23 +830,22 @@ class RadarHardwareManager:
            self.logger.debug('end CUDA_PROCESS')
 
            # repeat CLR_FREQ record for 2nd period (if executed for 1st)
-           for iChannel,ch in enumerate( self.channels):
-              if ch.scanManager.repeat_clrfreq_recording:
-                 self.next_active_state = CS_TRIGGER 
-                 self.active_state      = CS_CLR_FREQ 
-                 ch.scanManager.repeat_clrfreq_recording = False 
-                 self.logger.debug("Repeat reset state of cnum {} to CLR_FREQ (from {}) for second period".format(ch.cnum, self.next_active_state))
-   
-              elif ch.scanManager.current_period == 0:  # first period but no CLR_FREQ
-                 ch.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(ch.cnum, self.swingManager.activeSwing))
-                 ch.active_state = CS_TRIGGER 
+           if self.clearFreqRawDataManager.repeat_request_for_2nd_period:
+              self.clearFreqRawDataManager.repeat_request_for_2nd_period = False
+              self.clearFreqRawDataManager.outstanding_request = True
+              
+           # automatic trigger of second period (without ROS:SET_READY)
+           for channel in  self.channels:
+              if channel.scanManager.current_period == 0:  # first period 
+                 channel.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(channel.cnum, self.swingManager.activeSwing))
+                 channel.active_state = CS_TRIGGER 
               
         
 
     def next_period_RHM(self):
         self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
-           if ch is not None: 
+           if ch is not None and ch.active: 
           #    if (not ch.scanManager.isFirstPeriod):
           #    if (not ch.scanManager.isLastPeriod) and (not ch.scanManager.isFirstPeriod):
                   ch.scanManager.period_finished()
@@ -968,12 +964,6 @@ class RadarChannelHandler:
         #   WAIT_FOR_DATA        : self.WaitForDataHandler,\
             GET_DATA             : self.GetDataHandler}
 
-        while not self.parent_RadarHardwareManager.addingNewChannelsAllowed:
-            self.logger.info("Waiting to finish GET_DATA before adding new channel")
-            time.sleep(RADAR_STATE_TIME)
-
-        # adding channel to HardwareManager
-        self.parent_RadarHardwareManager.channels.append(self)  
 
         while True:
             rmsg = rosmsg_command(self.conn)
@@ -1018,10 +1008,10 @@ class RadarChannelHandler:
         while self.state[swing] not in state:
             counter = (counter + 1) % 10000
             if state[0] == CS_SAMPLES_READY and counter == 1:
-               self.logger.debug("_waitForState CS_SAMPLES_READY. state is {} (swing {})".format(self.state[swing], swing))
+               self.logger.debug("ch {}:_waitForState CS_SAMPLES_READY. state is {} (swing {})".format(self.cnum, self.state[swing], swing))
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
-                self.logger.error('CHANNEL STATE TIMEOUT')
+                self.logger.error('CHANNEL STATE TIMEOUT for channel {}'.format(self.cnum))
                 pdb.set_trace()
                 break
     
@@ -1068,12 +1058,12 @@ class RadarChannelHandler:
         #rmsg.set_data('type', rmsg.payload['type'])
         #rmsg.transmit()
         self.conn.close()
-        self.logger.debug('Deleting channel...')
+        self.logger.debug('Deleting channel {}'.format(self.cnum))
         hardwareManager = self.parent_RadarHardwareManager
-        hardwareManager.deleteRadarChannel(self)
+        hardwareManager.unregister_channel_from_HardwareManager(self)
         del self # TODO close thread ?!?
         # sys.exit() # TODO: set return value
-        hardwareManager.logger.info('Deleted channel.')
+        hardwareManager.logger.info('Deleted channel {}.'.format(self.cnum))
         return 'exit'
 
     def PingHandler(self, rmsg):
@@ -1082,23 +1072,22 @@ class RadarChannelHandler:
     #@timeit
     def RequestAssignedFreqHandler(self, rmsg):
         # wait for clear frequency search to end, hardware manager will set channel state to WAIT
-            # self._waitForState(STATE_WAIT) 
-            clrFreqResult = self.scanManager.get_current_clearFreq_result()
+        # self._waitForState(STATE_WAIT) 
+        clrFreqResult = self.scanManager.get_current_clearFreq_result()
 
-            transmit_dtype(self.conn, clrFreqResult[0], np.int32)
-            transmit_dtype(self.conn, clrFreqResult[1], np.float32)
-            self.logger.info('clr frequency search raw data age: {} s'.format(time.time() - clrFreqResult[2])) # YYY
-            return RMSG_SUCCESS
+        transmit_dtype(self.conn, clrFreqResult[0], np.int32)
+        transmit_dtype(self.conn, clrFreqResult[1], np.float32)
+
+        self.logger.info('ch {}: clr frequency search raw data age: {} s'.format(self.cnum, time.time() - clrFreqResult[2]))
+        return RMSG_SUCCESS
 
     #@timeit
     def RequestClearFreqSearchHandler(self, rmsg):
-        self._waitForState(self.swingManager.activeSwing, [CS_READY, CS_INACTIVE]) 
         self.clrfreq_struct.receive(self.conn)
 
-        # request clear frequency search time from hardware manager
-        self.next_active_state = self.active_state 
-        self.active_state      = CS_CLR_FREQ
-        self.logger.debug("RequestClearFreqSearchHandler: setting active state: {} and next active state {}".format(self.active_state, self.next_active_state))        
+        # set request flat from RadarHardwareManager:clearFreqRawDatamanager
+        self.parent_RadarHardwareManager.clearFreqRawDataManager.outstanding_request = True
+        self.logger.debug("RequestClearFreqSearchHandler: setting request CLR_FREQ flag in clearFreqRawDataManager (caused by ch {})".format(self.cnum))
 
         return RMSG_SUCCESS
 
@@ -1110,7 +1099,7 @@ class RadarChannelHandler:
         # ROS calls it ready, we call it trigger
         self._waitForState(self.swingManager.nextSwingToTrigger, CS_READY)
         transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
-        self.logger.debug("SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.swingManager.nextSwingToTrigger))
+        self.logger.debug("ch {}: SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.cnum, self.swingManager.nextSwingToTrigger))
         self.state[self.swingManager.nextSwingToTrigger] = CS_TRIGGER
         # send trigger command
         return RMSG_SUCCESS
@@ -1119,7 +1108,7 @@ class RadarChannelHandler:
     def RegisterSeqHandler(self, rmsg):
         # function to get the indexes of rising edges going from zero to a nonzero value in array ar
 
-        self.logger.debug('Entering RegisterSeqHandler')
+        self.logger.debug('Entering RegisterSeqHandler for channel {}'.format(self.cnum))
         def _rising_edge_idx(ar):
             ar = np.insert(ar, 0, -2)
             edges = np.array([ar[i+1] * (ar[i+1] - ar[i] > 1) for i in range(len(ar)-1)])
@@ -1228,87 +1217,37 @@ class RadarChannelHandler:
     # receive a ctrlprm struct
     #@timeit
     def SetParametersHandler(self, rmsg):
-
         # TODO: check if new freq is possible with usrp_centerFreq
-        
-        isFirstSequence = self.scanManager.current_period == 0 # TODO is this definition the same as active_state is CS_INACTIVE ???
+        # TODO divide compatibiliti check in sequence and ctrlprm check?
+        # TODO add compatibility check in parameter prediction function
 
-        if not isFirstSequence:
+        # period not jet triggered
+        if self.active_state == CS_INACTIVE or self.scanManager.current_period == 0:
+           self.ctrlprm_struct.receive(self.conn)
+           self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam']))
+           if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
+              return RSMG_FAILURE
+           self.parent_RadarHardwareManager.newChannelList.append(self)
+ 
+        # in middle of scan, period already triggerd. only compare with prediction
+        else:
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
-        self.ctrlprm_struct.receive(self.conn)
-        self.logger.debug("Received from ROS: tbeam={}, rbeam={}".format(self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam']))
-        self.CheckChannelCompatibility()
-       
-        if self.active_state is CS_INACTIVE:
-            channel = self
-            RHM = self.parent_RadarHardwareManager
-            RHM._calc_period_details() 
-
-            allOtherChannels = [ch for ch in RHM.channels if ch is not self]
-            if len(allOtherChannels) == 0:
-                self.logger.info("This is first channel. Adding channel.")
-            else:
-                self.logger.info("This is {}. channel. Waiting to add channel.".format(len(allOtherChannels)+1))
-                for otherChannel in allOtherChannels:
-                    otherChannel._waitFor(0, [CS_INACTIVE, CS_READY, CS_SAMPELS_READY, CS_CLR])
-                    self.logger.debug("Channel {} is {}".format(otherChannel.cnum, otherChannel.active_state))
-                self.logger.debug("Finished waiting. Adding channel...")
-            
-            # CUDA_ADD_CHANNEL in first period
-            cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            self.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
-            cmd.transmit()
-            cmd.client_return()      
- 
-
-            # CUDA_GENERATE for first period
-            self.logger.debug('send CUDA_GENERATE_PULSE')
-            cmd = cuda_generate_pulse_command(RHM.cudasocks, channel.swingManager.activeSwing)
-            cmd.transmit()
-            cmd.client_return()
-            self.logger.debug('received response CUDA_GENERATE_PULSE')
-
-            channel.active_state = CS_READY
-       
-        # compare received paramter with predicted parameter
-        if not isFirstSequence:
+           # compare received with predicted parameter
+           self.ctrlprm_struct.receive(self.conn)
            for key in ctrlprm_old.keys():
               if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
-                 self.logger.error("received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+                 self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+                 # TODO return RMSG_FAILURE
               else:
-                 self.logger.debug("received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+                 self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
 
-##        self._waitForState(STATE_WAIT)
-##        self.logger.debug('channel {} starting PRETRIGGER'.format(self.cnum))
-##        # check if the sequence is new before diving into PRETRIGGER state?
-##        
-##        ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
-##        self.ctrlprm_struct.receive(self.conn)
-##
-##        self.logger.debug('tfreq: {}, rfreq: {}'.format(self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-##
-##        # if we're not due for an update already, check and see if we need to update the transmit pulse sequence
-##        if not self.update_channel:
-##            for key in ctrlprm_old.keys():
-##                if key != '': # TODO: what is the blank key doing in the ctrlprm?..
-##                    if ctrlprm_old[key] != self.ctrlprm_struct.payload[key]:
-##                        self.update_channel = True
-##                        break
-##        print('usrp_server RadarChannelHandler.SetParametersHandler: tfreq: ' + str(self.ctrlprm_struct.payload['tfreq']) + ' rfreq: ' + str(self.ctrlprm_struct.payload['rfreq']))
-##
-##        if not self.CheckChannelCompatibility():   # TODO: move this to point where sequence is received?
-##            self.logger.error("New channel is not compatible")
-##            return RMSG_FAILURE
-##
-##        self.state = STATE_PRETRIGGER
-##        self.logger.debug('channel {} going into PRETRIGGER state'.format(self.cnum))
-##        self._waitForState(STATE_WAIT)
-##        # TODO for a SetParametersHandler, prepare transmit and receive sample buffers
-           
+        
         if (self.rnum < 0 or self.cnum < 0):
+            self.logger.error("SET_PARAMETER: Invalid radar or channel number: rnum={}, cnum={}".format(self.rnum, self.cnum))
             return RMSG_FAILURE
+
         return RMSG_SUCCESS
 
     def CheckChannelCompatibility(self):
@@ -1319,7 +1258,7 @@ class RadarChannelHandler:
         if all([self.pulse_lens[0]==self.pulse_lens[i] for i in range(1,len(self.pulse_lens))]):
             pulseLength = self.pulse_lens[0]
         else:
-            self.logger.error("Pulse lengths has to be the equal! ") # TODO raise error?
+            self.logger.error("Pulse lengths in one sequence have to be the equal! ") # TODO raise error?
             pdb.set_trace()
             return False
         
@@ -1333,6 +1272,7 @@ class RadarChannelHandler:
             return True
 
         else:   # not first channel => check if new parameters are compatible
+            
             parCompatibleList_seq  = [hardwareManager.commonChannelParameter[parameter] == getattr(self, parameter) for parameter in commonParList_seq]
             parCompatibleList_ctrl = [hardwareManager.commonChannelParameter[parameter] == self.ctrlprm_struct.payload[parameter] for parameter in commonParList_ctrl]
 
@@ -1369,16 +1309,17 @@ class RadarChannelHandler:
         # TODO: return bad status if negative radar or channel
         self.update_ctrlprm_class("current")
         self.ctrlprm_struct.transmit()
+        self.logger.debug("ch {}: sending current ctrlprm_struct (tfreq={}, rfreq={},tbeam={},rbeam={})".format(self.cnum, self.ctrlprm_struct.get_data('tfreq'), self.ctrlprm_struct.get_data('rfreq'), self.ctrlprm_struct.get_data('tbeam'), self.ctrlprm_struct.get_data('rbeam') ))
         return RMSG_SUCCESS
     
     #@timeit
     def GetDataHandler(self, rmsg):
-        self.logger.debug('start channelHanlder:GetDataHandler')
+        self.logger.debug('ch {}: start channelHanlder:GetDataHandler'.format(self.cnum))
         self.update_ctrlprm_class("current")
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
         self.dataprm_struct.transmit()
-        self.logger.debug('sending dprm struct')
+        self.logger.debug('ch {}: sending dprm struct'.format(self.cnum))
 
         if self.rnum < 0 or self.cnum < 0:
             pdb.set_trace()
@@ -1387,15 +1328,15 @@ class RadarChannelHandler:
         # TODO investigate possible race conditions
 
         finishedSwing = self.swingManager.lastSwingWithData 
-        self.logger.debug('channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(finishedSwing))
+        self.logger.debug('ch {}: channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(self.cnum, finishedSwing))
         self._waitForState(finishedSwing, CS_SAMPLES_READY)
 
-        self.logger.debug('channelHanlder:GetDataHandler returning samples')
+        self.logger.debug('ch {}: channelHanlder:GetDataHandler returning samples'.format(self.cnum))
         self.send_results_to_control_program()
 
-        self.logger.debug('channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.next_state[finishedSwing], finishedSwing))
+        self.logger.debug('ch {}: channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.cnum, self.next_state[finishedSwing], finishedSwing))
         self.state[finishedSwing] = self.next_state[finishedSwing]
-        self.logger.debug('end channelHanlder:GetDataHandler')
+        self.logger.debug('ch {}: end channelHanlder:GetDataHandler'.format(self.cnum))
 
         self.swingManager.lastSwingWithData = 1 - finishedSwing   # alternate swing
 
@@ -1459,11 +1400,17 @@ class RadarChannelHandler:
     def SetRadarChanHandler(self, rmsg):
         self.rnum = recv_dtype(self.conn, np.int32)
         self.cnum = recv_dtype(self.conn, np.int32)
+
+        if self.cnum in [ch.cnum for ch in self.parent_RadarHardwareManager.channels if ch is not None and ch is not self]:
+           self.logger.error("New channel (cnum {}) can not be added beause channel with this cnum already active.".format(self.cnum))
+           return RMSG_FAILURE
+        
         
         self.ctrlprm_struct.set_data('channel', self.cnum)
         self.ctrlprm_struct.set_data('radar',  self.rnum)
 
         # TODO: how to handle channel contention?
+        # self.logger.name = "ChManager {}".format(self.cnum)
         self.logger.debug('radar num: {}, radar chan: {}'.format(self.rnum, self.cnum))
 
         # TODO: set RMSG_FAILURE if radar channel is unavailable
