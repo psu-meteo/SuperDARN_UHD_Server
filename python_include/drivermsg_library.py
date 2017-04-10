@@ -260,9 +260,10 @@ class cuda_remove_channel_command(driver_command):
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
-    def __init__(self, cudas, swing = -1):
+    def __init__(self, cudas, swing=-1, mixing_freq=-1 ):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
         self.queue(swing, np.uint32, 'swing')
+        self.queue(mixing_freq, np.float32, 'mixing_freq')
 
 
 # re-initialize the usrp driver for a new pulse sequence

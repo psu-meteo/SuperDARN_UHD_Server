@@ -101,6 +101,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
         swing = cmd.payload['swing']
+        self.gpu.usrp_mixing_freq[swing] = cmd.payload['mixing_freq']
  
         if not any(self.gpu.sequences[swing]):
             self.logger.error("no sequences are defined. Pulse generation not possible")

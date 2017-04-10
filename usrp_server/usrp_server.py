@@ -59,32 +59,35 @@ def oh_jonny_give_me_some_data():
 def oh_jonny_calc_the_frequency(rawData, metaData,clearFreqPar, beamNo):
     return clearFreqPar[0], 11
 
-class usrpCenterFreqManager():
+class usrpMixingFreqManager():
+    """ Manages usrp mixing frequency based on channels. Ensures that only one channel
+        at a time can call add_new_freq_band().  """
   
-    def __init__(self):
-       self.semaphore = posix_ipc.Semaphore('usrp_center_freq', posix_ipc.O_CREAT)
-       self.release()
+    def __init__(self, cFreq, bandWidth):
+       self.current_mixing_freq = cFreq
+       self.usrp_bandwidth      = bandWidth
+       self.semaphore = posix_ipc.Semaphore('usrp_mixing_freq', posix_ipc.O_CREAT)
+       self.semaphore.release()
        self.channelRangeList    = []
        self.channelList         = []
-       self.current_center_freq = None
-       self.usrp_bandwidth      = None
 
     def add_new_freq_band(self, channel):
-       if self.usrp_bandwidth is None or self.current_center_freq is None:
-          channel.logger.error("center_freq or usrp_bandwith have not been initilaizen in usrpCenterFreqManager ")
-          ValueError("no center_freq or bandwidth")
+       """ Checks if new channel is covered with current mixing frequency and bandwidth. 
+           Retruns True/False if channel can/cannot be added. If changing the mixing frequency
+           allows to add the new channel, the new mixing frequency will be output argument.
+       """
 
        newLower, newUpper = self.get_range_of_channel(channel)
 
-       channel.logger.debug("ch {}: waiting for semaphore of usrpCenterFreqManager")
+       channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager")
        self.semaphore.acquire()
-       channel.logger.debug("ch {}: acquired semaphore of usrpCenterFreqManager")
+       channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager")
    
-       if newLower > (self.current_center_freq - self.usrp_bandwidth/2) and newUpper < (self.current_center_freq + self.usrp_bandwidth/2):
+       if newLower > (self.current_mixing_freq - self.usrp_bandwidth/2) and newUpper < (self.current_mixing_freq + self.usrp_bandwidth/2):
           channel.logger.degug("channel range is within USRP bandwidth")
           self.channelRangeList.append([newLower, newUpper])
           self.channelList.append(channel)
-          return True
+          result = True
        else:
           #determine range of all channels
           allCh_lower = newLower
@@ -97,24 +100,21 @@ class usrpCenterFreqManager():
 
           if (allCh_upper - allCh_lower) > self.usrp_bandwith:
              channel.logger.error("new channel can not be added. USPR bandwidth too small")
-             return False
+             result =  False
           else:
-             newCenterFreq = (allCh_upper - allCh_lower)/2 + allCh_lower
-             channel.logger.info("calculated new usrp center frequency: {} kHz (old was {} kHz)".format(newCenterFreq, self.current_center_freq))
-             # adjust center freq that everything is in overall bandwidth
-             RADAR_FREQ_RANGE = [8000 18000] # TODO move to config file or read from restricted freq file
-             newCenterFreq = max(newCenterFreq, RADAR_FREQ_RANGE[0]+self.usrp_bandwidth/2)
-             newCenterFreq = min(newCenterFreq, RADAR_FREQ_RANGE[1]-self.usrp_bandwidth/2)
-             
-             
- #            TODO set new cfreq and trigger CUDA_generate
-
-
-      
-
-      # what if freq changes?
+             newMixingFreq = (allCh_upper - allCh_lower)/2 + allCh_lower
+             channel.logger.info("calculated new usrp mixing frequency: {} kHz (old was {} kHz)".format(newMixingFreq, self.current_mixing_freq))
+             # adjust mixing freq that everything is in overall bandwidth
+             RHM = channel.parent_RadarHardwareManager
+             newMixingFreq = max(newMixingFreq, RHM.hardwareLimit_freqRange[0]+self.usrp_bandwidth/2)
+             newMixingFreq = min(newMixingFreq, RHM.hardwareLimit_freqRange[1]-self.usrp_bandwidth/2)
+             self.current_mixing_freq = newMixingFreq
+             result = newMixingFreq
+          
+     
        self.semaphore.release()
-       channel.logger.debug("ch {}: released semaphore of usrpCenterFreqManager")
+       channel.logger.debug("ch {}: released semaphore of usrpMixingFreqManager")
+       return result
 
     def get_range_of_channel(self, channel):
        rangeList = channel.scanManager.clear_freq_range_list
@@ -259,6 +259,7 @@ class RadarHardwareManager:
         self.client_sock.bind(('localhost', port))
         self.logger = logging.getLogger('HwManager')
         self.logger.info('listening on port ' + str(port) + ' for control programs')
+        self.mixingFreqManager       = None
         
         self.ini_file_init()
         self.usrp_init()
@@ -272,6 +273,8 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager = clearFrequencyRawDataManager()
         self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
+
+
 
     def run(self):
         def spawn_channel(conn):
@@ -360,8 +363,8 @@ class RadarHardwareManager:
         # READ driver_config.ini
         driver_config = configparser.ConfigParser()
         driver_config.read('../driver_config.ini')
-        self.ini_shm_settings = driver_config['shm_settings']
-        self.ini_cuda_settings = driver_config['cuda_settings']
+        self.ini_shm_settings     = driver_config['shm_settings']
+        self.ini_cuda_settings    = driver_config['cuda_settings']
         self.ini_network_settings = driver_config['network_settings']
 
         # READ usrp_config.ini
@@ -376,15 +379,16 @@ class RadarHardwareManager:
         # READ array_config.ini
         array_config = configparser.ConfigParser()
         array_config.read('../array_config.ini')
-        self.ini_array_settings = array_config['array_info']
         self.ini_rxfe_settings  = array_config['rxfe']
         self.totalScalingFactor = float(array_config['gain_control']['total_scaling_factor'])
+
+        self.ini_array_settings = array_config['array_info']
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
         self.nMainAntennas   = int(  self.ini_array_settings['main_ants'] )
         self.nBackAntennas   = int(  self.ini_array_settings['back_ants'] )
         self.array_nBeams    = int(  self.ini_array_settings['nbeams'] )
         self.array_x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
-
+        self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
 
     def usrp_init(self):
         usrp_drivers = [] # hostname of usrp drivers
@@ -401,12 +405,9 @@ class RadarHardwareManager:
         self.nUSRPs = len(usrp_drivers)
         self.fault_status = np.ones(self.nUSRPs)
         
-        # TODO: read these from ini config file
-        # currently pulled from radar_config_constants.py
-        self.usrp_tx_cfreq = DEFAULT_USRP_CENTER_FREQ
-        self.usrp_rx_cfreq = DEFAULT_USRP_CENTER_FREQ 
-        self.usrp_rf_tx_rate = int(self.ini_cuda_settings['FSampTX'])
-        self.usrp_rf_rx_rate = int(self.ini_cuda_settings['FSampRX'])
+        self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
+        self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
+        self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
 
         # open each 
         try:
@@ -541,7 +542,7 @@ class RadarHardwareManager:
 
         # CUDA_GENERATE for first period
         RHM.logger.debug('send CUDA_GENERATE_PULSE')
-        cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing)
+        cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq)
         cmd.transmit()
         cmd.client_return()
         RHM.logger.debug('received response CUDA_GENERATE_PULSE')
@@ -650,7 +651,7 @@ class RadarHardwareManager:
       
         for ch in self.channels:
             if ch.ctrlprm_struct.payload['tfreq'] != 0: 
-                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.usrp_tx_cfreq, self.usrp_rf_tx_rate))
+                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate))
                 if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
         
@@ -664,7 +665,7 @@ class RadarHardwareManager:
 
         if transmittingChannelAvailable:
            # USRP SETUP
-           cmd = usrp_setup_command(self.usrpsocks, self.usrp_tx_cfreq, self.usrp_rx_cfreq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+           cmd = usrp_setup_command(self.usrpsocks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
            cmd.client_return()
@@ -811,7 +812,7 @@ class RadarHardwareManager:
         synthNewPulses = True # TODO keep track of changes to do this only if necessary
         if synthNewPulses:
            self.logger.debug('send CUDA_GENERATE_PULSE')
-           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing) 
+           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq) 
            cmd.transmit()
            cmd.client_return()
            self.logger.debug('received response CUDA_GENERATE_PULSE')
@@ -1325,7 +1326,7 @@ class RadarChannelHandler:
                     
 
         # TODO change usrp_xx_cfreq somewhere if possible        
-        assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
+        assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.mixingFreqManager.current_mixing_freq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
         
      
