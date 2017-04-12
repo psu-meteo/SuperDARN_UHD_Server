@@ -32,7 +32,7 @@
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
 
-#define RX_OFFSET 0 // 290e-6 // microseconds, alex had 450-e6 set here
+#define RX_OFFSET 0
 
 void usrp_rx_worker(
     uhd::usrp::multi_usrp::sptr usrp,
@@ -86,15 +86,15 @@ void usrp_rx_worker(
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
     if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
-	if (num_acc_samps != num_requested_samps){
+    if (num_acc_samps != num_requested_samps){
         *return_status=-1;
-		uhd::time_spec_t rx_error_time = usrp->get_time_now();
-		std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
+        uhd::time_spec_t rx_error_time = usrp->get_time_now();
+        std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
 
-		std::cerr << "Error code: " << md.error_code << "\t";
-		std::cerr << "Samples rx'ed: " << num_acc_samps << 
-			" (expected " << num_requested_samps << ")" << std::endl;
-	}
+        std::cerr << "Error code: " << md.error_code << "\t";
+        std::cerr << "Samples rx'ed: " << num_acc_samps << 
+            " (expected " << num_requested_samps << ")" << std::endl;
+    }
 
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
         uhd::time_spec_t rx_error_time = usrp->get_time_now();

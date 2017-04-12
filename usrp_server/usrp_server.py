@@ -70,11 +70,14 @@ class clearFrequencyRawDataManager():
         self.center_freq = None
         self.sampling_rate = None
         self.number_of_samples = None
-    
+         
         self.metaData = {}
         self.rawData = None
         
         self.metaData['x_spacing'] = antenna_spacing 
+
+        self.logger = logging.getLogger('clearFrequency')
+        self.logger.debug('clearFrequencyRawDataManager initialized')
 
 
     def set_usrp_driver_connections(self, usrp_driver_socks):
@@ -96,7 +99,10 @@ class clearFrequencyRawDataManager():
     def record_new_data(self):
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
+
+        self.logger.debug('grabbing new data')
         self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
+
         self.metaData['antenna_list'] = self.antennaList
 
         # so, self.rawData is np.array(complex(nantennas, nsamples)
@@ -648,21 +654,27 @@ class RadarHardwareManager:
            cmd.client_return()
            self.logger.debug('received response USRP_SETUP')
 
+
            # USRP_TRIGGER
+
+           self.logger.debug('sending usrp_get_time command')
            cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
-        
-           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
-           
+
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
 
            usrp_time = cmd.recv_time(self.usrpsocks[0])
            cmd.client_return()
-         
+
+       
+          
+
            sequence_start_time_secs  = np.zeros(channel.nSequences_per_period, dtype=np.uint64)
            sequence_start_time_usecs = np.zeros(channel.nSequences_per_period, dtype=np.uint32)
+
+           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
 
            # provide sequence times for control program
            for iSequence in range(channel.nSequences_per_period):
@@ -680,6 +692,7 @@ class RadarHardwareManager:
            self.logger.debug('sending trigger pulse command')
            cmd.transmit()
 
+           self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
            # set state of channel to CS_PROCESSING
            for ch in self.channels:
                if ch.active_state == CS_TRIGGER:
@@ -693,7 +706,6 @@ class RadarHardwareManager:
                pdb.set_trace()
 
            self.logger.debug('trigger return!')
-
 
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
@@ -753,8 +765,7 @@ class RadarHardwareManager:
                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} from CS_PROCESSING to CS_SAMPLES_READY".format(self.swingManager.processingSwing, channel.cnum )) 
 
 
-       # PERIOD FINISHED
-        
+        # PERIOD FINISHED
         self.next_period_RHM()
  
         # CUDA_ADD & CUDA_GENGERATE for processingSwing 
@@ -767,20 +778,22 @@ class RadarHardwareManager:
                cmd.transmit()
                cmd.client_return()      
             else:
-               if channel.active:
-                  cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-                  self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
-                  cmd.transmit()
-                  cmd.client_return()      
+                # so, how do I know if the channel is active?
+                if channel.active:
+                    cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
+                    self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+                    cmd.transmit()
+                    cmd.client_return()      
    
-                  if channel.processing_state == CS_INACTIVE: # first use of swing 1
-                      channel.processing_state = CS_READY
-                      channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
-                  else: 
-                      channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
-                      channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum ))
-               else:
-                  self.logger.debug("ch {}: channel not active => not calling CUDA_ADD".format(channel.cnum))
+                    if channel.processing_state == CS_INACTIVE: # first use of swing 1
+                        channel.processing_state = CS_READY
+                        channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
+                    else: 
+                        channel.next_processing_state = CS_READY # will be set to CS_READ after GetData finishes
+                        channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_READY".format(self.swingManager.processingSwing, channel.cnum ))
+                else:
+                    self.logger.debug("ch {}: channel not active => not calling CUDA_ADD".format(channel.cnum))
+                    pdb.set_trace()
             
  
 
@@ -814,6 +827,7 @@ class RadarHardwareManager:
    
            self.logger.debug('start waiting for USRP_DATA return')
            cmd.client_return()
+
            self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
            self.logger.debug('end waiting for USRP_DATA return')
 
@@ -845,7 +859,7 @@ class RadarHardwareManager:
     def next_period_RHM(self):
         self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
-           if ch is not None and ch.active: 
+            if ch is not None: 
           #    if (not ch.scanManager.isFirstPeriod):
           #    if (not ch.scanManager.isLastPeriod) and (not ch.scanManager.isFirstPeriod):
                   ch.scanManager.period_finished()
@@ -905,8 +919,9 @@ class RadarChannelHandler:
         self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager.array_beam_sep, self.parent_RadarHardwareManager.array_nBeams)
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
+        
 
-        # DELETE THIS!
+        # DELETE THIS AFTER CLEAR FREQUENCY CODE IS WORKING
         self.logger.warning("Scan information only set for debugging")
         self.scanManager.scan_beam_list = [i for i in range(16)]
         self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
@@ -1299,9 +1314,6 @@ class RadarChannelHandler:
         # TODO change usrp_xx_cfreq somewhere if possible        
         assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.usrp_tx_cfreq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
-        
-     
-
 
     # send ctrlprm struct
     #@timeit
@@ -1444,6 +1456,7 @@ class RadarChannelHandler:
 
     def SetActiveHandler(self, rmsg):
         # called by site library at the start of a scan 
+        self.active = True
 
         self.logger.debug('SetActiveHandler starting')
 
@@ -1468,6 +1481,7 @@ class RadarChannelHandler:
         return RMSG_SUCCESS
 
     def SetInactiveHandler(self, rmsg):
+        self.active = False
         # TODO: return failure status if the radar or channel number is invalid?
         return RMSG_SUCCESS
 
