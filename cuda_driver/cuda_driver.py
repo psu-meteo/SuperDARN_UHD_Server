@@ -518,7 +518,7 @@ class ProcessingGPU(object):
             self.cu_tx_mixer_freq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
                 
-        self.streams = [cuda.Stream() for i in range(self.nChannels)]
+        self.streams = [cuda.Stream() for i in range(nSwings)]
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
@@ -820,6 +820,7 @@ class ProcessingGPU(object):
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self, swing):
         self.streams[swing].synchronize()
+        self.logger.debug("Finished waiting for synchronize streams")
         cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples)
         if False:
            import matplotlib.pyplot as plt

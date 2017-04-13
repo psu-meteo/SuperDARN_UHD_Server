@@ -330,7 +330,7 @@ class RadarHardwareManager:
                         controlLoop_logger.debug('end RHM.trigger_next_swing()')
 
                 else:
-                    time.sleep(RADAR_STATE_TIME+1*debug) # sleep to reduce load of this while loop
+                    time.sleep(RADAR_STATE_TIME) # sleep to reduce load of this while loop
 
         # end of radar_main_control_loop()
 
@@ -519,6 +519,7 @@ class RadarHardwareManager:
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
 
+        RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
         RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
         for channel in newChannelList:
@@ -541,11 +542,12 @@ class RadarHardwareManager:
             RHM.newChannelList.remove(channel)
 
         # CUDA_GENERATE for first period
-        RHM.logger.debug('send CUDA_GENERATE_PULSE')
+        RHM.logger.debug('send CUDA_GENERATE_PULSE (1st period)')
         cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq)
         cmd.transmit()
         cmd.client_return()
-        RHM.logger.debug('received response CUDA_GENERATE_PULSE')
+        RHM.logger.debug('end CUDA_GENERATE_PULSE (1st period)')
+        RHM.logger.debug("end initialize_channel")
 
 
     def unregister_channel_from_HardwareManager(self, channelObject):
@@ -665,13 +667,15 @@ class RadarHardwareManager:
 
         if transmittingChannelAvailable:
            # USRP SETUP
+           self.logger.debug("start USRP_SETUP")
            cmd = usrp_setup_command(self.usrpsocks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
            cmd.client_return()
-           self.logger.debug('received response USRP_SETUP')
+           self.logger.debug("end USRP_SETUP")
 
            # USRP_TRIGGER
+           self.logger.debug("start USRP_GET_TIME")
            cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
         
@@ -683,6 +687,7 @@ class RadarHardwareManager:
 
            usrp_time = cmd.recv_time(self.usrpsocks[0])
            cmd.client_return()
+           self.logger.debug("end USRP_GET_TIME")
          
            sequence_start_time_secs  = np.zeros(channel.nSequences_per_period, dtype=np.uint64)
            sequence_start_time_usecs = np.zeros(channel.nSequences_per_period, dtype=np.uint32)
@@ -698,6 +703,7 @@ class RadarHardwareManager:
                channel.sequence_start_time_usecs = sequence_start_time_usecs
     
            # broadcast the start of the next integration period to all usrp
+           self.logger.debug('start USRP_TRIGGER')
            trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
            cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
            self.logger.debug('sending trigger pulse command')
@@ -714,8 +720,7 @@ class RadarHardwareManager:
            if TRIGGER_BUSY in returns:
                self.logger.error('could not trigger, usrp driver is busy')
                pdb.set_trace()
-
-           self.logger.debug('trigger return!')
+           self.logger.debug('end USRP_TRIGGER')
 
 
 
@@ -761,9 +766,10 @@ class RadarHardwareManager:
                 transmit_dtype(cudasock, -1, np.int32) # to end transfer process
                 
             cmd.client_return()
-            self.logger.debug('end get_data() transfering rx data via socket')
+            self.logger.debug('end CUDA_GET_DATA')
 
             # BEAMFORMING
+            self.logger.debug('start rx beamforming')
             beamformed_samples      = self.calc_beamforming( main_samples, back_samples)
             for iChannel, channel in enumerate(self.channels):
                if channel.processing_state is CS_PROCESSING:
@@ -774,6 +780,7 @@ class RadarHardwareManager:
 
                   channel.processing_state = CS_SAMPLES_READY
                   channel.logger.debug("Switching processing state (swing {}) state of cnum {} from CS_PROCESSING to CS_SAMPLES_READY".format(self.swingManager.processingSwing, channel.cnum )) 
+            self.logger.debug('end rx beamforming')
 
 
 
@@ -784,18 +791,22 @@ class RadarHardwareManager:
         # CUDA_ADD & CUDA_GENGERATE for processingSwing 
         for channel in self.channels:
             if channel.scanManager.isLastPeriod or channel.scanManager.isForelastPeriod:
+               self.logger.debug("start CUDA_REMOVE_CHANNEL")
                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
                channel.next_processing_state = CS_INACTIVE
                channel.logger.debug("Switching next processing state (swing {}) state of cnum {} to CS_INACTIVE".format(self.swingManager.processingSwing, channel.cnum )) 
                cmd.transmit()
                cmd.client_return()      
+               self.logger.debug("end CUDA_REMOVE_CHANNEL")
             else:
                if channel.active:
+                  self.logger.debug("start CUDA_ADD_CHANNEL")
                   cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
                   self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
                   cmd.transmit()
                   cmd.client_return()      
+                  self.logger.debug("end CUDA_ADD_CHANNEL")
    
                   if channel.processing_state == CS_INACTIVE: # first use of swing 1
                       channel.processing_state = CS_READY
@@ -811,15 +822,15 @@ class RadarHardwareManager:
         # CUDA_GENERATE
         synthNewPulses = True # TODO keep track of changes to do this only if necessary
         if synthNewPulses:
-           self.logger.debug('send CUDA_GENERATE_PULSE')
+           self.logger.debug('start CUDA_GENERATE_PULSE')
            cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq) 
            cmd.transmit()
            cmd.client_return()
-           self.logger.debug('received response CUDA_GENERATE_PULSE')
+           self.logger.debug('end CUDA_GENERATE_PULSE')
 
         if transmittingChannelAvailable:
            # USRP_READY_DATA for activeSwing 
-           self.logger.debug('sending USRP_READY_DATA command ')
+           self.logger.debug('start USRP_READY_DATA')
            cmd = usrp_ready_data_command(self.usrpsocks, swingManager.activeSwing)
            cmd.transmit()
     
@@ -840,6 +851,8 @@ class RadarHardwareManager:
            cmd.client_return()
            self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
            self.logger.debug('end waiting for USRP_DATA return')
+           self.logger.debug('end USRP_READY_DATA')
+
 
         # SWITCH SWINGS
         swingManager.switch_swings()
@@ -892,17 +905,29 @@ class RadarHardwareManager:
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
     
-                phasing_matrix = np.array([rad_to_rect(a * pshift) for a in RHM.antenna_index_list])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.matrix([rad_to_rect(a * pshift) for a in range(RHM.nMainAntennas)])  # calculate a complex number representing the phase shift for each antenna
                #phasingMatrix_back = np.ones(len(MAIN_ANTENNAS))
-    
-                for iSample in range(nSamples):
-                    itemp = 0
-                    qtemp = 0
-    
-                    for iAntenna in range(len(RHM.antenna_index_list)):
-                       itemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna]) - np.imag(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna])
-                       qtemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna]) + np.imag(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna])
-                    beamformed_samples[iChannel][iSample] = complex_int32_pack(itemp, qtemp)
+   
+                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) 
+                real_mat = np.real(complex_float_samples)
+                imag_mat = np.imag(complex_float_samples)
+                maxInt16value = 32767
+                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                   RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
+                   OverflowError("calc_beamforming: overflow error in casting data to complex int")
+                   # TODO maybe later limit values and continue
+
+                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                beamformed_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
+
+#                for iSample in range(nSamples):
+#                    itemp = 0
+#                    qtemp = 0
+#    
+#                    for iAntenna in range(len(RHM.antenna_index_list)):
+#                       itemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna]) - np.imag(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna])
+#                       qtemp += np.real(main_samples[iChannel][iAntenna][iSample]) * np.imag(phasing_matrix[iAntenna]) + np.imag(main_samples[iChannel][iAntenna][iSample]) * np.real(phasing_matrix[iAntenna])
+#                    beamformed_samples[iChannel][iSample] = complex_int32_pack(itemp, qtemp)
     
         return beamformed_samples
 
@@ -1087,9 +1112,10 @@ class RadarChannelHandler:
         self.logger.debug('Deleting channel {}'.format(self.cnum))
         hardwareManager = self.parent_RadarHardwareManager
         hardwareManager.unregister_channel_from_HardwareManager(self)
+        cnum = self.cnum
         del self # TODO close thread ?!?
         # sys.exit() # TODO: set return value
-        hardwareManager.logger.info('Deleted channel {}.'.format(self.cnum))
+        hardwareManager.logger.info('Deleted channel {}.'.format(cnum))
         return 'exit'
 
     def PingHandler(self, rmsg):
@@ -1269,8 +1295,8 @@ class RadarChannelHandler:
               if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
                  self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
                  # TODO return RMSG_FAILURE
-              else:
-                 self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+              #else:
+               #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
 
         
         if (self.rnum < 0 or self.cnum < 0):
@@ -1343,7 +1369,7 @@ class RadarChannelHandler:
     
     #@timeit
     def GetDataHandler(self, rmsg):
-        self.logger.debug('ch {}: start channelHanlder:GetDataHandler'.format(self.cnum))
+        self.logger.debug('start channelHanlder:GetDataHandler ch: {}'.format(self.cnum))
         self.update_ctrlprm_class("current")
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
@@ -1358,14 +1384,16 @@ class RadarChannelHandler:
 
         finishedSwing = self.swingManager.lastSwingWithData 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(self.cnum, finishedSwing))
+        self.logger.debug("start waiting for CS_SAMPLES_READY")
         self._waitForState(finishedSwing, CS_SAMPLES_READY)
+        self.logger.debug("end waiting for CS_SAMPLES_READY")
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler returning samples'.format(self.cnum))
         self.send_results_to_control_program()
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.cnum, self.next_state[finishedSwing], finishedSwing))
         self.state[finishedSwing] = self.next_state[finishedSwing]
-        self.logger.debug('ch {}: end channelHanlder:GetDataHandler'.format(self.cnum))
+        self.logger.debug('end channelHanlder:GetDataHandler ch: {}'.format(self.cnum))
 
         self.swingManager.lastSwingWithData = 1 - finishedSwing   # alternate swing
 

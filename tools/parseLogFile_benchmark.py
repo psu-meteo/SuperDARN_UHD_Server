@@ -99,35 +99,26 @@ timSpansServer = timeSpans(server)
 
 fig, ax = plt.subplots()
 uniqueNames = list(set(timSpansServer.startName))
+uniqueMessages = list(set(timSpansServer.msg))
 
 t0 = timSpansServer.startTime[0]
 
 for idx in range(len(timSpansServer.startTime)):
 
-    nameIdx = uniqueNames.index(timSpansServer.startName[idx])
+    # nameIdx = uniqueNames.index(timSpansServer.startName[idx])
+    nameIdx = uniqueMessages.index(timSpansServer.msg[idx])
+
     startSec = (timSpansServer.startTime[idx] - t0).total_seconds()
     duration = (timSpansServer.stopTime[idx] - timSpansServer.startTime[idx]).total_seconds()
     ax.barh(nameIdx, duration, left= startSec, align='center')
-    ax.text(startSec+duration/2, nameIdx, "{}\n{} ms".format(timSpansServer.msg[idx], duration*1000), rotation=90, backgroundcolor='w', alpha=0.5, ha='center', va='center' )
+    ax.text(startSec+duration/2, nameIdx, "{} ms".format(duration*1000), rotation=45, backgroundcolor='gray', alpha=0.5, ha='center', va='center' )
 
-
-plt.yticks(range(len(uniqueNames)), uniqueNames)
 plt.xlabel('Time in s')
-ax.axis([0,2, -0.5,len(uniqueNames)-0.5])
+
+plt.yticks(range(len(uniqueMessages)), uniqueMessages)
+ax.axis([0,20, -0.5,len(uniqueMessages)-0.5])
 
 plt.grid(True)
 plt.show()    
-
-
-# %% DEL
-#    def getStartEndMsg(self):
-#        output = logEntries()
-#        idx2take = [idx for idx,msg in enumerate(self.msg) if ("start " == msg[:6]) or ("end " == msg[:4])]
-#        output.time  = [self.time[idx]  for idx in idx2take]
-#        output.name  = [self.name[idx]  for idx in idx2take]
-#        output.level = [self.level[idx] for idx in idx2take]
-#        output.msg   = [self.msg[idx]   for idx in idx2take]
-#        return output
-
 
 
