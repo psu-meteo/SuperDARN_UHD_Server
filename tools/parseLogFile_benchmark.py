@@ -25,7 +25,11 @@ class logEntries:
         with open(self.fileName) as f:
             for line in f:
                 dateStr = line[:23]
-                self.time.append(datetime.strptime(dateStr, '%Y-%m-%d %H:%M:%S,%f'))
+                try:
+                   self.time.append(datetime.strptime(dateStr, '%Y-%m-%d %H:%M:%S,%f'))
+                except:
+                   print("No valid date format: {}".format(dateStr))
+                   continue
                 self.name.append(line[24:37].strip())
                 self.level.append(line[37:46].strip())
                 self.msg.append(line[46:-1].strip())
