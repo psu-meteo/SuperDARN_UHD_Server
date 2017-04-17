@@ -4,6 +4,7 @@
 #  srr.py [status]                                 : shows all software radio processes
 #  srr.py stop [cuda[_driver] | usrp_driver | driver]       : stops all software radio processes or only the specified 
 #  srr.py start [cuda[_driver] | usrp_driver | [usrp_]server] : comming soon...
+#  srr.py init [auto|main|aux]                     : create symlink to usrp_config file. no argumet is same as "auto"
 
 #  TODO:
 # restart is processes already running?
@@ -37,7 +38,7 @@ USRP_SERVER_QUIT  = '.'
 
 basePath = os.path.dirname(os.path.realpath(__file__))
 nSecs_restart_pause = 10
-
+print(basePath)
 def myPrint(msg):
    print("||>  {}".format(msg))
 basePrintLine = "||>==============================================================="
@@ -55,6 +56,41 @@ def waitFor(nSeconds):
       time.sleep(1)
    else:
       print
+######################
+## init
+def initialize(inputArg):
+   configPath = basePath # might change later...
+
+   usrp_config_source_file = dict(main=configPath + "/usrp_config__kod-main.ini", aux=configPath + "/usrp_config__kod-aux.ini")
+   usrp_config_target_file = configPath + "/usrp_config.ini"
+
+   if len(inputArg) == 1 or inputArg[1].lower() == "auto":
+      hostName = os.uname()[1].lower()
+      myPrint(" Auto detect of hostname: {}".format(hostName))
+   else:
+      hostName = inputArg[1].lower()
+
+   if hostName in ['main', 'kod-main', 'kodiak-main']:
+      computer = "main"
+   elif hostName in ['aux', 'kod-aux', 'kodiak-aux']: 
+      computer = "aux"
+   else:
+      myPrint(" Error. Unkown copmuter name. Use MAIN or AUX")
+      return
+
+   myPrint(" Initializing for computer: {}".format(computer))
+
+   if os.path.isfile(usrp_config_target_file):
+      if os.path.islink(usrp_config_target_file): # is a link
+          myPrint("  removing link for {}".format(usrp_config_target_file))
+          os.unlink(usrp_config_target_file)
+      else: # is a file
+          myPrint("  removing file {}".format(usrp_config_target_file))
+          os.remove(usrp_config_target_file)
+       
+   
+   os.symlink(usrp_config_source_file[computer], usrp_config_target_file)
+   myPrint("Creating symlink {} -> {}".format(usrp_config_target_file, usrp_config_source_file[computer]))
 
 
 ######################
@@ -333,6 +369,8 @@ else:
    
    if firstArg == "status":
        print_status()
+   elif firstArg == "init":
+       initialize(inputArg)
 
    elif firstArg == "start":
       if nArguments == 1 or inputArg[1].lower == "all":
