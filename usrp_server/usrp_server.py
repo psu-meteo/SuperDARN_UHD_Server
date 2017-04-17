@@ -701,7 +701,7 @@ class RadarHardwareManager:
             ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
             ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
-        RHM.nSequences_per_period = nSequences_per_period
+        self.nSequences_per_period = nSequences_per_period
             
         
 
@@ -1433,8 +1433,6 @@ class RadarChannelHandler:
         self.update_ctrlprm_class("current")
         self.dataprm_struct.set_data('samples', self.ctrlprm_struct.payload['number_of_samples'])
 
-        transmit_dtype(self.conn, self.resultData_nSequences_per_period, np.uint32)  
-
         self.dataprm_struct.transmit() # only 'samples' of dataprm is ever changed TODO check other parameter such as event_secs....
         self.logger.debug('ch {}: sending dprm struct'.format(self.cnum))
 
@@ -1451,6 +1449,8 @@ class RadarChannelHandler:
         self.logger.debug("end waiting for CS_SAMPLES_READY")
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler returning samples'.format(self.cnum))
+        transmit_dtype(self.conn, self.parent_RadarHardwareManager.resultData_nSequences_per_period, np.uint32)  
+        self.logger.debug("transmitting number of sequences in period: {}".format(self.parent_RadarHardwareManager.resultData_nSequences_per_period))
         self.send_results_to_control_program()
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.cnum, self.next_state[finishedSwing], finishedSwing))
@@ -1493,7 +1493,7 @@ class RadarChannelHandler:
 
     
         # send back samples with pulse start times 
-        for sidx in range(self.nSequences_per_period):
+        for sidx in range(self.parent_RadarHardwareManager.resultData_nSequences_per_period):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
             
             transmit_dtype(self.conn, self.sequence_start_time_secs[sidx],  np.uint32)
@@ -1509,7 +1509,7 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, self.resultData_main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, self.resultData_main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
+            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! perido {} / {}'.format(sidx, self.parent_RadarHardwareManager.resultData_nSequences_per_period ))
 
 
     
