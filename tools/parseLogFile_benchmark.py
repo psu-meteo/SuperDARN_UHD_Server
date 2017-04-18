@@ -104,6 +104,7 @@ timSpansServer = timeSpans(server)
 fig, ax = plt.subplots()
 uniqueNames = list(set(timSpansServer.startName))
 uniqueMessages = list(set(timSpansServer.msg))
+uniqueMessages.sort(reverse=True)
 
 t0 = timSpansServer.startTime[0]
 
@@ -115,7 +116,7 @@ for idx in range(len(timSpansServer.startTime)):
     startSec = (timSpansServer.startTime[idx] - t0).total_seconds()
     duration = (timSpansServer.stopTime[idx] - timSpansServer.startTime[idx]).total_seconds()
     ax.barh(nameIdx, duration, left= startSec, align='center')
-    ax.text(startSec+duration/2, nameIdx, "{} ms".format(duration*1000), rotation=45, backgroundcolor='gray', alpha=0.5, ha='center', va='center' )
+    ax.text(startSec+duration/2, nameIdx, "{:3.0f} ms".format(duration*1000), rotation=45, backgroundcolor='gray', alpha=0.5, ha='center', va='center' )
 
 plt.xlabel('Time in s')
 

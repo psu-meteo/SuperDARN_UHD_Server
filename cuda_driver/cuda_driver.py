@@ -344,10 +344,15 @@ class cuda_process_handler(cudamsg_handler):
 #        pdb.set_trace()
 
 #        acquire_sem(rx_sem_list[SIDEA][swing])
-        self.gpu.rx_init(swing)
+
+#        self.logger.debug("start rx_init")
+#        self.gpu.rx_init(swing)
+#        self.logger.debug("end rx_init, start copy data")
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
-        self.gpu._set_rx_phaseIncrement(swing) 
+#        self.gpu._set_rx_phaseIncrement(swing) 
+        self.logger.debug("end copy data, start rx process")
+ 
         self.gpu.rxsamples_process(swing) 
  #       release_sem(rx_sem_list[SIDEA][swing])
         self.logger.debug('leaving cuda_process_handler (swing {})'.format(swing))
@@ -545,6 +550,7 @@ class ProcessingGPU(object):
 
         self._set_tx_mixerfreq(swing)
         self._set_tx_phasedelay(swing)
+        self._set_rx_phaseIncrement( swing)
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
@@ -690,7 +696,7 @@ class ProcessingGPU(object):
 
         # synthesize rf waveform (beamforming, apply phase_masks, mixing in cuda)
     def synth_channels(self, bb_signal, swing):
-#        self.rx_init(swing) moved to process_handler
+        self.rx_init(swing) 
 
         # TODO: this assumes all channels have the same number of samples 
         tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
