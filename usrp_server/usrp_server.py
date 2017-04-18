@@ -588,7 +588,7 @@ class RadarHardwareManager:
      
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            RHM.logger.debug('send CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
+            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
             cmd.transmit()
             cmd.client_return()      
             if channel.active_state == CS_INACTIVE: 
@@ -604,7 +604,7 @@ class RadarHardwareManager:
             RHM.newChannelList.remove(channel)
 
         # CUDA_GENERATE for first period
-        RHM.logger.debug('send CUDA_GENERATE_PULSE (1st period)')
+        RHM.logger.debug('start CUDA_GENERATE_PULSE (1st period)')
         cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq)
         cmd.transmit()
         cmd.client_return()
@@ -673,7 +673,7 @@ class RadarHardwareManager:
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
         nSequences_per_period = int(sampling_duration / pulse_sequence_period)
-        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s)".format(sampling_duration, nSequences_per_period,  self.commonChannelParameter['integration_period_duration']))
+        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(sampling_duration, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
 
         # calculate the number of RF transmit and receive samples 
         num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
@@ -696,7 +696,6 @@ class RadarHardwareManager:
         # inform all channels with the number of pulses per integration period        
         for ch in self.channels+newChannels:
             ch.nSequences_per_period = nSequences_per_period
-            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
             ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
             assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
@@ -713,7 +712,6 @@ class RadarHardwareManager:
         self.logger.warning('TODO: where do we want to do gain control?')
         self.gain_control_divide_by_nChannels()
         
-        self.resultData_nSequences_per_period = self.nSequences_per_period
         self._calc_period_details()
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
@@ -746,31 +744,39 @@ class RadarHardwareManager:
            self.logger.debug("start USRP_GET_TIME")
            cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
-
+          
            self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
            self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
 
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
-
            usrp_time = cmd.recv_time(self.usrpsocks[0])
            cmd.client_return()
            self.logger.debug("end USRP_GET_TIME")
-           sequence_start_time_secs  = np.zeros(channel.nSequences_per_period, dtype=np.uint64)
-           sequence_start_time_usecs = np.zeros(channel.nSequences_per_period, dtype=np.uint32)
 
            self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
 
-           # provide sequence times for control program
-           for iSequence in range(channel.nSequences_per_period):
+           # calculate sequence times for control program
+           sequence_start_time_secs  = np.zeros(self.nSequences_per_period, dtype=np.uint64)
+           sequence_start_time_usecs = np.zeros(self.nSequences_per_period, dtype=np.uint32)
+           for iSequence in range(self.nSequences_per_period):
                pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
                sequence_start_time_secs[iSequence]  = int(pulse_start_time) 
                sequence_start_time_usecs[iSequence] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
 
+           # save data for returning results to control program
+           resultDict = {}
+           resultDict['sequence_start_time_secs']      = sequence_start_time_secs
+           resultDict['sequence_start_time_usecs']     = sequence_start_time_usecs
+           resultDict['number_of_samples']             = self.commonChannelParameter['number_of_samples']
+           resultDict['nSequences_per_period']         = self.nSequences_per_period       
+           resultDict['pulse_sequence_offsets_vector'] = self.commonChannelParameter['pulse_sequence_offsets_vector'] 
+           resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
            for channel in self.channels: 
-               channel.sequence_start_time_secs  = sequence_start_time_secs
-               channel.sequence_start_time_usecs = sequence_start_time_usecs
+               resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
+               resultDict['pulse_lens']                   = channel.pulse_lens    
+               channel.resultDict_list.insert(0,resultDict)
     
            # broadcast the start of the next integration period to all usrp
            self.logger.debug('start USRP_TRIGGER')
@@ -793,7 +799,6 @@ class RadarHardwareManager:
                pdb.set_trace()
            self.logger.debug('end USRP_TRIGGER')
 
-
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
 
         if CS_PROCESSING in allProcessingChannelStates:
@@ -805,6 +810,7 @@ class RadarHardwareManager:
             nMainAntennas = self.nMainAntennas
             nBackAntennas = self.nBackAntennas
             main_samples = None
+
 
             for cudasock in self.cudasocks:
                 nAntennas = recv_dtype(cudasock, np.uint32)
@@ -844,9 +850,11 @@ class RadarHardwareManager:
             for iChannel, channel in enumerate(self.channels):
                if channel.processing_state is CS_PROCESSING:
                   # copy samples and ctrlprm to transmit later to control program
-                  channel.resultData_main_beamformed          = beamformed_samples[iChannel]
+                  if 'main_beamformed' in channel.resultDict_list[-1]:
+                     channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
+                  channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
                   channel.update_ctrlprm_class("current")
-                  channel.resultData_ctrlprm = channel.ctrlprm_struct.dataqueue
+                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = channel.ctrlprm_struct.dataqueue
 
             self.logger.debug('end rx beamforming')
 
@@ -1016,6 +1024,7 @@ class RadarChannelHandler:
 
         self.channelScalingFactor = 0
         self.cnum = 'unknown'
+        self.resultDict_list = []
 
         self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager.array_beam_sep, self.parent_RadarHardwareManager.array_nBeams)
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
@@ -1449,8 +1458,7 @@ class RadarChannelHandler:
         self.logger.debug("end waiting for CS_SAMPLES_READY")
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler returning samples'.format(self.cnum))
-        transmit_dtype(self.conn, self.parent_RadarHardwareManager.resultData_nSequences_per_period, np.uint32)  
-        self.logger.debug("transmitting number of sequences in period: {}".format(self.parent_RadarHardwareManager.resultData_nSequences_per_period))
+#        transmit_dtype(self.conn, self.parent_RadarHardwareManager.resultData_nSequences_per_period, np.uint32)  
         self.send_results_to_control_program()
 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.cnum, self.next_state[finishedSwing], finishedSwing))
@@ -1465,10 +1473,16 @@ class RadarChannelHandler:
         # interact with site library's SiteIntegrate loop
         # send metadata for integration period
         # currently assuming pulse sequences are uniform within an integration period
-        badtrdat_start_usec = self.pulse_sequence_offsets_vector * 1e6 # convert to us
-        transmit_dtype(self.conn, self.npulses_per_sequence, np.uint32)
-        transmit_dtype(self.conn, badtrdat_start_usec,       np.uint32) # length badtrdat_len
-        transmit_dtype(self.conn, self.pulse_lens,           np.uint32) # length badtrdat_len
+
+        resultDict = self.resultDict_list.pop()
+
+        transmit_dtype(self.conn, resultDict['nSequences_per_period'], np.uint32)  
+        self.logger.debug("transmitting number of sequences in period: {}".format(resultDict['nSequences_per_period']))
+
+        badtrdat_start_usec = resultDict['pulse_sequence_offsets_vector'] * 1e6 # convert to us
+        transmit_dtype(self.conn, resultDict['npulses_per_sequence'], np.uint32)
+        transmit_dtype(self.conn, badtrdat_start_usec,                np.uint32) # length badtrdat_len
+        transmit_dtype(self.conn, resultDict['pulse_lens'],           np.uint32) # length badtrdat_len
 
         # stuff these with junk, they don't seem to be used..
         num_transmitters = self.parent_RadarHardwareManager.nUSRPs   # TODO update for polarization?
@@ -1481,35 +1495,38 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, txstatus_agc,     np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr,  np.int32) # length num_transmitters
         
-        # send back ctrlprm
-        for par in ["rbeam", "tbeam", "tfreq", "rfreq"]:
-            for item in self.resultData_ctrlprm:
-                if item.name == par:
-                   self.logger.debug("Sending to ROS: {}={}".format(par, item.data))
+#        # send back ctrlprm
+#        for par in ["rbeam", "tbeam", "tfreq", "rfreq"]:
+#            for item in resultDict['ctrlprm_struct']:
+#                if item.name == par:
+#                   self.logger.debug("Sending to ROS: {}={}".format(par, item.data))
 
-        for item in self.resultData_ctrlprm:
+        for item in resultDict['ctrlprm_dataqueue']:
             item.transmit(self.ctrlprm_struct.clients[0])
-        self.resultData_ctrlprm = []
+            if item.name in ["rbeam", "tbeam", "tfreq", "rfreq"]:
+                   self.logger.debug("Sending to ROS: {}={}".format(item.name, item.data))
+        
+##        self.resultData_ctrlprm = []
 
     
         # send back samples with pulse start times 
-        for sidx in range(self.parent_RadarHardwareManager.resultData_nSequences_per_period):
-            self.logger.debug('GET_DATA returning samples from pulse {}'.format(sidx))
+        for iSequence in range(resultDict['nSequences_per_period']):
+            self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
             
-            transmit_dtype(self.conn, self.sequence_start_time_secs[sidx],  np.uint32)
-            transmit_dtype(self.conn, self.sequence_start_time_usecs[sidx], np.uint32)
+            transmit_dtype(self.conn, resultDict['sequence_start_time_secs'][iSequence],  np.uint32)
+            transmit_dtype(self.conn, resultDict['sequence_start_time_usecs'][iSequence], np.uint32)
 
             # calculate the baseband sample index for the start and end of a pulse sequence
             # within a block of beamformed samples over the entire integration period
             # assuming that the first sample is aligned with the center of the first transmit pulse
             # and all sequences within the integration period have the same length
-            pulse_sequence_start_index = sidx * self.nbb_rx_samples_per_sequence
-            pulse_sequence_end_index = pulse_sequence_start_index + self.ctrlprm_struct.payload['number_of_samples']
+            pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
+            pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
         
             # send the packed complex int16 samples to the control program.. 
-            transmit_dtype(self.conn, self.resultData_main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            transmit_dtype(self.conn, self.resultData_main_beamformed[pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! perido {} / {}'.format(sidx, self.parent_RadarHardwareManager.resultData_nSequences_per_period ))
+            transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! perido {} / {}'.format(iSequence, resultDict["nSequences_per_period"]))
 
 
     
