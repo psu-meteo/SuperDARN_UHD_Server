@@ -224,6 +224,7 @@ class scanManager():
         self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
 
         self.restricted_frequency_list = restricted_frequency_list
+        self.logger = logging.getLogger('scanManager')
   
     def update_freq_list(self, freq_range_list):
         # update the clear freq range list
@@ -252,6 +253,9 @@ class scanManager():
 
         if not self.isLastPeriod:
             self.current_period += 1
+            self.logger.debug("Increasing current_period to {}".format(self.current_period))
+        else:
+            self.logger.debug("Last period current_period is still {}".format(self.current_period))
 
         
     def status(self):
@@ -333,6 +337,8 @@ class RadarHardwareManager:
         self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
 
+        self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
+        self.set_par_semaphore.release()
 
 
     def run(self):
@@ -580,7 +586,7 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
-
+        RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
         RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
@@ -610,6 +616,8 @@ class RadarHardwareManager:
         cmd.client_return()
         RHM.logger.debug('end CUDA_GENERATE_PULSE (1st period)')
         RHM.logger.debug("end initialize_channel")
+
+        RHM.set_par_semaphore.release()
 
 
     def unregister_channel_from_HardwareManager(self, channelObject):
@@ -732,6 +740,7 @@ class RadarHardwareManager:
 
         if transmittingChannelAvailable:
            # USRP SETUP
+           self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
            self.logger.debug("start USRP_SETUP")
            cmd = usrp_setup_command(self.usrpsocks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
@@ -855,6 +864,9 @@ class RadarHardwareManager:
                   channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
                   channel.update_ctrlprm_class("current")
                   channel.resultDict_list[-1]['ctrlprm_dataqueue'] = channel.ctrlprm_struct.dataqueue
+                  for item in channel.ctrlprm_struct.dataqueue:
+                     if item.name == 'rbeam':
+                        channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
 
             self.logger.debug('end rx beamforming')
 
@@ -987,6 +999,7 @@ class RadarHardwareManager:
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
                 bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
+                channel.logger.debug("rx beamforming: ch {}, beam {}".format(channel.cnum, channel.scanManager.current_beam))
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
     
@@ -1032,9 +1045,9 @@ class RadarChannelHandler:
         
 
         # DELETE THIS AFTER CLEAR FREQUENCY CODE IS WORKING
-        self.logger.warning("Scan information only set for debugging")
-        self.scanManager.scan_beam_list = [i for i in range(16)]
-        self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
+#        self.logger.warning("Scan information only set for debugging")
+#        self.scanManager.scan_beam_list = [i for i in range(16)]
+#        self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
     @property
@@ -1133,8 +1146,9 @@ class RadarChannelHandler:
         counter = 0
         while self.state[swing] not in state:
             counter = (counter + 1) % 10000
-            if state[0] == CS_SAMPLES_READY and counter == 1:
-               self.logger.debug("ch {}:_waitForState CS_SAMPLES_READY. state is {} (swing {})".format(self.cnum, self.state[swing], swing))
+#            if state[0] == CS_SAMPLES_READY and counter == 1:
+            if counter == 1:
+               self.logger.debug("ch {}:_waitForState {}. state is {} (swing {})".format(self.cnum, state, self.state[swing], swing))
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT for channel {}'.format(self.cnum))
@@ -1348,16 +1362,32 @@ class RadarChannelHandler:
         # TODO divide compatibiliti check in sequence and ctrlprm check?
         # TODO add compatibility check in parameter prediction function
 
+        RHM = self.parent_RadarHardwareManager
+
+
         # period not jet triggered
-        if self.active_state == CS_INACTIVE or self.scanManager.current_period == 0:
+        if self.active_state == CS_INACTIVE or self.active_state == CS_READY: 
+           RHM.set_par_semaphore.acquire()
+
+           if self.active_state == CS_READY:
+              self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
+              self.active_state = CS_INACTIVE
+
            self.ctrlprm_struct.receive(self.conn)
-           self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam']))
+           self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
               return RSMG_FAILURE
-           self.parent_RadarHardwareManager.newChannelList.append(self)
+
+           if self not in self.parent_RadarHardwareManager.newChannelList:
+              self.parent_RadarHardwareManager.newChannelList.append(self)
+              self.logger.debug("Adding ch {} to newChannelList ".format(self.cnum))
+           else:
+              self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
+           RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        else:
+        elif self.active_state == CS_PROCESSING:
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
@@ -1388,7 +1418,9 @@ class RadarChannelHandler:
             self.logger.error("Pulse lengths in one sequence have to be the equal! ") # TODO raise error?
             pdb.set_trace()
             return False
-        
+        if hardwareManager.nRegisteredChannels == 1 and hardwareManager.channels[0] == self:
+           self.logger.info("Compatibility check: This channel is already registered at HardwareManager and is the only one. Renewing registration.")
+           hardwareManager.nRegisteredChannels == 0
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
@@ -1526,7 +1558,7 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! perido {} / {}'.format(iSequence, resultDict["nSequences_per_period"]))
+            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! sequence {} / {}'.format(iSequence, resultDict["nSequences_per_period"]))
 
 
     
