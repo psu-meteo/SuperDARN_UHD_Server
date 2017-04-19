@@ -863,7 +863,7 @@ class RadarHardwareManager:
                      channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
                   channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
                   channel.update_ctrlprm_class("current")
-                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = channel.ctrlprm_struct.dataqueue
+                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
                   for item in channel.ctrlprm_struct.dataqueue:
                      if item.name == 'rbeam':
                         channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
