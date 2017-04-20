@@ -53,7 +53,7 @@ CS_READY         = 'CS_READY'
 CS_TRIGGER       = 'CS_TRIGGER'
 CS_PROCESSING    = 'CS_PROCESSING'
 CS_SAMPLES_READY = 'CS_SAMPLES_READY'
-
+CS_LAST_SWING    = 'CS_LAST_SWING'
 
 class usrpMixingFreqManager():
     """ Manages usrp mixing frequency based on channels. Ensures that only one channel
@@ -195,6 +195,8 @@ class swingManager():
         # a/p swing status is switched in main loop async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
         self.lastSwingWithData  = self.activeSwing  
         self.nextSwingToTrigger = self.activeSwing
+    def reset(self):
+        self.__init__() # for now reset is the same as init
 
     def switch_swings(self):
         self.activeSwing     = 1 - self.activeSwing
@@ -220,21 +222,28 @@ class scanManager():
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
+        self.isPostLast = False # to handle last trigger_next_swing() call
 
         self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
 
         self.restricted_frequency_list = restricted_frequency_list
         self.logger = logging.getLogger('scanManager')
+
+    def init_new_scan(self, freq_range_list, scan_beam_list):
   
-    def update_freq_list(self, freq_range_list):
-        # update the clear freq range list
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
         self.clear_freq_range_list = freq_range_list
 
-    def update_beam_list(self, scan_beam_list):
-        # update the list of beams over the scan
         # list of [bmnum, bmnum..] 
         self.scan_beam_list = scan_beam_list
+
+        # rest all other parameter
+        self.current_period = 0
+        self.current_clrFreq_result = None
+        self.next_clrFreq_result    = None 
+        self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
+        self.isPostLast = False # to handle last trigger_next_swing() call
+
 
     def switch_swings(self):
         # switch swings
@@ -256,6 +265,7 @@ class scanManager():
             self.logger.debug("Increasing current_period to {}".format(self.current_period))
         else:
             self.logger.debug("Last period current_period is still {}".format(self.current_period))
+            self.isPostLast = True
 
         
     def status(self):
@@ -386,7 +396,7 @@ class RadarHardwareManager:
                     # wait for all channels to be in TRIGGER state
                     executeTrigger = True
                     for ch in self.channels:
-                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
+                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE, CS_LAST_SWING]:
                             controlLoop_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
                             time.sleep(sleepTime)
                             executeTrigger = False
@@ -738,6 +748,9 @@ class RadarHardwareManager:
               transmittingChannelAvailable = True
               break
 
+        self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
+        self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
+
         if transmittingChannelAvailable:
            # USRP SETUP
            self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
@@ -754,8 +767,8 @@ class RadarHardwareManager:
            cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
           
-           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
-           self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
+    ##       self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
+    ##     self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
 
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
@@ -764,7 +777,6 @@ class RadarHardwareManager:
            cmd.client_return()
            self.logger.debug("end USRP_GET_TIME")
 
-           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
 
            # calculate sequence times for control program
            sequence_start_time_secs  = np.zeros(self.nSequences_per_period, dtype=np.uint64)
@@ -799,7 +811,7 @@ class RadarHardwareManager:
            for ch in self.channels:
                if ch.active_state == CS_TRIGGER:
                   ch.active_state = CS_PROCESSING
-                  ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {})".format(ch.cnum, self.swingManager.activeSwing))
+                  ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {}, period {})".format(ch.cnum, self.swingManager.activeSwing, ch.scanManager.current_period))
            self.logger.debug('waiting for trigger return')
            returns = cmd.client_return()
 
@@ -807,6 +819,8 @@ class RadarHardwareManager:
                self.logger.error('could not trigger, usrp driver is busy')
                pdb.set_trace()
            self.logger.debug('end USRP_TRIGGER')
+        else:
+           self.logger.debug('No tranmitting channles available. Skipping USRP_TRIGGER')
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
 
@@ -869,6 +883,8 @@ class RadarHardwareManager:
                         channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
 
             self.logger.debug('end rx beamforming')
+        else:
+           self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
 
         # PERIOD FINISHED        
@@ -879,8 +895,13 @@ class RadarHardwareManager:
            if channel.processing_state is CS_PROCESSING:
 
               # determine next state after samples are returned to control program
-              if channel.scanManager.isLastPeriod or channel.scanManager.isForelastPeriod:
+              if channel.scanManager.isPostLast: # or channel.scanManager.isForelastPeriod:
                  channel.next_processing_state = CS_INACTIVE
+                 channel.active_state          = CS_INACTIVE
+                 channel.next_active_state     = CS_INACTIVE
+                 channel.logger.debug('last period finished, setting active and next processing state to CS_INACTIVE')
+              elif channel.scanManager.isLastPeriod:
+                 channel.next_processing_state = CS_LAST_SWING
               else:
                  channel.next_processing_state = CS_READY 
               channel.logger.debug("Switching next processing state (swing {}) of cnum {} to {}".format(self.swingManager.processingSwing, channel.cnum, channel.next_processing_state )) 
@@ -890,7 +911,7 @@ class RadarHardwareManager:
  
         # CUDA_ADD & CUDA_GENGERATE for processingSwing 
         for channel in self.channels:
-            if channel.scanManager.isLastPeriod or channel.scanManager.isForelastPeriod:
+            if channel.scanManager.isLastPeriod: # or channel.scanManager.isForelastPeriod:
                self.logger.debug("start CUDA_REMOVE_CHANNEL")
                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
@@ -1043,11 +1064,6 @@ class RadarChannelHandler:
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
         
-
-        # DELETE THIS AFTER CLEAR FREQUENCY CODE IS WORKING
-#        self.logger.warning("Scan information only set for debugging")
-#        self.scanManager.scan_beam_list = [i for i in range(16)]
-#        self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
     @property
@@ -1238,7 +1254,8 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
-        self._waitForState(self.swingManager.nextSwingToTrigger, CS_READY)
+        self.logger.debug("ch {}: SetReadyFlagHandler: waiting for nextSwingToTrigger (swing {}) become  CS_READY".format(self.cnum, self.swingManager.nextSwingToTrigger))
+        self._waitForState(self.swingManager.nextSwingToTrigger, [CS_READY, CS_LAST_SWING])
  #       transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
         self.logger.debug("ch {}: SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.cnum, self.swingManager.nextSwingToTrigger))
         self.state[self.swingManager.nextSwingToTrigger] = CS_TRIGGER
@@ -1629,8 +1646,10 @@ class RadarChannelHandler:
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.scanManager.update_freq_list(freq_range_list)
-        self.scanManager.update_beam_list(scan_beam_list)
+        self.scanManager.init_new_scan(freq_range_list, scan_beam_list)
+
+        self.swingManager.reset()
+    
 
         return RMSG_SUCCESS
 

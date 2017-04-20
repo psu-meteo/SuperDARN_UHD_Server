@@ -377,7 +377,7 @@ else:
          myPrint("Starting all...")
          start_cuda_driver()
          start_usrp_driver()
-         time.sleep(10)
+         waitFor(10)
          start_usrp_server()
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          start_usrp_driver()
@@ -407,7 +407,7 @@ else:
          stop_usrp_driver()
          stop_cuda_driver()
          myPrint("waiting for {} sec".format(nSecs_restart_pause))
-         time.sleep(nSecs_restart_pause)
+         waitFor(nSecs_restart_pause)
          start_cuda_driver()
          start_usrp_driver()
 #         start_usrp_server()
