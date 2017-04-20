@@ -55,6 +55,34 @@ CS_PROCESSING    = 'CS_PROCESSING'
 CS_SAMPLES_READY = 'CS_SAMPLES_READY'
 CS_LAST_SWING    = 'CS_LAST_SWING'
 
+class usrpSockManager():
+   def __init__(self, RHM):
+      self.addressList            = [] # hostname of usrp drivers
+      self.antenna_index_list = []
+      self.socks = []
+      usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
+      self.logger = logging.getLogger("usrpSockManager")      
+
+      for usrp in RHM.ini_usrp_configs:
+          usrp_driver_hostname = usrp['driver_hostname']
+          self.antenna_index_list.append(int(usrp['array_idx'])) 
+          usrp_driver_port = int(usrp['array_idx']) + usrp_driver_base_port 
+          self.addressList.append((usrp_driver_hostname, usrp_driver_port))
+      
+      self.nUSRPs = len(self.addressList)
+      self.fault_status = np.ones(self.nUSRPs)
+      
+      # open each 
+      try: # TODO switch the two lines to allow staring with not all usrps?
+          for usrp in self.addressList:
+              self.logger.debug('connecting to usrp driver on port {}'.format(usrp[1]))
+              usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+              usrpsock.connect(usrp)
+              self.socks.append(usrpsock)
+      except ConnectionRefusedError:
+          self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
+          sys.exit(1)
+
 class usrpMixingFreqManager():
     """ Manages usrp mixing frequency based on channels. Ensures that only one channel
         at a time can call add_new_freq_band().  """
@@ -339,7 +367,7 @@ class RadarHardwareManager:
 
         self.nRegisteredChannels = 0
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
-        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpsocks)
+        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks)
 
         self.logger.warning("RadarHardwareManager: hardcoded clear frequency search frequency!, modify code to use adaptive center freq")
         self.clearFreqRawDataManager.set_clrfreq_search_span(12.5e6, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
@@ -469,53 +497,28 @@ class RadarHardwareManager:
         self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
 
     def usrp_init(self):
-        usrp_drivers = [] # hostname of usrp drivers
-        usrp_driver_base_port = int(self.ini_network_settings['USRPDriverPort'])
-        self.antenna_index_list = []
+      self.usrpManager = usrpSockManager(self)
+      self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
+      self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
+      self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
 
-        for usrp in self.ini_usrp_configs:
-            usrp_driver_hostname = usrp['driver_hostname']
-            self.antenna_index_list.append(int(usrp['array_idx'])) 
-            usrp_driver_port = int(usrp['array_idx']) + usrp_driver_base_port 
-            usrp_drivers.append((usrp_driver_hostname, usrp_driver_port))
-        
-        usrp_driver_socks = []
-        self.nUSRPs = len(usrp_drivers)
-        self.fault_status = np.ones(self.nUSRPs)
-        
-        self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
-        self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
-        self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
-
-        # open each 
-        try:
-            for usrp in usrp_drivers:
-                self.logger.debug('connecting to usrp driver on port {}'.format(usrp[1]))
-                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                usrpsock.connect(usrp)
-                usrp_driver_socks.append(usrpsock)
-        except ConnectionRefusedError:
-            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
-            sys.exit(1)
-
-        self.usrpsocks = usrp_driver_socks
-        self._resync_usrps()
+      self._resync_usrps()
 
 
     def _resync_usrps(self):
         usrps_synced = False
 
         while not usrps_synced:
-            cmd = usrp_sync_time_command(self.usrpsocks)
+            cmd = usrp_sync_time_command(self.usrpManager.socks)
             cmd.transmit()
             cmd.client_return()
 
             # once USRPs are connected, synchronize clocks/timers 
-            cmd = usrp_get_time_command(self.usrpsocks)
+            cmd = usrp_get_time_command(self.usrpManager.socks)
             cmd.transmit() 
 
             usrptimes = []
-            for usrpsock in self.usrpsocks:
+            for usrpsock in self.usrpManager.socks:
                 usrptimes.append(cmd.recv_time(usrpsock))
            
             cmd.client_return()
@@ -544,7 +547,7 @@ class RadarHardwareManager:
            att = 31.5
 
         self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
-        cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
+        cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
         cmd.client_return()
 
@@ -562,7 +565,7 @@ class RadarHardwareManager:
             amp2 = testParSet[iSet][1]
             att  = testParSet[iSet][2]
 
-            cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
             cmd.transmit()
             cmd.client_return()
             self.logger.warning("Current settings: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
@@ -664,13 +667,13 @@ class RadarHardwareManager:
     def exit(self):
         # clean up and exit
         self.client_sock.close()
-        cmd = usrp_exit_command(self.usrpsocks)
+        cmd = usrp_exit_command(self.usrpManager.socks)
         cmd.transmit()
 
         cmd = cuda_exit_command(self.cudasocks)
         cmd.transmit()
 
-        for sock in self.usrpsocks:
+        for sock in self.usrpManager.socks:
             sock.close()
         for sock in self.cudasocks:
             sock.close()
@@ -755,7 +758,7 @@ class RadarHardwareManager:
            # USRP SETUP
            self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
            self.logger.debug("start USRP_SETUP")
-           cmd = usrp_setup_command(self.usrpsocks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+           cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
            cmd.client_return()
@@ -764,7 +767,7 @@ class RadarHardwareManager:
 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
-           cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
+           cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
           
     ##       self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
@@ -773,7 +776,7 @@ class RadarHardwareManager:
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
-           usrp_time = cmd.recv_time(self.usrpsocks[0])
+           usrp_time = cmd.recv_time(self.usrpManager.socks[0])
            cmd.client_return()
            self.logger.debug("end USRP_GET_TIME")
 
@@ -802,7 +805,7 @@ class RadarHardwareManager:
            # broadcast the start of the next integration period to all usrp
            self.logger.debug('start USRP_TRIGGER')
            trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
-           cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
+           cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
            self.logger.debug('sending trigger pulse command')
            cmd.transmit()
 
@@ -947,15 +950,15 @@ class RadarHardwareManager:
         if transmittingChannelAvailable:
            # USRP_READY_DATA for activeSwing 
            self.logger.debug('start USRP_READY_DATA')
-           cmd = usrp_ready_data_command(self.usrpsocks, swingManager.activeSwing)
+           cmd = usrp_ready_data_command(self.usrpManager.socks, swingManager.activeSwing)
            cmd.transmit()
     
            # check status of usrp drivers
-           for iUSRP, usrpsock in enumerate(self.usrpsocks):
+           for iUSRP, usrpsock in enumerate(self.usrpManager.socks):
                self.logger.debug('start receiving one USRP status')
                ready_return = cmd.recv_metadata(usrpsock)
                rx_status                = ready_return['status']
-               self.fault_status[iUSRP] = ready_return["fault"]
+               self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
                self.logger.debug('GET_DATA rx status {}'.format(rx_status))
                if rx_status != 2:
@@ -1534,8 +1537,8 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, resultDict['pulse_lens'],           np.uint32) # length badtrdat_len
 
         # stuff these with junk, they don't seem to be used..
-        num_transmitters = self.parent_RadarHardwareManager.nUSRPs   # TODO update for polarization?
-        txstatus_agc = self.parent_RadarHardwareManager.fault_status # TODO is this the right way to return fault status????
+        num_transmitters = self.parent_RadarHardwareManager.usrpManager.nUSRPs   # TODO update for polarization?
+        txstatus_agc = self.parent_RadarHardwareManager.usrpManager.fault_status # TODO is this the right way to return fault status????
         txstatus_lowpwr = np.zeros(num_transmitters)
         if txstatus_agc.any():
             self.logger.warning('Following USRPs report Fault:  {} (usrp index)'.format([k for k in range(txstatus_agc.size) if txstatus_agc[k] != 0]))
