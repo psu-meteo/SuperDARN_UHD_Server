@@ -57,31 +57,66 @@ CS_LAST_SWING    = 'CS_LAST_SWING'
 
 class usrpSockManager():
    def __init__(self, RHM):
-      self.addressList            = [] # hostname of usrp drivers
-      self.antenna_index_list = []
+      self.addressList_active     = [] # tuple of IP and port
+      self.addressList_inactive   = []
       self.socks = []
       usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
+      self.RHM = RHM
       self.logger = logging.getLogger("usrpSockManager")      
-
-      for usrp in RHM.ini_usrp_configs:
-          usrp_driver_hostname = usrp['driver_hostname']
-          self.antenna_index_list.append(int(usrp['array_idx'])) 
-          usrp_driver_port = int(usrp['array_idx']) + usrp_driver_base_port 
-          self.addressList.append((usrp_driver_hostname, usrp_driver_port))
       
-      self.nUSRPs = len(self.addressList)
+      addressList = []
+      for usrp in RHM.ini_usrp_configs:
+          addressList.append((usrp['driver_hostname'], int(usrp['array_idx']) + usrp_driver_base_port))
+      
+      self.nUSRPs = len(addressList) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
       
       # open each 
-      try: # TODO switch the two lines to allow staring with not all usrps?
-          for usrp in self.addressList:
-              self.logger.debug('connecting to usrp driver on port {}'.format(usrp[1]))
-              usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-              usrpsock.connect(usrp)
-              self.socks.append(usrpsock)
-      except ConnectionRefusedError:
-          self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
-          sys.exit(1)
+      for usrp in addressList:
+         try: 
+            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            usrpsock.connect(usrp)
+            self.socks.append(usrpsock)
+            self.addressList_active.append(usrp)
+            self.logger.debug('connected to usrp driver on port {}'.format(usrp[1]))
+         except ConnectionRefusedError:
+            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
+            self.addressList_inactive.append(usrp)
+
+
+   def eval_client_return(self, cmd, fcn=None):
+      if fcn is None: # default receive function
+         client_return = cmd.client_return()
+      else:
+         client_return = fcn()
+
+      if CONNECTION_ERROR in client_return:
+         offset = 0
+         for iSock, singleReturn in enumerate(client_return):
+            if singleReturn == CONNECTION_ERROR:
+               self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
+               self.addressList_inactive.append(self.addressList_active[iSock-offset] )
+               del self.addressList_active[iSock-offset]
+               del self.socks[iSock-offset]
+               offset += 1 
+      return client_return
+
+   def restore_lost_connections(self):
+      addressList = self.addressList_inactive
+      self.addressList_inactive = [] 
+      for usrp in addressList:
+         try: 
+            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            usrpsock.connect(usrp)
+            # TODO : sync to other usrps
+            self.RHM._resync_usrps
+            # TODO : initialize shm with zeros
+            self.socks.append(usrpsock)
+            self.addressList_active.append(usrp)
+            self.logger.info('reconnection to usrp driver on port {} successful'.format(usrp[1]))
+         except ConnectionRefusedError:
+            self.logger.error('usrp reconnection failed on port {}'.format(usrp[1]))
+            self.addressList_inactive.append(usrp)
 
 class usrpMixingFreqManager():
     """ Manages usrp mixing frequency based on channels. Ensures that only one channel
@@ -401,6 +436,10 @@ class RadarHardwareManager:
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time()
 
+                # check if there are any disconnected URSPs
+                if len(self.usrpManager.addressList_inactive):
+                   self.usrpManager.restore_lost_connections()
+
                 # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
                 if self.clearFreqRawDataManager.outstanding_request:
                     controlLoop_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
@@ -549,7 +588,7 @@ class RadarHardwareManager:
         self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
         cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
-        cmd.client_return()
+        self.usrpManager.eval_client_return(cmd)
 
 
     def test_rxfe_control(self):
@@ -761,7 +800,7 @@ class RadarHardwareManager:
            cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
-           cmd.client_return()
+           self.usrpManager.eval_client_return(cmd)
            self.logger.debug("end USRP_SETUP")
 
 
@@ -816,7 +855,7 @@ class RadarHardwareManager:
                   ch.active_state = CS_PROCESSING
                   ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {}, period {})".format(ch.cnum, self.swingManager.activeSwing, ch.scanManager.current_period))
            self.logger.debug('waiting for trigger return')
-           returns = cmd.client_return()
+           returns = self.usrpManager.eval_client_return(cmd)
 
            if TRIGGER_BUSY in returns:
                self.logger.error('could not trigger, usrp driver is busy')
@@ -954,20 +993,25 @@ class RadarHardwareManager:
            cmd.transmit()
     
            # check status of usrp drivers
-           for iUSRP, usrpsock in enumerate(self.usrpManager.socks):
-               self.logger.debug('start receiving one USRP status')
-               ready_return = cmd.recv_metadata(usrpsock)
-               rx_status                = ready_return['status']
-               self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
+           self.logger.debug('start receiving all USRP status')
+           payloadList = self.usrpManager.eval_client_return(cmd, fcn=cmd.receive_all_metadata)
+           self.logger.debug('end receiving all USRP status')
+
+           for iUSRP, ready_return in enumerate(payloadList):
+               if ready_return == CONNECTION_ERROR:
+                  self.usrpManager.fault_status[iUSRP] = True
+                  self.logger.error('connection to USRP broke in GET_DATA')
+               else: 
+                  rx_status                = ready_return['status']
+                  self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
-               self.logger.debug('GET_DATA rx status {}'.format(rx_status))
-               if rx_status != 2:
-                   self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
-                   #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
-               self.logger.debug('end receiving one USRP status')
+                  self.logger.debug('GET_DATA rx status {}'.format(rx_status))
+                  if rx_status != 2:
+                      self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
+                      #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
    
            self.logger.debug('start waiting for USRP_DATA return')
-           cmd.client_return()
+           self.usrpManager.eval_client_return(cmd)
 
            self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
            self.logger.debug('end waiting for USRP_DATA return')

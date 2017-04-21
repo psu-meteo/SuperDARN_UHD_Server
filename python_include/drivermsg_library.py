@@ -3,6 +3,7 @@ import numpy as np
 import uuid
 import collections
 import pdb
+import logging
 from socket_utils import *
 from termcolor import cprint
 
@@ -25,6 +26,7 @@ CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('l')
 
+CONNECTION_ERROR = "CONNECTION_ERROR"
 
 # NOT USED:
 CUDA_SETUP = ord('s')
@@ -67,6 +69,7 @@ class driver_command(object):
         self.dataqueue = [] # ordered list of variables to transmit/receive
         self.payload = {} # dictionary to store received values
         self.command = np.uint8(command)
+        self.logger = logging.getLogger('socket_data')
     
     def queue(self, data, dtype, name = '', nitems = 1):
         # pdb.set_trace()
@@ -88,27 +91,35 @@ class driver_command(object):
 
     def transmit(self):
         for clientsock in self.clients:
-            if self.command != NO_COMMAND:
-                transmit_dtype(clientsock, np.uint8(self.command))
+            try:
+               if self.command != NO_COMMAND:
+                   transmit_dtype(clientsock, np.uint8(self.command))
 
-            for item in self.dataqueue:
-         #       pdb.set_trace()
-                if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
-                   raise ValueError("swing has been not defined!")
-                item.transmit(clientsock)
+               for item in self.dataqueue:
+            #       pdb.set_trace()
+                   if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
+                      raise ValueError("swing has been not defined!")
+                   item.transmit(clientsock)
 
-               # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+                  # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+            except:
+               self.logger.error("Error transmitting command {} to cient {}:{}".format(self.command, clientsock.getsockname()[0], clientsock.getsockname()[1] ))
 
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
     def client_return(self, dtype = np.uint8, check_return = True):
         returns = []
         for client in self.clients:
-            r = recv_dtype(client, dtype)
-            if check_return:
-                assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
-            
-            returns.append(r)
+            try:
+               r = recv_dtype(client, dtype)
+               if check_return:
+                   assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
+               
+               returns.append(r)
+            except:
+               self.logger.error("Error receiving client_return for command {} from  cient {}:{}".format(self.command, client.getsockname()[0], client.getsockname()[1] ))
+               returns.append(CONNECTION_ERROR)
+
         #cprint('command return success', 'yellow')
         return returns
 
@@ -309,6 +320,21 @@ class usrp_ready_data_command(driver_command):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
         self.queue(swing , np.int16,   'swing' )
         
+    def receive_all_metadata(self):
+       payloadList = []
+       for sock in self.clients:
+           try:
+              payload = {}
+              payload['status']   = recv_dtype(sock, np.int32)
+              payload['antenna']  = recv_dtype(sock, np.int32)
+              payload['nsamples'] = recv_dtype(sock, np.int32)
+              payload['fault']    = recv_dtype(sock, np.bool_)
+              payloadList.append(payload)
+           except:
+              payloadList.append(CONNECTION_ERROR)
+              self.logger.error("Connection error.")
+       return payloadList
+
     def recv_metadata(self, sock):
         payload = {}
         payload['status']   = recv_dtype(sock, np.int32)

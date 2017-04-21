@@ -85,7 +85,7 @@ class cudamsg_handler(object):
         self.gpu = gpu
         self.array_info = array_info
         self.hardware_limits = hardware_limits
-        self.logger = logging.getLogger('msg_handler')
+        self.logger = logging.getLogger('cudamsg_handler')
 
     def respond(self):
         transmit_dtype(self.sock, self.command, np.uint8)

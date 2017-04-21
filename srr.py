@@ -92,6 +92,11 @@ def initialize(inputArg):
    os.symlink(usrp_config_source_file[computer], usrp_config_target_file)
    myPrint("Creating symlink {} -> {}".format(usrp_config_target_file, usrp_config_source_file[computer]))
 
+def set_alias():
+   # does only work for the subprocess session...
+   aliasPar = 'alias srrt="{}/srr.py " '.format(basePath)
+   subprocess.call(['alias', aliasPar], shell=True)
+   myPrint("setting alias srr to script")
 
 ######################
 ## Processes:
@@ -113,7 +118,7 @@ def print_status():
            commandString = " ".join(wordList[10:]) 
            for knowProcess in kownProcessList:
                if commandString.startswith(knowProcess):
-                  srrProcesses.append(commandString)
+                  srrProcesses.append(wordList[1] + " " + commandString)
                   break
    
     myPrint("Found {} processes:".format(len(srrProcesses)))
