@@ -246,7 +246,7 @@ class clearFrequencyRawDataManager():
         if self.rawData is None or not self.raw_data_available_from_this_period:
            self.record_new_data()
         else:
-          # print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
+           print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
         return self.rawData, self.metaData, self.recordTime
 
 class swingManager():
@@ -414,6 +414,7 @@ class RadarHardwareManager:
 
         self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
         self.set_par_semaphore.release()
+        self.trigger_next_function_running = False
 
 
     def run(self):
@@ -768,6 +769,7 @@ class RadarHardwareManager:
 
     #@timeit
     def trigger_next_swing(self):
+        self.trigger_next_function_running = True
         self.logger.debug('running RHM.trigger_next_swing()')
         swingManager = self.swingManager
      
@@ -1041,8 +1043,9 @@ class RadarHardwareManager:
            for channel in  self.channels:
               if channel.scanManager.current_period == 0:  # first period 
                  channel.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(channel.cnum, self.swingManager.activeSwing))
-                 channel.active_state = CS_TRIGGER 
-              
+                 channel.active_state = CS_TRIGGER
+ 
+        self.trigger_next_function_running = False
         
 
     def next_period_RHM(self):
@@ -1682,6 +1685,12 @@ class RadarChannelHandler:
         self.active = True
 
         self.logger.debug('SetActiveHandler starting')
+        
+        if self.parent_RadarHardwareManager.trigger_next_function_running:
+           self.logger.debug('start SetActiveHandler: waiting for trigger_next() to finish')
+           while self.parent_RadarHardwareManager.trigger_next_function_running:
+              time.sleep(0.01)
+           self.logger.debug('end SetActiveHandler: waiting for trigger_next() to finish')
 
         scan_num_beams = recv_dtype(self.conn, np.int32)
         self.logger.debug('SetActiveHandler number of beams per scan: {}'.format(scan_num_beams))
