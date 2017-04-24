@@ -456,6 +456,11 @@ class RadarHardwareManager:
         usrp_drivers = [] # hostname of usrp drivers
         usrp_driver_base_port = int(self.ini_network_settings['USRPDriverPort'])
         self.antenna_index_list = []
+        
+        if not len(self.ini_usrp_configs):
+            self.logger.error('no USRPs found in usrp_config.ini! exiting')
+            self.logger.error('maybe it doesn\' exist? try running ./srr.py init')
+            sys.exit(1)
 
         for usrp in self.ini_usrp_configs:
             usrp_driver_hostname = usrp['driver_hostname']
