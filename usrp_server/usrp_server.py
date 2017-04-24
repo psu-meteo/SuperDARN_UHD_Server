@@ -105,6 +105,8 @@ class usrpSockManager():
       addressList = self.addressList_inactive
       self.addressList_inactive = [] 
       for usrp in addressList:
+         self.logger.error("Skipping reconnecting usrps because resync causes problems. TODO fix it!")
+         return
          try: 
             usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             usrpsock.connect(usrp)
@@ -244,7 +246,7 @@ class clearFrequencyRawDataManager():
         if self.rawData is None or not self.raw_data_available_from_this_period:
            self.record_new_data()
         else:
-           print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
+          # print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
         return self.rawData, self.metaData, self.recordTime
 
 class swingManager():
@@ -316,7 +318,7 @@ class scanManager():
     # XXX store current freqencies in clrfreq manager,
     # add to restricted
     def period_finished(self):
-        print("swing manager period finished... ")
+      #  print("swing manager period finished... ")
         self.current_clrFreq_result = self.next_clrFreq_result
         self.next_clrFreq_result = None
         if self.isPrePeriod:
@@ -336,7 +338,7 @@ class scanManager():
     
     @property        
     def current_beam(self):
-        print("Requesting current beam for period {}".format(self.current_period))
+       # print("Requesting current beam for period {}".format(self.current_period))
         return self.scan_beam_list[self.current_period]
         
     @property        
@@ -348,13 +350,13 @@ class scanManager():
 
     def get_current_clearFreq_result(self):
         if self.current_clrFreq_result is None:
-            print("  calc current clr_freq (period {})".format(self.current_period))
+           # print("  calc current clr_freq (period {})".format(self.current_period))
             self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
         return self.current_clrFreq_result
         
     def get_next_clearFreq_result(self):
         if self.next_clrFreq_result is None:
-            print("  calc next clr_freq (period {})".format(self.current_period+1))
+           # print("  calc next clr_freq (period {})".format(self.current_period+1))
             self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
         return self.next_clrFreq_result        
         
@@ -646,11 +648,11 @@ class RadarHardwareManager:
      
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
+            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
             cmd.transmit()
             cmd.client_return()      
             if channel.active_state == CS_INACTIVE: 
-               RHM.logger.debug("initialize_channel() is setting ch {} from CS_INACTIVE to CS_READY".format(channel.cnum))
+               RHM.logger.debug("initialize_channel() is setting ch {} swing {} from CS_INACTIVE to CS_READY".format(channel.cnum,  channel.swingManager.activeSwing))
                channel.active_state = CS_READY # channel not really ready until CUDA_GENERATE, but there will be no trigger in parallel to this function
             else:
                RHM.logger.debug("initialize_channel() ch {} state stays {}".format(channel.cnum, channel.active_state))
@@ -892,8 +894,8 @@ class RadarHardwareManager:
                                back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
 
 
-                            self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
-                            time.sleep(.1)
+                        #    self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
+                        #    time.sleep(.1)
                             samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                             samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                             
@@ -1012,9 +1014,8 @@ class RadarHardwareManager:
    
            self.logger.debug('start waiting for USRP_DATA return')
            self.usrpManager.eval_client_return(cmd)
-
-           self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
            self.logger.debug('end waiting for USRP_DATA return')
+
            self.logger.debug('end USRP_READY_DATA')
 
 
@@ -1451,7 +1452,8 @@ class RadarChannelHandler:
            RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        elif self.active_state == CS_PROCESSING:
+        elif self.active_state == CS_PROCESSING or self.active_state == CS_LAST_SWING: 
+         # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
@@ -1463,6 +1465,9 @@ class RadarChannelHandler:
                  # TODO return RMSG_FAILURE
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+        else:
+           self.logger.error("Active state is {}. Dont know what to do...".format(self.active_state))
+           pdb.set_trace()
 
         
         if (self.rnum < 0 or self.cnum < 0):
@@ -1622,7 +1627,7 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! sequence {} / {}'.format(iSequence, resultDict["nSequences_per_period"]))
+        self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 
     
@@ -1696,6 +1701,7 @@ class RadarChannelHandler:
         self.scanManager.init_new_scan(freq_range_list, scan_beam_list)
 
         self.swingManager.reset()
+        self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
     
 
         return RMSG_SUCCESS
