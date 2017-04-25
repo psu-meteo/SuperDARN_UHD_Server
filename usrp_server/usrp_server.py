@@ -896,8 +896,8 @@ class RadarHardwareManager:
                                back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
 
 
-                        #    self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
-                        #    time.sleep(.1)
+                         #   self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
+                         #   time.sleep(.1)
                             samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                             samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                             
@@ -1007,6 +1007,8 @@ class RadarHardwareManager:
                   self.logger.error('connection to USRP broke in GET_DATA')
                else: 
                   rx_status                = ready_return['status']
+                  if rx_status == -1:
+                     self.logger.error("Error occurred in rx_worker. TODO: delete data oder mute USRP? ") # TODO
                   self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
                   self.logger.debug('GET_DATA rx status {}'.format(rx_status))
