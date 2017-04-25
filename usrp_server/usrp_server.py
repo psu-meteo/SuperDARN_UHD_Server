@@ -414,6 +414,7 @@ class RadarHardwareManager:
 
         self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
         self.set_par_semaphore.release()
+        self.lastSwingInvalid = False
         self.trigger_next_function_running = False
 
 
@@ -840,6 +841,7 @@ class RadarHardwareManager:
            resultDict['nSequences_per_period']         = self.nSequences_per_period       
            resultDict['pulse_sequence_offsets_vector'] = self.commonChannelParameter['pulse_sequence_offsets_vector'] 
            resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
+           resultDict['results_are_valid']              = True
            for channel in self.channels: 
                resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
                resultDict['pulse_lens']                   = channel.pulse_lens    
@@ -869,68 +871,82 @@ class RadarHardwareManager:
            self.logger.debug('No tranmitting channles available. Skipping USRP_TRIGGER')
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
-
-        if CS_PROCESSING in allProcessingChannelStates:
-            # CUDA_GET_DATA
-            self.logger.debug('start CUDA_GET_DATA')
-            cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
-            cmd.transmit()
-
-            nMainAntennas = self.nMainAntennas
-            nBackAntennas = self.nBackAntennas
-            main_samples = None
+        if self.lastSwingInvalid: # TODO check if this works (in control program or data files)
+           self.logger.warning("Last swin has been invalid. Preparing 0 sequences to transmit")
+           for iChannel, channel in enumerate(self.channels):
+              if channel.processing_state is CS_PROCESSING:
+                 channel.update_ctrlprm_class("current")
+                 channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
+                 channel.resultDict_list[-1]['results_are_valid'] = False
+                 channel.resultDict_list[-1]['nSequences_per_period'] = 0
 
 
-            for cudasock in self.cudasocks:
-                nAntennas = recv_dtype(cudasock, np.uint32)
-                for iChannel,channel in enumerate(self.channels):
-
-                    if channel.processing_state == CS_PROCESSING:
-                        transmit_dtype(cudasock, channel.cnum, np.int32)
-
-                        for iAntenna in range(nAntennas):
-                            antIdx = recv_dtype(cudasock, np.uint16)
-                            nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
-                            if main_samples is None:
-                               main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
-                               back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
-
-
-                         #   self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
-                         #   time.sleep(.1)
-                            samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
-                            samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
-                            
-                            if antIdx < nMainAntennas:
-                                main_samples[iChannel][antIdx] = samples[:]
-
-                            else:
-                                back_samples[iChannel][antIdx - nMainAntennas] = samples[:]
-                                        
-          
-                transmit_dtype(cudasock, -1, np.int32) # to end transfer process
-                
-            cmd.client_return()
-            self.logger.debug('end CUDA_GET_DATA')
-
-            # BEAMFORMING
-            self.logger.debug('start rx beamforming')
-            beamformed_samples      = self.calc_beamforming( main_samples, back_samples)
-            for iChannel, channel in enumerate(self.channels):
-               if channel.processing_state is CS_PROCESSING:
-                  # copy samples and ctrlprm to transmit later to control program
-                  if 'main_beamformed' in channel.resultDict_list[-1]:
-                     channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
-                  channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
-                  channel.update_ctrlprm_class("current")
-                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
-                  for item in channel.ctrlprm_struct.dataqueue:
-                     if item.name == 'rbeam':
-                        channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
-
-            self.logger.debug('end rx beamforming')
+                 for item in channel.ctrlprm_struct.dataqueue:
+                    if item.name == 'rbeam':
+                       channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
+           self.lastSwingInvalid = False
         else:
-           self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
+           if CS_PROCESSING in allProcessingChannelStates:
+               # CUDA_GET_DATA
+               self.logger.debug('start CUDA_GET_DATA')
+               cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
+               cmd.transmit()
+
+               nMainAntennas = self.nMainAntennas
+               nBackAntennas = self.nBackAntennas
+               main_samples = None
+
+
+               for cudasock in self.cudasocks:
+                   nAntennas = recv_dtype(cudasock, np.uint32)
+                   for iChannel,channel in enumerate(self.channels):
+
+                       if channel.processing_state == CS_PROCESSING:
+                           transmit_dtype(cudasock, channel.cnum, np.int32)
+
+                           for iAntenna in range(nAntennas):
+                               antIdx = recv_dtype(cudasock, np.uint16)
+                               nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
+                               if main_samples is None:
+                                  main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
+                                  back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
+
+
+                            #   self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
+                            #   time.sleep(.1)
+                               samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
+                               samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+                               
+                               if antIdx < nMainAntennas:
+                                   main_samples[iChannel][antIdx] = samples[:]
+
+                               else:
+                                   back_samples[iChannel][antIdx - nMainAntennas] = samples[:]
+                                           
+             
+                   transmit_dtype(cudasock, -1, np.int32) # to end transfer process
+                   
+               cmd.client_return()
+               self.logger.debug('end CUDA_GET_DATA')
+
+               # BEAMFORMING
+               self.logger.debug('start rx beamforming')
+               beamformed_samples      = self.calc_beamforming( main_samples, back_samples)
+               for iChannel, channel in enumerate(self.channels):
+                  if channel.processing_state is CS_PROCESSING:
+                     # copy samples and ctrlprm to transmit later to control program
+                     if 'main_beamformed' in channel.resultDict_list[-1]:
+                        channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
+                     channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
+                     channel.update_ctrlprm_class("current")
+                     channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
+                     for item in channel.ctrlprm_struct.dataqueue:
+                        if item.name == 'rbeam':
+                           channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
+
+               self.logger.debug('end rx beamforming')
+           else:
+              self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
 
         # PERIOD FINISHED        
