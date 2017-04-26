@@ -101,6 +101,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     channel_filter = np.ones(clear_bw / CLRFREQ_RES)
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
     
+    print('find_clrfreq_from_spectrum in clear_frequency_search.py, returning hardcoded frequency!')
     return 13100, 10 # hardcocde clrfreq return
     print("TODO: why is fstart 10 MHz?")
     # mask channel power spectrum to between fstart and fstop
