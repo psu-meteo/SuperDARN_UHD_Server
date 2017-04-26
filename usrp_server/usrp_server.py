@@ -1648,6 +1648,13 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            
+            # wait for confirmation before sending the next antenna..
+            # if we start catching this assert or timing out, maybe add some more error handling here
+            sample_send_status = recv_dtype(self.conn, np.int32)
+            assert sample_send_status == iSequence 
+
+
         self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 

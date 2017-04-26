@@ -33,7 +33,7 @@ OBEY_RESTRICTED_FREQS = True
 DEBUG = 1
 def dbPrint(msg):
    if DEBUG:
-     print("clear_frequency_serch.py : " + msg)
+     print("clear_frequency_search.py : " + msg)
 
 
 def read_restrict_file(restrict_file):
@@ -101,9 +101,6 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     channel_filter = np.ones(clear_bw / CLRFREQ_RES)
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
     
-    print('find_clrfreq_from_spectrum in clear_frequency_search.py, returning hardcoded frequency!')
-    return 13100, 10 # hardcocde clrfreq return
-    print("TODO: why is fstart 10 MHz?")
     # mask channel power spectrum to between fstart and fstop
     usable_mask = (spectrum_freqs > fstart) * (spectrum_freqs < fstop)
     channel_power = channel_power[usable_mask]
@@ -112,9 +109,11 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     # find lowest power channel
     clrfreq_idx = np.argmin(channel_power) 
     
-    clrfreq = spectrum_freqs[clrfreq_idx]
+    clrfreq = spectrum_freqs[clrfreq_idx] / 1e3
     noise = channel_power[clrfreq_idx]
-        
+    
+    dbPrint("clear frequency: ".format(clrfreq))
+    dbPrint("noise: ".format(clrfreq))
     return clrfreq, noise
 
 def fft_clrfreq_samples(samples):
