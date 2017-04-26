@@ -53,7 +53,72 @@ CS_READY         = 'CS_READY'
 CS_TRIGGER       = 'CS_TRIGGER'
 CS_PROCESSING    = 'CS_PROCESSING'
 CS_SAMPLES_READY = 'CS_SAMPLES_READY'
+CS_LAST_SWING    = 'CS_LAST_SWING'
 
+class usrpSockManager():
+   def __init__(self, RHM):
+      self.addressList_active     = [] # tuple of IP and port
+      self.addressList_inactive   = []
+      self.socks = []
+      usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
+      self.RHM = RHM
+      self.logger = logging.getLogger("usrpSockManager")      
+      
+      addressList = []
+      for usrp in RHM.ini_usrp_configs:
+          addressList.append((usrp['driver_hostname'], int(usrp['array_idx']) + usrp_driver_base_port))
+      
+      self.nUSRPs = len(addressList) # TODO should this be all USRPs or only active?
+      self.fault_status = np.ones(self.nUSRPs)
+      
+      # open each 
+      for usrp in addressList:
+         try: 
+            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            usrpsock.connect(usrp)
+            self.socks.append(usrpsock)
+            self.addressList_active.append(usrp)
+            self.logger.debug('connected to usrp driver on port {}'.format(usrp[1]))
+         except ConnectionRefusedError:
+            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
+            self.addressList_inactive.append(usrp)
+
+
+   def eval_client_return(self, cmd, fcn=None):
+      if fcn is None: # default receive function
+         client_return = cmd.client_return()
+      else:
+         client_return = fcn()
+
+      if CONNECTION_ERROR in client_return:
+         offset = 0
+         for iSock, singleReturn in enumerate(client_return):
+            if singleReturn == CONNECTION_ERROR:
+               self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
+               self.addressList_inactive.append(self.addressList_active[iSock-offset] )
+               del self.addressList_active[iSock-offset]
+               del self.socks[iSock-offset]
+               offset += 1 
+      return client_return
+
+   def restore_lost_connections(self):
+      addressList = self.addressList_inactive
+      self.addressList_inactive = [] 
+      for usrp in addressList:
+         self.logger.error("Skipping reconnecting usrps because resync causes problems. TODO fix it!")
+         return
+         try: 
+            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            usrpsock.connect(usrp)
+            # TODO : sync to other usrps
+            self.RHM._resync_usrps
+            # TODO : initialize shm with zeros
+            self.socks.append(usrpsock)
+            self.addressList_active.append(usrp)
+            self.logger.info('reconnection to usrp driver on port {} successful'.format(usrp[1]))
+         except ConnectionRefusedError:
+            self.logger.error('usrp reconnection failed on port {}'.format(usrp[1]))
+            self.addressList_inactive.append(usrp)
 
 class usrpMixingFreqManager():
     """ Manages usrp mixing frequency based on channels. Ensures that only one channel
@@ -172,10 +237,14 @@ class clearFrequencyRawDataManager():
 
         self.metaData['antenna_list'] = self.antennaList
 
+        self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
+
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
         self.outstanding_request = False
+
+        self.logger.debug("clrfreq record time: {}".format(self.recordTime))
 
     def get_raw_data(self):
         if self.rawData is None or not self.raw_data_available_from_this_period:
@@ -195,6 +264,8 @@ class swingManager():
         # a/p swing status is switched in main loop async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
         self.lastSwingWithData  = self.activeSwing  
         self.nextSwingToTrigger = self.activeSwing
+    def reset(self):
+        self.__init__() # for now reset is the same as init
 
     def switch_swings(self):
         self.activeSwing     = 1 - self.activeSwing
@@ -220,20 +291,28 @@ class scanManager():
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
+        self.isPostLast = False # to handle last trigger_next_swing() call
 
         self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
 
         self.restricted_frequency_list = restricted_frequency_list
+        self.logger = logging.getLogger('scanManager')
+
+    def init_new_scan(self, freq_range_list, scan_beam_list):
   
-    def update_freq_list(self, freq_range_list):
-        # update the clear freq range list
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
         self.clear_freq_range_list = freq_range_list
 
-    def update_beam_list(self, scan_beam_list):
-        # update the list of beams over the scan
         # list of [bmnum, bmnum..] 
         self.scan_beam_list = scan_beam_list
+
+        # rest all other parameter
+        self.current_period = 0
+        self.current_clrFreq_result = None
+        self.next_clrFreq_result    = None 
+        self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
+        self.isPostLast = False # to handle last trigger_next_swing() call
+
 
     def switch_swings(self):
         # switch swings
@@ -243,7 +322,7 @@ class scanManager():
     # XXX store current freqencies in clrfreq manager,
     # add to restricted
     def period_finished(self):
-        print("swing manager period finished... ")
+      #  print("swing manager period finished... ")
         self.current_clrFreq_result = self.next_clrFreq_result
         self.next_clrFreq_result = None
         if self.isPrePeriod:
@@ -252,6 +331,10 @@ class scanManager():
 
         if not self.isLastPeriod:
             self.current_period += 1
+            self.logger.debug("Increasing current_period to {}".format(self.current_period))
+        else:
+            self.logger.debug("Last period current_period is still {}".format(self.current_period))
+            self.isPostLast = True
 
         
     def status(self):
@@ -259,7 +342,7 @@ class scanManager():
     
     @property        
     def current_beam(self):
-        print("Requesting current beam for period {}".format(self.current_period))
+       # print("Requesting current beam for period {}".format(self.current_period))
         return self.scan_beam_list[self.current_period]
         
     @property        
@@ -271,21 +354,17 @@ class scanManager():
 
     def get_current_clearFreq_result(self):
         if self.current_clrFreq_result is None:
-            print("  calc current clr_freq (period {})".format(self.current_period))
+           # print("  calc current clr_freq (period {})".format(self.current_period))
             self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
         return self.current_clrFreq_result
         
     def get_next_clearFreq_result(self):
         if self.next_clrFreq_result is None:
-            print("  calc next clr_freq (period {})".format(self.current_period+1))
+           # print("  calc next clr_freq (period {})".format(self.current_period+1))
             self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
-            
-        print("  evaluate_clear_freq hardcoded to 13 MHz!")
-        return (13e3, 10, time.time())
-
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
 
@@ -325,7 +404,7 @@ class RadarHardwareManager:
 
         self.nRegisteredChannels = 0
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
-        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpsocks)
+        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks)
 
         self.logger.warning("RadarHardwareManager: hardcoded clear frequency search frequency!, modify code to use adaptive center freq")
         self.clearFreqRawDataManager.set_clrfreq_search_span(12.5e6, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
@@ -333,6 +412,8 @@ class RadarHardwareManager:
         self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
 
+        self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
+        self.set_par_semaphore.release()
 
 
     def run(self):
@@ -357,6 +438,10 @@ class RadarHardwareManager:
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time()
 
+                # check if there are any disconnected URSPs
+                if len(self.usrpManager.addressList_inactive):
+                   self.usrpManager.restore_lost_connections()
+
                 # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
                 if self.clearFreqRawDataManager.outstanding_request:
                     controlLoop_logger.debug('start self.clearFreqRawDataManager.record_new_data()')
@@ -380,7 +465,7 @@ class RadarHardwareManager:
                     # wait for all channels to be in TRIGGER state
                     executeTrigger = True
                     for ch in self.channels:
-                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
+                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE, CS_LAST_SWING]:
                             controlLoop_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
                             time.sleep(sleepTime)
                             executeTrigger = False
@@ -453,58 +538,28 @@ class RadarHardwareManager:
         self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
 
     def usrp_init(self):
-        usrp_drivers = [] # hostname of usrp drivers
-        usrp_driver_base_port = int(self.ini_network_settings['USRPDriverPort'])
-        self.antenna_index_list = []
-        
-        if not len(self.ini_usrp_configs):
-            self.logger.error('no USRPs found in usrp_config.ini! exiting')
-            self.logger.error('maybe it doesn\' exist? try running ./srr.py init')
-            sys.exit(1)
+      self.usrpManager = usrpSockManager(self)
+      self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
+      self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
+      self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
 
-        for usrp in self.ini_usrp_configs:
-            usrp_driver_hostname = usrp['driver_hostname']
-            self.antenna_index_list.append(int(usrp['array_idx'])) 
-            usrp_driver_port = int(usrp['array_idx']) + usrp_driver_base_port 
-            usrp_drivers.append((usrp_driver_hostname, usrp_driver_port))
-        
-        usrp_driver_socks = []
-        self.nUSRPs = len(usrp_drivers)
-        self.fault_status = np.ones(self.nUSRPs)
-        
-        self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
-        self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
-        self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
-
-        # open each 
-        try:
-            for usrp in usrp_drivers:
-                self.logger.debug('connecting to usrp driver on port {}'.format(usrp[1]))
-                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                usrpsock.connect(usrp)
-                usrp_driver_socks.append(usrpsock)
-        except ConnectionRefusedError:
-            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
-            sys.exit(1)
-
-        self.usrpsocks = usrp_driver_socks
-        self._resync_usrps()
+      self._resync_usrps()
 
 
     def _resync_usrps(self):
         usrps_synced = False
 
         while not usrps_synced:
-            cmd = usrp_sync_time_command(self.usrpsocks)
+            cmd = usrp_sync_time_command(self.usrpManager.socks)
             cmd.transmit()
             cmd.client_return()
 
             # once USRPs are connected, synchronize clocks/timers 
-            cmd = usrp_get_time_command(self.usrpsocks)
+            cmd = usrp_get_time_command(self.usrpManager.socks)
             cmd.transmit() 
 
             usrptimes = []
-            for usrpsock in self.usrpsocks:
+            for usrpsock in self.usrpManager.socks:
                 usrptimes.append(cmd.recv_time(usrpsock))
            
             cmd.client_return()
@@ -533,9 +588,9 @@ class RadarHardwareManager:
            att = 31.5
 
         self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
-        cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
+        cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
-        cmd.client_return()
+        self.usrpManager.eval_client_return(cmd)
 
 
     def test_rxfe_control(self):
@@ -551,7 +606,7 @@ class RadarHardwareManager:
             amp2 = testParSet[iSet][1]
             att  = testParSet[iSet][2]
 
-            cmd = usrp_rxfe_setup_command(self.usrpsocks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
             cmd.transmit()
             cmd.client_return()
             self.logger.warning("Current settings: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
@@ -585,7 +640,7 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
-
+        RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
         RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
@@ -593,11 +648,11 @@ class RadarHardwareManager:
      
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {})'.format(channel.cnum))
+            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
             cmd.transmit()
             cmd.client_return()      
             if channel.active_state == CS_INACTIVE: 
-               RHM.logger.debug("initialize_channel() is setting ch {} from CS_INACTIVE to CS_READY".format(channel.cnum))
+               RHM.logger.debug("initialize_channel() is setting ch {} swing {} from CS_INACTIVE to CS_READY".format(channel.cnum,  channel.swingManager.activeSwing))
                channel.active_state = CS_READY # channel not really ready until CUDA_GENERATE, but there will be no trigger in parallel to this function
             else:
                RHM.logger.debug("initialize_channel() ch {} state stays {}".format(channel.cnum, channel.active_state))
@@ -615,6 +670,8 @@ class RadarHardwareManager:
         cmd.client_return()
         RHM.logger.debug('end CUDA_GENERATE_PULSE (1st period)')
         RHM.logger.debug("end initialize_channel")
+
+        RHM.set_par_semaphore.release()
 
 
     def unregister_channel_from_HardwareManager(self, channelObject):
@@ -651,13 +708,13 @@ class RadarHardwareManager:
     def exit(self):
         # clean up and exit
         self.client_sock.close()
-        cmd = usrp_exit_command(self.usrpsocks)
+        cmd = usrp_exit_command(self.usrpManager.socks)
         cmd.transmit()
 
         cmd = cuda_exit_command(self.cudasocks)
         cmd.transmit()
 
-        for sock in self.usrpsocks:
+        for sock in self.usrpManager.socks:
             sock.close()
         for sock in self.cudasocks:
             sock.close()
@@ -735,32 +792,35 @@ class RadarHardwareManager:
               transmittingChannelAvailable = True
               break
 
+        self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
+        self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
+
         if transmittingChannelAvailable:
            # USRP SETUP
+           self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
            self.logger.debug("start USRP_SETUP")
-           cmd = usrp_setup_command(self.usrpsocks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+           cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
-           cmd.client_return()
+           self.usrpManager.eval_client_return(cmd)
            self.logger.debug("end USRP_SETUP")
 
 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
-           cmd = usrp_get_time_command(self.usrpsocks[0]) # grab current usrp time from one usrp_driver 
+           cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
            cmd.transmit()
           
-           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
-           self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
+    ##       self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
+    ##     self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
 
            # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
            # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
-           usrp_time = cmd.recv_time(self.usrpsocks[0])
+           usrp_time = cmd.recv_time(self.usrpManager.socks[0])
            cmd.client_return()
            self.logger.debug("end USRP_GET_TIME")
 
-           self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
 
            # calculate sequence times for control program
            sequence_start_time_secs  = np.zeros(self.nSequences_per_period, dtype=np.uint64)
@@ -786,7 +846,7 @@ class RadarHardwareManager:
            # broadcast the start of the next integration period to all usrp
            self.logger.debug('start USRP_TRIGGER')
            trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
-           cmd = usrp_trigger_pulse_command(self.usrpsocks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
+           cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
            self.logger.debug('sending trigger pulse command')
            cmd.transmit()
 
@@ -795,14 +855,16 @@ class RadarHardwareManager:
            for ch in self.channels:
                if ch.active_state == CS_TRIGGER:
                   ch.active_state = CS_PROCESSING
-                  ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {})".format(ch.cnum, self.swingManager.activeSwing))
+                  ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {}, period {})".format(ch.cnum, self.swingManager.activeSwing, ch.scanManager.current_period))
            self.logger.debug('waiting for trigger return')
-           returns = cmd.client_return()
+           returns = self.usrpManager.eval_client_return(cmd)
 
            if TRIGGER_BUSY in returns:
                self.logger.error('could not trigger, usrp driver is busy')
                pdb.set_trace()
            self.logger.debug('end USRP_TRIGGER')
+        else:
+           self.logger.debug('No tranmitting channles available. Skipping USRP_TRIGGER')
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
 
@@ -832,8 +894,8 @@ class RadarHardwareManager:
                                back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
 
 
-                            self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
-                            time.sleep(.1)
+                        #    self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
+                        #    time.sleep(.1)
                             samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                             samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                             
@@ -859,9 +921,14 @@ class RadarHardwareManager:
                      channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
                   channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
                   channel.update_ctrlprm_class("current")
-                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = channel.ctrlprm_struct.dataqueue
+                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
+                  for item in channel.ctrlprm_struct.dataqueue:
+                     if item.name == 'rbeam':
+                        channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
 
             self.logger.debug('end rx beamforming')
+        else:
+           self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
 
         # PERIOD FINISHED        
@@ -872,8 +939,13 @@ class RadarHardwareManager:
            if channel.processing_state is CS_PROCESSING:
 
               # determine next state after samples are returned to control program
-              if channel.scanManager.isLastPeriod or channel.scanManager.isForelastPeriod:
+              if channel.scanManager.isPostLast: # or channel.scanManager.isForelastPeriod:
                  channel.next_processing_state = CS_INACTIVE
+                 channel.active_state          = CS_INACTIVE
+                 channel.next_active_state     = CS_INACTIVE
+                 channel.logger.debug('last period finished, setting active and next processing state to CS_INACTIVE')
+              elif channel.scanManager.isLastPeriod:
+                 channel.next_processing_state = CS_LAST_SWING
               else:
                  channel.next_processing_state = CS_READY 
               channel.logger.debug("Switching next processing state (swing {}) of cnum {} to {}".format(self.swingManager.processingSwing, channel.cnum, channel.next_processing_state )) 
@@ -883,7 +955,7 @@ class RadarHardwareManager:
  
         # CUDA_ADD & CUDA_GENGERATE for processingSwing 
         for channel in self.channels:
-            if channel.scanManager.isLastPeriod or channel.scanManager.isForelastPeriod:
+            if channel.scanManager.isLastPeriod: # or channel.scanManager.isForelastPeriod:
                self.logger.debug("start CUDA_REMOVE_CHANNEL")
                cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = swingManager.processingSwing) 
                self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
@@ -919,27 +991,31 @@ class RadarHardwareManager:
         if transmittingChannelAvailable:
            # USRP_READY_DATA for activeSwing 
            self.logger.debug('start USRP_READY_DATA')
-           cmd = usrp_ready_data_command(self.usrpsocks, swingManager.activeSwing)
+           cmd = usrp_ready_data_command(self.usrpManager.socks, swingManager.activeSwing)
            cmd.transmit()
     
            # check status of usrp drivers
-           for iUSRP, usrpsock in enumerate(self.usrpsocks):
-               self.logger.debug('start receiving one USRP status')
-               ready_return = cmd.recv_metadata(usrpsock)
-               rx_status                = ready_return['status']
-               self.fault_status[iUSRP] = ready_return["fault"]
+           self.logger.debug('start receiving all USRP status')
+           payloadList = self.usrpManager.eval_client_return(cmd, fcn=cmd.receive_all_metadata)
+           self.logger.debug('end receiving all USRP status')
+
+           for iUSRP, ready_return in enumerate(payloadList):
+               if ready_return == CONNECTION_ERROR:
+                  self.usrpManager.fault_status[iUSRP] = True
+                  self.logger.error('connection to USRP broke in GET_DATA')
+               else: 
+                  rx_status                = ready_return['status']
+                  self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
-               self.logger.debug('GET_DATA rx status {}'.format(rx_status))
-               if rx_status != 2:
-                   self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
-                   #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
-               self.logger.debug('end receiving one USRP status')
+                  self.logger.debug('GET_DATA rx status {}'.format(rx_status))
+                  if rx_status != 2:
+                      self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
+                      #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
    
            self.logger.debug('start waiting for USRP_DATA return')
-           cmd.client_return()
-
-           self.logger.debug('GET_DATA: received samples from USRP_DRIVERS, status: ' + str(rx_status))
+           self.usrpManager.eval_client_return(cmd)
            self.logger.debug('end waiting for USRP_DATA return')
+
            self.logger.debug('end USRP_READY_DATA')
 
 
@@ -992,6 +1068,7 @@ class RadarHardwareManager:
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
                 bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
+                channel.logger.debug("rx beamforming: ch {}, beam {}".format(channel.cnum, channel.scanManager.current_beam))
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
     
@@ -1035,11 +1112,6 @@ class RadarChannelHandler:
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
         
-
-        # DELETE THIS AFTER CLEAR FREQUENCY CODE IS WORKING
-        self.logger.warning("Scan information only set for debugging")
-        self.scanManager.scan_beam_list = [i for i in range(16)]
-        self.scanManager.clear_freq_range_list = [[10000+i*10, 300+i] for i in range(16)]
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
     @property
@@ -1138,8 +1210,9 @@ class RadarChannelHandler:
         counter = 0
         while self.state[swing] not in state:
             counter = (counter + 1) % 10000
-            if state[0] == CS_SAMPLES_READY and counter == 1:
-               self.logger.debug("ch {}:_waitForState CS_SAMPLES_READY. state is {} (swing {})".format(self.cnum, self.state[swing], swing))
+#            if state[0] == CS_SAMPLES_READY and counter == 1:
+            if counter == 1:
+               self.logger.debug("ch {}:_waitForState {}. state is {} (swing {})".format(self.cnum, state, self.state[swing], swing))
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT for channel {}'.format(self.cnum))
@@ -1229,7 +1302,8 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
-        self._waitForState(self.swingManager.nextSwingToTrigger, CS_READY)
+        self.logger.debug("ch {}: SetReadyFlagHandler: waiting for nextSwingToTrigger (swing {}) become  CS_READY".format(self.cnum, self.swingManager.nextSwingToTrigger))
+        self._waitForState(self.swingManager.nextSwingToTrigger, [CS_READY, CS_LAST_SWING])
  #       transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
         self.logger.debug("ch {}: SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.cnum, self.swingManager.nextSwingToTrigger))
         self.state[self.swingManager.nextSwingToTrigger] = CS_TRIGGER
@@ -1353,16 +1427,33 @@ class RadarChannelHandler:
         # TODO divide compatibiliti check in sequence and ctrlprm check?
         # TODO add compatibility check in parameter prediction function
 
+        RHM = self.parent_RadarHardwareManager
+
+
         # period not jet triggered
-        if self.active_state == CS_INACTIVE or self.scanManager.current_period == 0:
+        if self.active_state == CS_INACTIVE or self.active_state == CS_READY: 
+           RHM.set_par_semaphore.acquire()
+
+           if self.active_state == CS_READY:
+              self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
+              self.active_state = CS_INACTIVE
+
            self.ctrlprm_struct.receive(self.conn)
-           self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam']))
+           self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
               return RSMG_FAILURE
-           self.parent_RadarHardwareManager.newChannelList.append(self)
+
+           if self not in self.parent_RadarHardwareManager.newChannelList:
+              self.parent_RadarHardwareManager.newChannelList.append(self)
+              self.logger.debug("Adding ch {} to newChannelList ".format(self.cnum))
+           else:
+              self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
+           RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        else:
+        elif self.active_state == CS_PROCESSING or self.active_state == CS_LAST_SWING: 
+         # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
 
@@ -1374,6 +1465,9 @@ class RadarChannelHandler:
                  # TODO return RMSG_FAILURE
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+        else:
+           self.logger.error("Active state is {}. Dont know what to do...".format(self.active_state))
+           pdb.set_trace()
 
         
         if (self.rnum < 0 or self.cnum < 0):
@@ -1393,7 +1487,9 @@ class RadarChannelHandler:
             self.logger.error("Pulse lengths in one sequence have to be the equal! ") # TODO raise error?
             pdb.set_trace()
             return False
-        
+        if hardwareManager.nRegisteredChannels == 1 and hardwareManager.channels[0] == self:
+           self.logger.info("Compatibility check: This channel is already registered at HardwareManager and is the only one. Renewing registration.")
+           hardwareManager.nRegisteredChannels == 0
 
         if hardwareManager.nRegisteredChannels == 0:  # this is the first channel
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
@@ -1490,8 +1586,8 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, resultDict['pulse_lens'],           np.uint32) # length badtrdat_len
 
         # stuff these with junk, they don't seem to be used..
-        num_transmitters = self.parent_RadarHardwareManager.nUSRPs   # TODO update for polarization?
-        txstatus_agc = self.parent_RadarHardwareManager.fault_status # TODO is this the right way to return fault status????
+        num_transmitters = self.parent_RadarHardwareManager.usrpManager.nUSRPs   # TODO update for polarization?
+        txstatus_agc = self.parent_RadarHardwareManager.usrpManager.fault_status # TODO is this the right way to return fault status????
         txstatus_lowpwr = np.zeros(num_transmitters)
         if txstatus_agc.any():
             self.logger.warning('Following USRPs report Fault:  {} (usrp index)'.format([k for k in range(txstatus_agc.size) if txstatus_agc[k] != 0]))
@@ -1531,7 +1627,7 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
-            self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array! perido {} / {}'.format(iSequence, resultDict["nSequences_per_period"]))
+        self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 
     
@@ -1602,8 +1698,11 @@ class RadarChannelHandler:
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.scanManager.update_freq_list(freq_range_list)
-        self.scanManager.update_beam_list(scan_beam_list)
+        self.scanManager.init_new_scan(freq_range_list, scan_beam_list)
+
+        self.swingManager.reset()
+        self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+    
 
         return RMSG_SUCCESS
 
