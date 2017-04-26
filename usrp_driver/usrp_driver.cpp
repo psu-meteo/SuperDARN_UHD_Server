@@ -365,7 +365,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     float mimic_delay;
 
     int32_t verbose = 1; 
-    int32_t rx_worker_status; // TODO: change to swing vector is we need this
+    int32_t rx_worker_status = 0; // TODO: change to swing vector is we need this
 
     // clean up to fix it later..
     std::vector<void *> shm_rx_vec(nSwings);
@@ -753,7 +753,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                   
                    // TODO: delete this
                    // uint32_t channel_index;
-                   // channel_index = sock_get_int32(driverconn); 
+                   // channel_index = sock_get_int32(driverconn);
+                    if(rx_worker_status){
+                      fprintf(stderr, "Error in rx_worker. Setting state to -1.");
+                      state_vec[swing] = -1;
+                      rx_worker_status = 0;
+                    }
+       
 
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], ant, nSamples_rx);
                     sock_send_int32(driverconn, state_vec[swing]);  // send status

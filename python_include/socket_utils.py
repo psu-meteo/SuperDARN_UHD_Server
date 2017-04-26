@@ -21,9 +21,9 @@ def complex_int32_pack(isamp, qsamp):
 
 def recv_dtype(sock, dtype, nitems = 1):
     if dtype == str:
-        data = sock.recv(nitems)
+        data = sock.recv(nitems, socket.MSG_WAITALL)
     else:
-        dstr = sock.recv(dtype().nbytes * nitems)
+        dstr = sock.recv(dtype().nbytes * nitems, socket.MSG_WAITALL)
         if verbose:
             print(' => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes * nitems , dstr  ))
         data = np.fromstring(dstr, dtype=dtype, count=nitems)

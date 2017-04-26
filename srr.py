@@ -1,10 +1,31 @@
 #!/usr/bin/python3
-# software radio radar
+# Software Radio Radar
+#  Function to quickly start and terminate single radar processes.
 #
-#  srr.py [status]                                 : shows all software radio processes
-#  srr.py stop [cuda[_driver] | usrp_driver | driver]       : stops all software radio processes or only the specified 
-#  srr.py start [cuda[_driver] | usrp_driver | [usrp_]server] : comming soon...
-#  srr.py init [auto|main|aux]                     : create symlink to usrp_config file. no argumet is same as "auto"
+#  Usage:
+#     srr.py [status]              : shows all software radio processes 
+#     srr.py init [auto|main|aux]  : create symlink to usrp_config file (default is auto)
+#     srr.py start   PROCESS       : start a process or process group (see below for processes) 
+#     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
+#     srr.py restart PROCESS       : restart a process or process group with needed wait times
+#     srr.py help                  : show this help
+#
+#  Available PROCESSES:
+#     cuda (or cuda_driver)        : cuda driver
+#     usrps (or usrp_driver)       : all usrps defined in usrp_config.ini
+#     server (or usrp_server)      : usrp_server
+#   
+#     errlog (or errorlog)         : errlog server            (no restart)
+#     rawacf (or rawacfwrite)      : rawacf write process     (no restart)
+#     fitacf (or fitacfwrite)      : fitacf write process     (no restart)
+#     rtserver                     : real time display server (no restart)
+#   
+#     uaf_fix (or uafscan_fix)     : starts uafscan fast with fixfreq 14000 (only start)
+#
+#  Available PROCESS GROUPS:
+#     driver                       : cuda_driver and usrp_driver
+#     all                          : cuda_driver, usrp_driver and usrp_server
+
 
 #  TODO:
 # restart is processes already running?
@@ -92,6 +113,22 @@ def initialize(inputArg):
    os.symlink(usrp_config_source_file[computer], usrp_config_target_file)
    myPrint("Creating symlink {} -> {}".format(usrp_config_target_file, usrp_config_source_file[computer]))
 
+def show_help():
+   thisFile = open( os.path.realpath(__file__), 'r')
+   helpText = []
+   isFirst = True
+   for line in thisFile:
+      if isFirst:
+         isFirst = False
+         continue
+      if line.startswith("#"):
+         helpText.append(line[1:])
+         myPrint(line[1:-1])
+      else:
+         break
+#   print(helpText)
+      
+
 def set_alias():
    # does only work for the subprocess session...
    aliasPar = 'alias srrt="{}/srr.py " '.format(basePath)
@@ -109,7 +146,7 @@ def get_processes():
    return processList
 
 def print_status():
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver"]
     processList = get_processes()
     srrProcesses = []
     for line in processList:
@@ -234,7 +271,10 @@ def get_process_ids(processShortName):
        processMatchString = ["rtserver"]
        nWords = 0
     else:
+       nWords = 0
+       processMatchString = [processShortName]
        ValueError("unknown process short name {}".format(processShortName))
+       
      
     processList = get_processes()
     cudaProcesses = []
@@ -283,8 +323,40 @@ def stop_rtserver():
     serverProcesses = get_process_ids("rtserver")
     if len(serverProcesses):
        terminate_all(serverProcesses)
+       return 1
     else:
        myPrint("  No rtserver processes found...")
+       return 0
+    
+def stop_errorlog():
+    myPrint(" Stopping errlog...")
+    serverProcesses = get_process_ids("errlog")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No errlog processes found...")
+       return 0
+    
+def stop_fitacf_write():
+    myPrint(" Stopping fitacfwrite...")
+    serverProcesses = get_process_ids("fitacfwrite")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No fitacfwrite processes found...")
+       return 0
+    
+def stop_rawacf_write():
+    myPrint(" Stopping rawacfwrite...")
+    serverProcesses = get_process_ids("rawacfwrite")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No rawacfwrite processes found...")
+       return 0
     
     
 
@@ -354,8 +426,24 @@ def start_2normalscans():
     subprocess.Popen(command.split(" "))
 
 def start_rtserver():
-    myPrint("Starting rtserver on port 1401...")
-    subprocess.Popen(['rtserver', '-rp', '41104', '-ep', '41000', '-tp', '1401' ])
+    commandList = 'rtserver -rp 41104 -ep 41000 -tp 1401'.split(" ")
+    myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
+def start_fitacf_write():
+    commandList = 'fitacfwrite -r ade.a -lp 41103 -ep 41000'.split(" ")
+    myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
+def start_rawacf_write():
+    commandList = 'rawacfwrite -r ade.a -lp 41102 -ep 41000'.split(" ")
+    myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
+def start_errorlog():
+    commandList = 'errlog -name mcm.a -lp 41000'.split(" ")
+    myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
+    subprocess.Popen(commandList)
 
 
 
@@ -401,8 +489,17 @@ else:
          start_2normalscans()
       elif inputArg[1].lower() in ["rtserver"]:
          start_rtserver()
+      elif inputArg[1].lower() in ["errorlog", "errlog"]:
+         start_errorlog()
+      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+         start_fitacf_write()
+      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+         start_rawacf_write()
       else:
-         myPrint("unknown process to start")
+         myPrint("ERROR: Unknown process to start")
+         myPrint("See srr help for process names:")
+         myPrint("")
+         show_help()
 
    elif firstArg == "restart":
       if nArguments == 1 or inputArg[1].lower == "all":
@@ -440,7 +537,10 @@ else:
          start_usrp_server()
 
       else:
-         myPrint("unknown process to restart")
+         myPrint("ERROR: Unknown process to restart")
+         myPrint("See srr help for process names:")
+         myPrint("")
+         show_help()
 
 
    elif firstArg == "stop":
@@ -462,15 +562,25 @@ else:
       elif inputArg[1].lower() == "driver":
          stop_usrp_driver()
          stop_cuda_driver()
+      elif inputArg[1].lower() in ["errorlog", "errlog"]:
+         stop_errorlog()
+      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+         stop_fitacf_write()
+      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+         stop_rawacf_write()
       else:
-         myPrint("unknown process to stop")
-   elif firstArg == "edit":
-       commandList = ['vim ', os.path.realpath(__file__) ] 
-       myPrint(commandList)
-       subprocess.Popen(commandList)
- 
+         myPrint("ERROR: Unknown process to stop")
+         myPrint("See srr help for process names:")
+         myPrint("")
+         show_help()
+   elif firstArg == "help":
+      show_help()
+   
    else:
-      myPrint("Unknown arguments ")
+      myPrint("ERROR: UNKNWON COMMAND")
+      myPrint("See srr help for usage:")
+      myPrint("")
+      show_help()
    
 myPrint(" ")
 print(basePrintLine)
