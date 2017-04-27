@@ -237,10 +237,14 @@ class clearFrequencyRawDataManager():
 
         self.metaData['antenna_list'] = self.antennaList
 
+        self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
+
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
         self.raw_data_available_from_this_period = True
         self.outstanding_request = False
+
+        self.logger.debug("clrfreq record time: {}".format(self.recordTime))
 
     def get_raw_data(self):
         if self.rawData is None or not self.raw_data_available_from_this_period:
@@ -361,12 +365,11 @@ class scanManager():
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
-            
-        print("  evaluate_clear_freq hardcoded to 13 MHz!")
-        return (13e3, 10, time.time())
-
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
+        
+
+        self.logger.debug("clear_freq_range: {}".format(self.clear_freq_range_list[iPeriod]))
 
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
         return (clearFreq, noise, recordTime)
@@ -1648,6 +1651,13 @@ class RadarChannelHandler:
             # send the packed complex int16 samples to the control program.. 
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            
+            # wait for confirmation before sending the next antenna..
+            # if we start catching this assert or timing out, maybe add some more error handling here
+            sample_send_status = recv_dtype(self.conn, np.int32)
+            assert sample_send_status == iSequence 
+
+
         self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 
@@ -1717,7 +1727,7 @@ class RadarChannelHandler:
         self.logger.debug('SetActiveHandler clear frequency search start frequencies: {}'.format(clrfreq_start_list))
 
         clrfreq_bandwidth_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        self.logger.debug('SetActiveHandler clear frequency search bandwidths: {}'.format(clrfreq_bandwidth_list))
+        self.logger.debug('SetActiveHandler clear frequency search bandwidths (Hz): {}'.format(clrfreq_bandwidth_list))
 
         scan_beam_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))

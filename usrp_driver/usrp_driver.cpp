@@ -706,8 +706,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         for(uint32_t p_i = 0; p_i < pulse_time_offsets.size(); p_i++) {
                             double offset_time = pulse_sample_idx_offsets[p_i] / txrate;
                             pulse_time_offsets[p_i] = offset_time_spec(start_time, offset_time);
-                            DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
+                            //DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
+
+                        DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets[0].get_real_secs());
+                        DEBUG_PRINT("last TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets[-1].get_real_secs());
                         
                         rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
@@ -719,13 +722,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
+                        // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay)); 
 
+
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
 
+                        uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
+
                     }
 
 
@@ -736,8 +743,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     swing      = sock_get_int16(  driverconn); 
                     DEBUG_PRINT("READY_DATA command (swing %d), waiting for uhd threads to join back\n", swing);
 
-                    uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
-
+                    
                     DEBUG_PRINT("READY_DATA unlocking swing a semaphore\n");
                     unlock_semaphore(sem_rx_vec[swing]);
                     unlock_semaphore(sem_tx_vec[swing]);
@@ -922,7 +928,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
                     
-                    sock_send_int32(driverconn, 0); // TODO: send antenna number as int32
+                    sock_send_int32(driverconn, (int32_t) ant);
                     sock_send_float64(driverconn, clrfreq_rate);
 
                     // send back samples                   
@@ -935,6 +941,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     usrp->set_rx_freq(rxfreq);
 
                     sock_send_uint8(driverconn, CLRFREQ);
+                    start_time = usrp->get_time_now();
+                    real_time = start_time.get_real_secs();
+                    frac_time = start_time.get_frac_secs();
+                    DEBUG_PRINT("CLRFREQ finished at UHD time: %d %.2f \n", real_time, frac_time);
+
                     break;
 
                     }
