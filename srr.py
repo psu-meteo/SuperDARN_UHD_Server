@@ -21,11 +21,13 @@
 #     rtserver                     : real time display server (no restart)
 #   
 #     uaf_fix (or uafscan_fix)     : starts uafscan fast with fixfreq 14000 (only start)
+#     uaf_fix ch_No                : starts uaf_fix on channel cd_No (1-4)
+#     uaf_fix_onesec [ch_No]       : starts uafscan (onsec, fixfreq) default ch_No=1
 #
 #  Available PROCESS GROUPS:
 #     driver                       : cuda_driver and usrp_driver
 #     all                          : cuda_driver, usrp_driver and usrp_server
-
+#     allscans                     : all porcesses with scan in their name
 
 #  TODO:
 # restart is processes already running?
@@ -59,16 +61,14 @@ USRP_SERVER_QUIT  = '.'
 
 basePath = os.path.dirname(os.path.realpath(__file__))
 nSecs_restart_pause = 10
-print(basePath)
+
 def myPrint(msg):
    print("||>  {}".format(msg))
 basePrintLine = "||>==============================================================="
 
 print(basePrintLine)
 myPrint("Software Radio Radar")
-print(basePrintLine)
 myPrint(" ")
-
 
 def waitFor(nSeconds):
    print("||> Waiting for {} second(s): ".format(nSeconds), end="", flush=True)
@@ -155,7 +155,7 @@ def print_status():
            commandString = " ".join(wordList[10:]) 
            for knowProcess in kownProcessList:
                if commandString.startswith(knowProcess):
-                  srrProcesses.append(wordList[1] + " " + commandString)
+                  srrProcesses.append( " " + commandString + "  (PID " + wordList[1] + ")")
                   break
    
     myPrint("Found {} processes:".format(len(srrProcesses)))
@@ -328,6 +328,15 @@ def stop_rtserver():
        myPrint("  No rtserver processes found...")
        return 0
     
+def stop_allscans():
+    myPrint(" Stopping errlog...")
+    serverProcesses = get_process_ids("scan")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No errlog processes found...")
+       return 0
 def stop_errorlog():
     myPrint(" Stopping errlog...")
     serverProcesses = get_process_ids("errlog")
@@ -406,11 +415,25 @@ def start_usrp_server():
     subprocess.Popen(['./usrp_server.py' ])
     os.chdir(basePath)
 
-def start_uafscan_fixfreq():
-    myPrint("Starting uafscan fixfreq...")
-#    os.chdir(os.path.join(basePath, "usrp_server") )   
-    subprocess.Popen(['uafscan', '--stid', 'mcm', '-c', '1', '--nowait', '--fixfrq', '14000','--fast',  '--debug' ])
-#    os.chdir(basePath)
+def start_uafscan_fixfreq_onesec(inputArg):
+    commandList ='uafscan --stid mcm -c 1 --nowait --fixfrq 14000 --onesec --debug'.split(" ")
+    if len(inputArg) == 2:
+       myPrint("Starting uafscan fixfreq onesec on default channel 1")
+    else:
+       myPrint("Starting uafscan fixfreq onesec on default channel {}".format(inputArg[2]))
+       commandList[4] = inputArg[2]
+    myPrint("  >>>{}".format(" ".join(commandList)))
+    subprocess.Popen(commandList)
+
+def start_uafscan_fixfreq(inputArg):
+    commandList ='uafscan --stid mcm -c 1 --nowait --fixfrq 14000 --fast --debug'.split(" ")
+    if len(inputArg) == 2:
+       myPrint("Starting uafscan fixfreq on default channel 1")
+    else:
+       myPrint("Starting uafscan fixfreq on default channel {}".format(inputArg[2]))
+       commandList[4] = inputArg[2]
+    myPrint("  >>>{}".format(" ".join(commandList)))
+    subprocess.Popen(commandList)
 
 
 def start_normalscan():
@@ -481,8 +504,10 @@ else:
          start_usrp_driver()
       elif inputArg[1].lower() in ["usrp_server", "server"]:
          start_usrp_server()
+      elif inputArg[1].lower() in ["uaf_fix_onesec", "uafscan_fix_onesec"]:
+         start_uafscan_fixfreq_onesec(inputArg)
       elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
-         start_uafscan_fixfreq()
+         start_uafscan_fixfreq(inputArg)
       elif inputArg[1].lower() in ["normalscan"]:
          start_normalscan()
       elif inputArg[1].lower() in ["2normalscans"]:
@@ -568,6 +593,8 @@ else:
          stop_fitacf_write()
       elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
          stop_rawacf_write()
+      elif inputArg[1].lower() in ["scans", "allscans"]:
+         stop_allscans()
       else:
          myPrint("ERROR: Unknown process to stop")
          myPrint("See srr help for process names:")
