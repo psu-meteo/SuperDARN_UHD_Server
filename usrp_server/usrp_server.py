@@ -367,6 +367,9 @@ class scanManager():
     def evaluate_clear_freq(self, iPeriod, beamNo):
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
+        
+
+        self.logger.debug("clear_freq_range: {}".format(self.clear_freq_range_list[iPeriod]))
 
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
         return (clearFreq, noise, recordTime)
@@ -1724,7 +1727,7 @@ class RadarChannelHandler:
         self.logger.debug('SetActiveHandler clear frequency search start frequencies: {}'.format(clrfreq_start_list))
 
         clrfreq_bandwidth_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        self.logger.debug('SetActiveHandler clear frequency search bandwidths: {}'.format(clrfreq_bandwidth_list))
+        self.logger.debug('SetActiveHandler clear frequency search bandwidths (Hz): {}'.format(clrfreq_bandwidth_list))
 
         scan_beam_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))

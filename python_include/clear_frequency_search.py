@@ -77,10 +77,11 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     # mask restricted frequencies
     if restricted_frequencies:
         spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
-  
+   
     # search for a clear frequency within the given frequency range
-    fstart = clear_freq_range[0] * 1e3 
-    fstop = (clear_freq_range[0] + clear_freq_range[1]) * 1e3
+    fstart = clear_freq_range[0] * 1e3
+    fstop =  clear_freq_range[1] * 1e3
+
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
 
     return tfreq, noise
@@ -112,8 +113,6 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     clrfreq = spectrum_freqs[clrfreq_idx] / 1e3
     noise = channel_power[clrfreq_idx]
     
-    dbPrint("clear frequency: ".format(clrfreq))
-    dbPrint("noise: ".format(clrfreq))
     return clrfreq, noise
 
 def fft_clrfreq_samples(samples):
