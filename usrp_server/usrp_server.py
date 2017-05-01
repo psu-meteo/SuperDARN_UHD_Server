@@ -1638,6 +1638,7 @@ class RadarChannelHandler:
         for iSequence in range(resultDict['nSequences_per_period']):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
             
+            self.logger.debug('GET_DATA sending sequence start time')
             transmit_dtype(self.conn, resultDict['sequence_start_time_secs'][iSequence],  np.uint32)
             transmit_dtype(self.conn, resultDict['sequence_start_time_usecs'][iSequence], np.uint32)
 
@@ -1645,15 +1646,20 @@ class RadarChannelHandler:
             # within a block of beamformed samples over the entire integration period
             # assuming that the first sample is aligned with the center of the first transmit pulse
             # and all sequences within the integration period have the same length
+
             pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
         
             # send the packed complex int16 samples to the control program.. 
+            self.logger.debug('GET_DATA sending main samples')
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+
+            self.logger.warning('GET_DATA sending back samples (currently just sending main samples again..)')
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             
             # wait for confirmation before sending the next antenna..
             # if we start catching this assert or timing out, maybe add some more error handling here
+            self.logger.warning('GET_DATA waiting on ack from site library')
             sample_send_status = recv_dtype(self.conn, np.int32)
             assert sample_send_status == iSequence 
 
