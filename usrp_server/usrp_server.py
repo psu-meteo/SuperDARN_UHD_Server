@@ -523,10 +523,16 @@ class RadarHardwareManager:
         usrp_config = configparser.ConfigParser()
         usrp_config.read('../usrp_config.ini')
         usrp_configs = []
+        self.antenna_idx_list_main = []
+        self.antenna_idx_list_back = []
         for usrp in usrp_config.sections():
             usrp_configs.append(usrp_config[usrp])
+            if usrp_config[usrp]['mainarray'].lower() in ['true', 1]:
+               self.antenna_idx_list_main.append(int(usrp_config[usrp]['array_idx']))
+            else:
+               self.antenna_idx_list_back.append(int(usrp_config[usrp]['array_idx']))
+            
         self.ini_usrp_configs = usrp_configs
-
 
         # READ array_config.ini
         array_config = configparser.ConfigParser()
@@ -536,8 +542,6 @@ class RadarHardwareManager:
 
         self.ini_array_settings = array_config['array_info']
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
-        self.nMainAntennas   = int(  self.ini_array_settings['main_ants'] )
-        self.nBackAntennas   = int(  self.ini_array_settings['back_ants'] )
         self.array_nBeams    = int(  self.ini_array_settings['nbeams'] )
         self.array_x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
         self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
@@ -895,8 +899,8 @@ class RadarHardwareManager:
                cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
                cmd.transmit()
 
-               nMainAntennas = self.nMainAntennas
-               nBackAntennas = self.nBackAntennas
+               nMainAntennas = len(self.antenna_idx_list_main)
+               nBackAntennas = len(self.antenna_idx_list_back)
                main_samples = None
 
 
@@ -912,7 +916,7 @@ class RadarHardwareManager:
                                nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
                                if main_samples is None:
                                   main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
-                                  back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb),dtype=np.complex64 )
+                                  back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
 
 
                             #   self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
@@ -920,11 +924,13 @@ class RadarHardwareManager:
                                samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                                samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                                
-                               if antIdx < nMainAntennas:
-                                   main_samples[iChannel][antIdx] = samples[:]
+                               if antIdx in self.antenna_idx_list_main:
+                                   iAntenna = self.antenna_idx_list_main.index(antIdx)
+                                   main_samples[iChannel][iAntenna] = samples[:]
 
                                else:
-                                   back_samples[iChannel][antIdx - nMainAntennas] = samples[:]
+                                   iAntenna = self.antenna_idx_list_back.index(antIdx)
+                                   back_samples[iChannel][iAntenna] = samples[:]
                                            
              
                    transmit_dtype(cudasock, -1, np.int32) # to end transfer process
@@ -934,13 +940,14 @@ class RadarHardwareManager:
 
                # BEAMFORMING
                self.logger.debug('start rx beamforming')
-               beamformed_samples      = self.calc_beamforming( main_samples, back_samples)
+               beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples)
                for iChannel, channel in enumerate(self.channels):
                   if channel.processing_state is CS_PROCESSING:
                      # copy samples and ctrlprm to transmit later to control program
                      if 'main_beamformed' in channel.resultDict_list[-1]:
                         channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
-                     channel.resultDict_list[-1]['main_beamformed'] = beamformed_samples[iChannel]
+                     channel.resultDict_list[-1]['main_beamformed'] = beamformed_main_samples[iChannel]
+                     channel.resultDict_list[-1]['back_beamformed'] = beamformed_back_samples[iChannel]
                      channel.update_ctrlprm_class("current")
                      channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
                      for item in channel.ctrlprm_struct.dataqueue:
@@ -1087,7 +1094,9 @@ class RadarHardwareManager:
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
         nSamples = main_samples.shape[2]
-        beamformed_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
+        beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
+        beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
+        debugPlot = False
     
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
@@ -1095,9 +1104,9 @@ class RadarHardwareManager:
                 channel.logger.debug("rx beamforming: ch {}, beam {}".format(channel.cnum, channel.scanManager.current_beam))
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
-    
-                phasing_matrix = np.matrix([rad_to_rect(a * pshift) for a in range(RHM.nMainAntennas)])  # calculate a complex number representing the phase shift for each antenna
-               #phasingMatrix_back = np.ones(len(MAIN_ANTENNAS))
+                
+                # MAIN ARRAY
+                phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in RHM.antenna_idx_list_main])  # calculate a complex number representing the phase shift for each antenna
                 complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
@@ -1105,12 +1114,46 @@ class RadarHardwareManager:
                 if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   # TODO maybe later limit values and continue
-
+                   # TODO check if this works
+                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
                 complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
-                beamformed_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
+                beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
-        return beamformed_samples
+                if debugPlot:
+                   import matplotlib.pyplot as plt
+                  # plt.figure()
+                  # plt.plot(np.transpose(main_samples[iChannel]))
+                  # plt.title("raw")
+                   plt.figure()
+                   plt.subplot(2,1,1)
+                   plt.plot(real_mat.tolist()[0])
+                   plt.plot(imag_mat.tolist()[0])
+                   plt.title("Main array")
+
+                # BACK ARRAY (same as middle of main array, ant 16 = ant 6, ...)
+                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift) for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
+                real_mat = np.real(complex_float_samples)
+                imag_mat = np.imag(complex_float_samples)
+                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                   RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
+                   OverflowError("calc_beamforming: overflow error in casting data to complex int")
+                   # TODO check if this works
+                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
+                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                beamformed_back_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
+                if debugPlot:
+                   import matplotlib.pyplot as plt
+                   plt.subplot(2,1,2)
+                   plt.plot(real_mat.tolist()[0])
+                   plt.plot(imag_mat.tolist()[0])
+                   plt.title("Back array")
+                   plt.show()
+
+
+        return beamformed_main_samples, beamformed_back_samples
 
 
 class RadarChannelHandler:
@@ -1599,7 +1642,8 @@ class RadarChannelHandler:
         # send metadata for integration period
         # currently assuming pulse sequences are uniform within an integration period
 
-        resultDict = self.resultDict_list.pop()
+        rd_shallow = self.resultDict_list[-1]
+        resultDict = copy.deepcopy(self.resultDict_list.pop())
 
         transmit_dtype(self.conn, resultDict['nSequences_per_period'], np.uint32)  
         self.logger.debug("transmitting number of sequences in period: {}".format(resultDict['nSequences_per_period']))
@@ -1649,13 +1693,14 @@ class RadarChannelHandler:
 
             pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
+            self.logger.debug("Number of samples if {} (no deepcopy version is {})".format(resultDict['number_of_samples'], rd_shallow['number_of_samples']))
         
             # send the packed complex int16 samples to the control program.. 
             self.logger.debug('GET_DATA sending main samples')
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
 
-            self.logger.warning('GET_DATA sending back samples (currently just sending main samples again..)')
-            transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
+            self.logger.warning('GET_DATA sending back samples')
+            transmit_dtype(self.conn, resultDict['back_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             
             # wait for confirmation before sending the next antenna..
             # if we start catching this assert or timing out, maybe add some more error handling here
