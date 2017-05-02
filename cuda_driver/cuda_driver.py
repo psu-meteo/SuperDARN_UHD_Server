@@ -79,7 +79,7 @@ if sys.hexversion < 0x030300F0:
 class cudamsg_handler(object):
     def __init__(self, serversock, command, gpu, antennas, array_info, hardware_limits):
         self.sock = serversock
-        self.antennas = np.uint16(antennas)
+        self.antenna_index_list = np.uint16(antennas)
         self.command = command
         self.status = 0
         self.gpu = gpu
@@ -172,7 +172,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
         nPulses   = 1 # TODO, don't hardcode this and support differing pulses within a sequence?
-        nAntennas = len(self.antennas)
+        nAntennas = len(self.antenna_index_list)
         
         # tbuffer is the time between tr gate and transmit pulse 
         padding    = np.zeros(int(np.round(tbuffer * self.gpu.tx_bb_samplingRate)))
@@ -194,7 +194,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         pshift = calc_phase_increment(bmazm, tx_center_freq, x_spacing)
 
         # calculate a complex number representing the phase shift for each antenna
-        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antennas]
+        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antenna_index_list]
         
         # construct baseband tx sample array
         bb_signal = np.complex128(np.zeros((nAntennas, nPulses, len(pulsesamps))))
@@ -322,7 +322,7 @@ class cuda_get_data_handler(cudamsg_handler):
             self.logger.debug('received channel number ={}(cuda index: {}))'.format(channel, channelIndex))
 
             for iAntenna in range(nAntennas):
-                transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
+                transmit_dtype(self.sock, self.antenna_index_list[iAntenna], np.uint16)
                 self.logger.debug('transmitted antenna index {}'.format(iAntenna))
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))
@@ -460,7 +460,7 @@ class ProcessingGPU(object):
 
         self.logger = logging.getLogger("cuda_gpu")
         self.logger.info('initializing cuda gpu')
-        self.antennas = np.int16(antennas)
+        self.antenna_index_list = np.int16(antennas)
         # maximum supported channels
         self.nChannels = int(maxchannels)
         self.nAntennas = len(antennas)
@@ -527,14 +527,15 @@ class ProcessingGPU(object):
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
     def addUSRP(self, usrp_hostname = '', driver_hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
-        self.tdelays[int(array_idx)] = tdelay
-        self.phase_offsets[int(array_idx)] = phase_offset
+        iAntenna =  self.antenna_index_list.tolist().index(int(array_idx))
+        self.tdelays[iAntenna] = tdelay
+        self.phase_offsets[iAntenna] = phase_offset
     
     # generate tx rf samples from sequence
     def synth_tx_rf_pulses(self, bb_signal, tx_bb_nSamples_per_pulse, swing):
         for iChannel in range(self.nChannels):
             if self.sequences[swing][iChannel] != None:  # if channel is defined
-                for (iAntenna, ant) in enumerate(self.antennas):
+                for (iAntenna, ant) in enumerate(self.antenna_index_list):
                     for iPulse in range(bb_signal[iChannel].shape[1]):
                         # bb_signal[channel][nantennas, nPulses, len(pulsesamps)]
                         # create interleaved real/complex bb vector

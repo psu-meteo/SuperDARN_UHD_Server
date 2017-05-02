@@ -270,6 +270,9 @@ def get_process_ids(processShortName):
     elif processShortName == "rtserver":
        processMatchString = ["rtserver"]
        nWords = 0
+    elif processShortName == "scan":
+       processMatchString = ["uafscan", "normalscan"]
+       nWords = 0
     else:
        nWords = 0
        processMatchString = [processShortName]
@@ -329,7 +332,7 @@ def stop_rtserver():
        return 0
     
 def stop_allscans():
-    myPrint(" Stopping errlog...")
+    myPrint(" Stopping scans...")
     serverProcesses = get_process_ids("scan")
     if len(serverProcesses):
        terminate_all(serverProcesses)
