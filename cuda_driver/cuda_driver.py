@@ -51,7 +51,8 @@ DEBUG = True
 verbose = 1
 C = 3e8
 
-
+RF_IF_GAIN = 6
+IF_BB_GAIN = 6 
 
 rx_shm_list = [[ [] for iSwing in allSwings] for iSide in range(2)]
 tx_shm_list = [ [] for iSwing in allSwings]  # so far same tx data for both sides
@@ -658,11 +659,11 @@ class ProcessingGPU(object):
                self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
  
 
-        self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
+        self.rx_filtertap_rfif = RF_IF_GAIN * dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)
         # dsp_filters.rolloff_filter_s1()
-        self.rx_filtertap_ifbb = dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
+        self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
-#        self._plot_filter()
+        # self._plot_filter()
         
         self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
         self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
