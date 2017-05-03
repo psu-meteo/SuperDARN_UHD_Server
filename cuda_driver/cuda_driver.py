@@ -350,7 +350,7 @@ class cuda_process_handler(cudamsg_handler):
 #        self.logger.debug("end rx_init, start copy data")
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
-#        self.gpu._set_rx_phaseIncrement(swing) 
+        self.gpu._set_rx_phaseIncrement(swing) 
         self.logger.debug("end copy data, start rx process")
  
         self.gpu.rxsamples_process(swing) 
@@ -523,6 +523,8 @@ class ProcessingGPU(object):
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
                 
         self.streams = [cuda.Stream() for i in range(nSwings)]
+        self.cu_rx_filtertaps_rfif = [None for i in range(nSwings)] # TODO initialize meory once here and not each rx_init
+        self.cu_rx_filtertaps_ifbb =  [None for i in range(nSwings)]
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
@@ -551,7 +553,7 @@ class ProcessingGPU(object):
 
         self._set_tx_mixerfreq(swing)
         self._set_tx_phasedelay(swing)
-        self._set_rx_phaseIncrement( swing)
+#        self._set_rx_phaseIncrement( swing)
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
@@ -673,14 +675,14 @@ class ProcessingGPU(object):
         self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
 
         # allocate memory on GPU
-        self.cu_rx_filtertaps_rfif = cuda.mem_alloc_like(self.rx_filtertap_rfif)
-        self.cu_rx_filtertaps_ifbb = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
+        self.cu_rx_filtertaps_rfif[swing] = cuda.mem_alloc_like(self.rx_filtertap_rfif)
+        self.cu_rx_filtertaps_ifbb[swing] = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
 
         self.cu_rx_if_samples = cuda.mem_alloc_like(self.rx_if_samples)
         self.cu_rx_bb_samples = cuda.mem_alloc_like(self.rx_bb_samples)
        
-        cuda.memcpy_htod(self.cu_rx_filtertaps_rfif, self.rx_filtertap_rfif)
-        cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb, self.rx_filtertap_ifbb)
+        cuda.memcpy_htod(self.cu_rx_filtertaps_rfif[swing], self.rx_filtertap_rfif)
+        cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb[swing], self.rx_filtertap_ifbb)
  
         # define cuda grid and block sizes
         self.rx_if_grid  = self._intify((rx_if_nSamples, self.nAntennas, 1))
@@ -767,10 +769,10 @@ class ProcessingGPU(object):
     def rxsamples_process(self, swing):
 
         self.logger.debug('processing rf -> if')
-        self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif, block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
+        self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif[swing], block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
  
         self.logger.debug('processing if -> bb')
-        self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
+        self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb[swing], block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
 
         debugAmpCompare = False
         if debugAmpCompare:
@@ -779,6 +781,17 @@ class ProcessingGPU(object):
             maxInValue = np.max(np.absolute(self.rx_rf_samples[0][0::2]))
             maxInValue = np.max(np.absolute(self.rx_rf_samples[0][1::2]))
             plt.title("rx max value {}".format(maxInValue))
+            plt.show()
+
+        # plot all 8 input ant (slow)
+        if False:
+            import myPlotTools as mpt
+            import matplotlib.pyplot as plt
+
+            plt.figure()
+            for iAnt in range(8):
+               ax = plt.subplot(811+iAnt) 
+               mpt.plot_time(self.rx_rf_samples[iAnt], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
             plt.show()
         
 
@@ -793,18 +806,18 @@ class ProcessingGPU(object):
 
             # PLOT all three frequency bands
             ax = plt.subplot(311)
-            mpt.plot_freq(self.rx_rf_samples[0],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_rf_samples[0][:int(self.rx_rf_samplingRate*0.1/2)*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('RF')
 
             ax = plt.subplot(312)
-            mpt.plot_freq(self.rx_if_samples[0][0], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-            mpt.plot_freq(self.rx_if_samples[0][1], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_if_samples[0][0][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_if_samples[0][1][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('IF')
 
             ax =plt.subplot(313)
-            mpt.plot_freq(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_bb_samples[0][0][:int(self.rx_bb_samplingRate*0.1/2)*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('BB')
 
