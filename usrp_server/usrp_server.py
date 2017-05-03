@@ -649,6 +649,8 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
+        RHM.gain_control_divide_by_nChannels()
+
         RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
