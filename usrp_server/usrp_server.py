@@ -748,9 +748,15 @@ class RadarHardwareManager:
 
         # calculate the number of RF transmit and receive samples 
         num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+        
        ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
 
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
+
+        # XXX
+        if num_requested_rx_samples < nSequences_per_period * self.nsamples_per_sequence:
+            self.logger.error("number of requested samples is too low for integration period!")
+            sys.exit(0)
 
         # then calculate sample indicies at which pulse sequences start within a pulse sequence
         nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
@@ -1693,7 +1699,8 @@ class RadarChannelHandler:
 
             pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
-            self.logger.debug("Number of samples if {} (no deepcopy version is {})".format(resultDict['number_of_samples'], rd_shallow['number_of_samples']))
+            self.logger.debug("Number of samples if {} (no deepcopy version is {}), main beamformed shape: {}".format(resultDict['number_of_samples'], rd_shallow['number_of_samples'], resultDict['main_beamformed'].shape))
+            self.logger.debug("start index: {}, end index: {}".format(pulse_sequence_start_index, pulse_sequence_end_index))
         
             # send the packed complex int16 samples to the control program.. 
             self.logger.debug('GET_DATA sending main samples')
