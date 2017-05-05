@@ -602,22 +602,6 @@ class ProcessingGPU(object):
 
            self.logger.debug('  TX Block: {}'.format( str(self.tx_block)))
            self.logger.debug('  TX Grid:  {}'.format( str(self.tx_grid )))
-
-# some of the rx variable do not exist, since rx_init moved to process_handler
-#           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
-#           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
-#           self.logger.debug("RF => IF")
-#           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
-#           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
-#           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
-#
-#           self.logger.debug("RF => IF")
-#           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
-#           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
-#           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
-#
-#           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
-
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
@@ -644,8 +628,8 @@ class ProcessingGPU(object):
 #        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
         
         self.rx_rf_nSamples = int(seq.nrf_rx_samples_per_integration_period)
-        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif + 1 ) / decimationRate_rf2if + 1 )
-        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb + 1 ) / decimationRate_if2bb +1  )
+        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif ) / decimationRate_rf2if + 1 )
+        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb ) / decimationRate_if2bb + 1 )
 
         self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
 
@@ -692,6 +676,22 @@ class ProcessingGPU(object):
         
         # check if up/downsampling cuda kernels block sizes exceed hardware limits 
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
+        if self.logger.isEnabledFor(logging.DEBUG): # save time 
+
+           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
+           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
+           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
+           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
+
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
+           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
+           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
+
+           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
+
 
         assert self._threadsPerBlock(self.rx_if_block) <= max_threadsPerBlock, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
         assert self._threadsPerBlock(self.rx_bb_block) <= max_threadsPerBlock, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'

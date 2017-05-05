@@ -14,6 +14,7 @@
 
 
 import sys
+import os
 import numpy as np
 import threading
 import logging
@@ -23,7 +24,7 @@ import time
 import configparser
 import copy
 import posix_ipc
-
+import pickle
 sys.path.insert(0, '../python_include')
 
 from phasing_utils import *
@@ -736,22 +737,30 @@ class RadarHardwareManager:
 
     def _calc_period_details(self, newChannels=[]):
         """ calculate details for integration period and save it in channel objects"""
-        # calculate the pulse sequence period with padding
-        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] -  self.commonChannelParameter['pulse_sequence_offsets_vector'][0]
-        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-#        sampling_duration = self.commonChannelParameter['integration_period_duration'] - INTEGRATION_PERIOD_SYNC_TIME
-        sampling_duration = self.starttime_period + self.commonChannelParameter['integration_period_duration'] -time.time() - INTEGRATION_PERIOD_SYNC_TIME
+
          
-        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+#        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] 
+#        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
+
+        # calculate the pulse sequence period with padding
+        nSamples_per_sequence = self.commonChannelParameter['number_of_samples'] + int(PULSE_SEQUENCE_PADDING_TIME / self.commonChannelParameter['baseband_samplerate'])
+        pulse_sequence_period = nSamples_per_sequence / self.commonChannelParameter['baseband_samplerate']  
+
+        # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
+        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
-        nSequences_per_period = int(sampling_duration / pulse_sequence_period)
-        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(sampling_duration, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
+        nSequences_per_period = int(transmitting_time_left / pulse_sequence_period)
+###        sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
+
 
         # calculate the number of RF transmit and receive samples 
-        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
+        nSamples_per_sequence_if =  int(self.ini_cuda_settings['IFBBRATE'])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(self.ini_cuda_settings['NTapsRX_ifbb']) 
+        num_requested_rx_samples =  int(self.ini_cuda_settings['RFIFRATE'])* (nSamples_per_sequence_if                      - 1 ) +  int(self.ini_cuda_settings['NTapsRX_rfif'])
+##        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
        ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
 
+        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
 
         # then calculate sample indicies at which pulse sequences start within a pulse sequence
@@ -765,13 +774,22 @@ class RadarHardwareManager:
                 integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
 
         self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
+     
+        if True:
+           self.logger.debug(" > nSamples_per_sequence (bb) {} ".format(nSamples_per_sequence ))
+           self.logger.debug(" > nSamples_per_sequence (if) {} ".format(nSamples_per_sequence_if ))
+           self.logger.debug(" > num_requested_rx_samples {}".format(num_requested_rx_samples ))
+           self.logger.debug(" > nSequences_per_period {} ".format(nSequences_per_period ))
 
         # inform all channels with the number of pulses per integration period        
         for ch in self.channels+newChannels:
-            ch.nSequences_per_period = nSequences_per_period
+            ch.nSequences_per_period                 = nSequences_per_period
             ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
-            ch.nbb_rx_samples_per_sequence = int(np.round(pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']))
-            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e-4, 'pulse sequences lengths must be a multiple of the baseband sampling rate'
+            ch.nbb_rx_samples_per_sequence           = nSamples_per_sequence  
+            print(ch.nbb_rx_samples_per_sequence)
+            print(pulse_sequence_period)
+            print(self.commonChannelParameter['baseband_samplerate'])
+            assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e4 / self.commonChannelParameter['baseband_samplerate'], 'pulse sequences lengths must be a multiple of the baseband sampling rate'
             ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
         self.nSequences_per_period = nSequences_per_period
             
@@ -916,6 +934,7 @@ class RadarHardwareManager:
                            for iAntenna in range(nAntennas):
                                antIdx = recv_dtype(cudasock, np.uint16)
                                nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
+                               self.logger.debug("Receiving {} bb samples.".format(nSamples_bb))
                                if main_samples is None:
                                   main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
                                   back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
@@ -940,6 +959,7 @@ class RadarHardwareManager:
                cmd.client_return()
                self.logger.debug('end CUDA_GET_DATA')
 
+
                # BEAMFORMING
                self.logger.debug('start rx beamforming')
                beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples)
@@ -957,6 +977,13 @@ class RadarHardwareManager:
                            channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
 
                self.logger.debug('end rx beamforming')
+
+               if os.path.isfile("./bufferLiveData.flag"):
+                  self.logger.info("Buffering raw data to disk.")
+                  with open('tmpRawData.pkl', 'wb') as f:
+                     pickle.dump([main_samples, back_samples, channel.resultDict_list[-1]],f,  pickle.HIGHEST_PROTOCOL)
+                  os.rename("tmpRawData.pkl", "liveRawData.pkl")
+                  os.remove("./bufferLiveData.flag")
            else:
               self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
@@ -1701,12 +1728,12 @@ class RadarChannelHandler:
             self.logger.debug('GET_DATA sending main samples')
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
 
-            self.logger.warning('GET_DATA sending back samples')
+            self.logger.debug('GET_DATA sending back samples')
             transmit_dtype(self.conn, resultDict['back_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             
             # wait for confirmation before sending the next antenna..
             # if we start catching this assert or timing out, maybe add some more error handling here
-            self.logger.warning('GET_DATA waiting on ack from site library')
+            self.logger.debug('GET_DATA waiting on ack from site library')
             sample_send_status = recv_dtype(self.conn, np.int32)
             assert sample_send_status == iSequence 
 
