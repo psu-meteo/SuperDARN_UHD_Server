@@ -1118,13 +1118,14 @@ class RadarHardwareManager:
                 complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
-                maxInt16value = 32767
-                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                maxInt16value = np.iinfo(np.int16).max # 32767
+                minInt16value = np.iinfo(np.int16).min # -32768
+
+                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   # TODO check if this works
-                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
-                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
+                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
                 complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
@@ -1144,12 +1145,11 @@ class RadarHardwareManager:
                 complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
-                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   # TODO check if this works
-                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
-                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
+                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
                 complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_back_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
                 if debugPlot:
