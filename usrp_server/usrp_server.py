@@ -757,11 +757,14 @@ class RadarHardwareManager:
         # calculate the number of RF transmit and receive samples 
         nSamples_per_sequence_if =  int(self.ini_cuda_settings['IFBBRATE'])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(self.ini_cuda_settings['NTapsRX_ifbb']) 
         num_requested_rx_samples =  int(self.ini_cuda_settings['RFIFRATE'])* (nSamples_per_sequence_if                      - 1 ) +  int(self.ini_cuda_settings['NTapsRX_rfif'])
-##        num_requested_rx_samples = np.uint64(np.round(sampling_duration * self.usrp_rf_rx_rate))
-       ## num_requested_tx_samples = np.uint64(np.round((self.usrp_rf_tx_rate) * (self.commonChannelParameter['tx_time'] / 1e6)))
 
         self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
+
+        # XXX
+        if num_requested_rx_samples < nSequences_per_period * self.nsamples_per_sequence:
+            self.logger.error("number of requested samples is too low for integration period!")
+            sys.exit(0)
 
         # then calculate sample indicies at which pulse sequences start within a pulse sequence
         nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
@@ -1139,13 +1142,14 @@ class RadarHardwareManager:
                 complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
-                maxInt16value = 32767
-                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                maxInt16value = np.iinfo(np.int16).max # 32767
+                minInt16value = np.iinfo(np.int16).min # -32768
+
+                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   # TODO check if this works
-                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
-                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
+                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
                 complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
@@ -1165,12 +1169,11 @@ class RadarHardwareManager:
                 complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
-                if (real_mat > maxInt16value).any() or (real_mat < - maxInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < - maxInt16value).any():
+                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   # TODO check if this works
-                   real_mat = np.clip(real_mat, -maxInt16value, maxInt16value)
-                   imag_mat = np.clip(imag_mat, -maxInt16value, maxInt16value)
+                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
                 complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_back_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
                 if debugPlot:
@@ -1722,7 +1725,8 @@ class RadarChannelHandler:
 
             pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
-            self.logger.debug("Number of samples if {} (no deepcopy version is {})".format(resultDict['number_of_samples'], rd_shallow['number_of_samples']))
+            self.logger.debug("Number of samples if {} (no deepcopy version is {}), main beamformed shape: {}".format(resultDict['number_of_samples'], rd_shallow['number_of_samples'], resultDict['main_beamformed'].shape))
+            self.logger.debug("start index: {}, end index: {}".format(pulse_sequence_start_index, pulse_sequence_end_index))
         
             # send the packed complex int16 samples to the control program.. 
             self.logger.debug('GET_DATA sending main samples')
