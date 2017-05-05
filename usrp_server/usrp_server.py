@@ -649,6 +649,8 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
+        RHM.gain_control_divide_by_nChannels()
+
         RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
@@ -674,7 +676,7 @@ class RadarHardwareManager:
 
         # CUDA_GENERATE for first period
         RHM.logger.debug('start CUDA_GENERATE_PULSE (1st period)')
-        cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq)
+        cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq*1000)
         cmd.transmit()
         cmd.client_return()
         RHM.logger.debug('end CUDA_GENERATE_PULSE (1st period)')
@@ -815,7 +817,7 @@ class RadarHardwareManager:
            # USRP SETUP
            self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
            self.logger.debug("start USRP_SETUP")
-           cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq, self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+           cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                     self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
            cmd.transmit()
            self.usrpManager.eval_client_return(cmd)
@@ -1017,7 +1019,7 @@ class RadarHardwareManager:
         synthNewPulses = True # TODO keep track of changes to do this only if necessary
         if synthNewPulses:
            self.logger.debug('start CUDA_GENERATE_PULSE')
-           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq) 
+           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq*1000)
            cmd.transmit()
            cmd.client_return()
            self.logger.debug('end CUDA_GENERATE_PULSE')
@@ -1598,7 +1600,7 @@ class RadarChannelHandler:
                     
 
         # TODO change usrp_xx_cfreq somewhere if possible        
-        assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.mixingFreqManager.current_mixing_freq) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
+        assert np.abs((ch.ctrlprm_struct.payload['tfreq'] * 1e3) - self.mixingFreqManager.current_mixing_freq*1e6) < (self.usrp_rf_tx_rate / 2), 'transmit frequency outside range supported by sampling rate and center frequency'
 
 
     # send ctrlprm struct
