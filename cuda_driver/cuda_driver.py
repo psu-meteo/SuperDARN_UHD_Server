@@ -327,7 +327,7 @@ class cuda_get_data_handler(cudamsg_handler):
                 self.logger.debug('transmitted antenna index {}'.format(iAntenna))
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))
-                self.logger.debug(" transmitting sum : {}".format(np.sum(samples[iAntenna][channelIndex]) ))
+                self.logger.debug("rx_bb ant {} transmitting mean abs : {} #sampleTrace".format(iAntenna, np.mean(np.abs(samples[iAntenna][channelIndex]) )))
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
 
             channel = recv_dtype(self.sock, np.int32) 
@@ -345,10 +345,7 @@ class cuda_process_handler(cudamsg_handler):
 #        pdb.set_trace()
 
 #        acquire_sem(rx_sem_list[SIDEA][swing])
-
-#        self.logger.debug("start rx_init")
-#        self.gpu.rx_init(swing)
-#        self.logger.debug("end rx_init, start copy data")
+        self.gpu.rx_init(swing, cmd.payload['nSamples'])
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu._set_rx_phaseIncrement(swing) 
@@ -607,8 +604,51 @@ class ProcessingGPU(object):
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
 
+    def rx_init(self, swing, nSamples_rx_rf_period):
+        self.rx_rf_nSamples = int(nSamples_rx_rf_period)
+        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif ) / self.rx_rf2if_downsamplingRate + 1 )
+        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb ) / self.rx_if2bb_downsamplingRate + 1 )
 
-    def rx_init(self, swing): 
+        self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
+
+        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
+        self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
+
+        self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
+        self.cu_rx_if_samples = cuda.mem_alloc_like(self.rx_if_samples)
+        self.cu_rx_bb_samples = cuda.mem_alloc_like(self.rx_bb_samples)
+
+        # define cuda grid and block sizes
+        self.rx_if_grid  = self._intify((rx_if_nSamples, self.nAntennas, 1))
+        self.rx_bb_grid  = self._intify((rx_bb_nSamples, self.nAntennas, 1))
+        self.rx_if_block = self._intify((self.ntaps_rfif / 2, self.nChannels, 1))
+        self.rx_bb_block = self._intify((self.ntaps_ifbb / 2, self.nChannels, 1))
+
+        if self.logger.isEnabledFor(logging.DEBUG): # save time 
+           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
+           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
+           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
+           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
+
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
+           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
+           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
+
+           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
+
+
+        # check if up/downsampling cuda kernels block sizes exceed hardware limits 
+        max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
+        assert self._threadsPerBlock(self.rx_if_block) <= max_threadsPerBlock, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+        assert self._threadsPerBlock(self.rx_bb_block) <= max_threadsPerBlock, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+
+
+    def rx_pre_init(self, swing): 
+        """ pre init of rx: before synth of pulses. put all posible rx_init() stuff into the waiting period. (here exact integration period is still unknown ) """
         # build arrays based on first sequence.
         seq = self.sequences[swing][0] # TODO: check if seq[0] exists
         ctrlprm = seq.ctrlprm
@@ -621,18 +661,7 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_rx_decimationRates, self.rx_decimationRates)
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
-        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
-       
-#        # OLD: now we start with nSamples_rx_rf
-#        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
-#        # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
-#        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
-        
-        self.rx_rf_nSamples = int(seq.nrf_rx_samples_per_integration_period)
-        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif ) / decimationRate_rf2if + 1 )
-        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb ) / decimationRate_if2bb + 1 )
-
-        self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
+        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"  
 
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nChannels, self.ntaps_rfif, 2]))
@@ -652,55 +681,17 @@ class ProcessingGPU(object):
     
         # self._plot_filter()
         
-        self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
-        self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
-
-        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-
-        self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
-
         # allocate memory on GPU
         self.cu_rx_filtertaps_rfif[swing] = cuda.mem_alloc_like(self.rx_filtertap_rfif)
         self.cu_rx_filtertaps_ifbb[swing] = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
 
-        self.cu_rx_if_samples = cuda.mem_alloc_like(self.rx_if_samples)
-        self.cu_rx_bb_samples = cuda.mem_alloc_like(self.rx_bb_samples)
-       
         cuda.memcpy_htod(self.cu_rx_filtertaps_rfif[swing], self.rx_filtertap_rfif)
         cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb[swing], self.rx_filtertap_ifbb)
  
-        # define cuda grid and block sizes
-        self.rx_if_grid  = self._intify((rx_if_nSamples, self.nAntennas, 1))
-        self.rx_bb_grid  = self._intify((rx_bb_nSamples, self.nAntennas, 1))
-        self.rx_if_block = self._intify((self.ntaps_rfif / 2, self.nChannels, 1))
-        self.rx_bb_block = self._intify((self.ntaps_ifbb / 2, self.nChannels, 1))
-        
-        # check if up/downsampling cuda kernels block sizes exceed hardware limits 
-        max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
-        if self.logger.isEnabledFor(logging.DEBUG): # save time 
-
-           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
-           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
-           self.logger.debug("RF => IF")
-           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
-           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
-           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
-
-           self.logger.debug("RF => IF")
-           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
-           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
-           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
-
-           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
-
-
-        assert self._threadsPerBlock(self.rx_if_block) <= max_threadsPerBlock, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-        assert self._threadsPerBlock(self.rx_bb_block) <= max_threadsPerBlock, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-
 
         # synthesize rf waveform (beamforming, apply phase_masks, mixing in cuda)
     def synth_channels(self, bb_signal, swing):
-        self.rx_init(swing) 
+        self.rx_pre_init(swing) 
 
         # TODO: this assumes all channels have the same number of samples 
         tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
@@ -762,7 +753,8 @@ class ProcessingGPU(object):
         for aidx in range(self.nAntennas):
             shm[aidx].seek(0)
             self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
-        print(self.rx_rf_samples[0][:11]) 
+            self.logger.debug("Input from SHM, Ant {} meanAbs= {} #sampleTrace (copied {} samples)".format(aidx, np.mean(np.abs(self.rx_rf_samples[aidx])), self.rx_rf_nSamples ))
+        # print(self.rx_rf_samples[0][:11]) 
 
 
                
@@ -771,9 +763,10 @@ class ProcessingGPU(object):
 
         self.logger.debug('processing rf -> if')
         self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif[swing], block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
- 
+        self.logger.debug("  block: {}, grid : {}".format(self.rx_if_block, self.rx_if_grid)) 
         self.logger.debug('processing if -> bb')
         self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb[swing], block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
+        self.logger.debug("  block: {}, grid : {}".format(self.rx_bb_block, self.rx_bb_grid)) 
 
         debugAmpCompare = False
         if debugAmpCompare:

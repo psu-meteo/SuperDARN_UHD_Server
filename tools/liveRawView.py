@@ -45,26 +45,27 @@ def read_and_plot():
    #timeVec = [iSample / parDict['baseband_samplerate'] for iSample in range(len(plotData))]
    #plt.plot(timeVec, np.abs(plotData))
    
-   
-   plt.cla()
-   plotData =  main_data[0][0]
-   timeVec = [iSample / parDict['baseband_samplerate'] for iSample in range(parDict['nbb_rx_samples_per_sequence'])]
-   plt.plot( np.abs(plotData))
- #  plt.pcolor( np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) )))
-   #plt.pcolor( np.abs(np.reshape(plotData, (parDict['nbb_rx_samples_per_sequence'], parDict['nSequences_per_period']) )))
-   
- # plt.figure()
- # plt.plot( np.transpose(np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) ))))
-   #plt.plot( np.abs(plotData ))
-   
-   
-   # start of sequences
-   seqStartTimes = np.array(parDict['sequence_start_time_secs']) + np.array(parDict["sequence_start_time_usecs"]) / 1e6
-   seqStartTimes = seqStartTimes - seqStartTimes[0]
-   seqValueVec = [100000 for i in range(len(seqStartTimes))]
-   #plt.plot( seqStartTimes, seqValueVec, 'o')
-   plt.title("nSequences_per_period={}, tbeam={}, rfreq={}".format(parDict["nSequences_per_period"], parDict["tbeam"] , parDict["rfreq"]), ) 
-#   plt.show()
+   for iAnt in range(8):
+      plt.subplot(811+iAnt) 
+      plt.cla()
+      plotData =  main_data[0][iAnt]
+      timeVec = [iSample / parDict['baseband_samplerate'] for iSample in range(parDict['nbb_rx_samples_per_sequence'])]
+      plt.plot([i /305 for i in range(len(plotData))], np.abs(plotData))
+    #  plt.pcolor( np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) )))
+      #plt.pcolor( np.abs(np.reshape(plotData, (parDict['nbb_rx_samples_per_sequence'], parDict['nSequences_per_period']) )))
+      plt.grid(True) 
+    # plt.figure()
+    # plt.plot( np.transpose(np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) ))))
+      #plt.plot( np.abs(plotData ))
+      
+      
+      # start of sequences
+      seqStartTimes = np.array(parDict['sequence_start_time_secs']) + np.array(parDict["sequence_start_time_usecs"]) / 1e6
+      seqStartTimes = seqStartTimes - seqStartTimes[0]
+      seqValueVec = [100000 for i in range(len(seqStartTimes))]
+      #plt.plot( seqStartTimes, seqValueVec, 'o')
+      plt.title("nSequences_per_period={}, tbeam={}, rfreq={}".format(parDict["nSequences_per_period"], parDict["tbeam"] , parDict["rfreq"]), ) 
+   #   plt.show()
    plt.pause(0.05)
 
 plt.figure()
