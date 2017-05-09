@@ -8,6 +8,7 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from matplotlib import gridspec
 import pathlib
 
@@ -79,27 +80,33 @@ def read_and_plot():
    plt.grid(True)
    plt.title("Beamformed main samples")
 
- 
-   exampleTXsamples = [main_data[0][iAnt][305] for iAnt in range(nAntennas)]
-   arrayAngle = np.angle(exampleTXsamples, deg=True)
-   arrayAngle = arrayAngle - arrayAngle[0]
 
    plt.subplot(414)
    plt.cla()
-   plt.scatter(np.arange(nAntennas), arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)))
+   idx2checkVec = [1, 305, 306]
+   colorList = cm.rainbow(np.linspace(0,1,len(idx2checkVec)))
+   for idx2check, plotColor in zip(idx2checkVec, colorList):
+      exampleTXsamples = [main_data[0][iAnt][305] for iAnt in range(nAntennas)]
+      arrayAngle = np.angle(exampleTXsamples, deg=True)
+      arrayAngle = arrayAngle - arrayAngle[0]
+      plt.scatter(np.arange(nAntennas)+(np.random.rand(1)-0.5)/5, arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)), color=plotColor)
    
-   beamsep = 3.24 / 180 * np.pi
+
+   beamsep = 3.24 
    delta_x = 15.4
    nBeams = 16
    
    alpha = beamsep * (parDict["tbeam"] - (nBeams -1) /2 )
-   phaseDiff_per_ant = - delta_x / 3e8 * parDict["rfreq"] *1000 * np.sin(alpha) / np.pi *180
+   print("alpha is {} (beam {})".format(alpha, parDict['tbeam']))
+   phaseDiff_per_ant = - delta_x / 3e8 * parDict["rfreq"] *1000 * np.sin(alpha/180*np.pi)  *360
    plt.plot(np.arange(nAntennas), [phaseDiff_per_ant*iAnt % 360  for iAnt in range(nAntennas)])
    plt.grid(True)
    plt.ylabel("phase difference in deg")
    plt.xlabel("antenna number")
    plt.axis([-0.5, nAntennas+0.5, 0, 360])
-   plt.legend(["Theory", "Measured"])
+   legendList = ["Measured sample {}".format(idx) for idx in idx2checkVec]
+   legendList.insert(0, "Theory")
+   plt.legend(legendList)
    plt.pause(0.05)
 
 plt.figure()
