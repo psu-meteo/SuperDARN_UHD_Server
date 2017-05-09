@@ -149,6 +149,12 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     for usrpsock in usrp_sockets:
         output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
         clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
+
+        dbPrint("------")
+        dbPrint("actual clrfreq rate: {}".format(clrfreq_rate_actual))
+        dbPrint("requested clrfreq rate: {}".format(clrfreq_rate_requested))
+
+        dbPrint("command sent, waiting for raw samples")
         assert clrfreq_rate_actual == clrfreq_rate_requested
         samples = recv_dtype(usrpsock, np.int16, 2 * int(num_clrfreq_samples))
         output_samples_list.append( samples[0::2] + 1j * samples[1::2])
