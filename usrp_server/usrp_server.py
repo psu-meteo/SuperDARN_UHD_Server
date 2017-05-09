@@ -822,7 +822,7 @@ class RadarHardwareManager:
         self._calc_period_details()
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
-      
+        self.logger.debug("nSamples_per_pulse: ".format(nSamples_per_pulse))
         for ch in self.channels:
             if ch.ctrlprm_struct.payload['tfreq'] != 0: 
                 self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate))
@@ -849,7 +849,7 @@ class RadarHardwareManager:
            cmd.transmit()
            self.usrpManager.eval_client_return(cmd)
            self.logger.debug("end USRP_SETUP")
-
+           nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
@@ -883,10 +883,10 @@ class RadarHardwareManager:
            resultDict['nSequences_per_period']         = self.nSequences_per_period       
            resultDict['pulse_sequence_offsets_vector'] = self.commonChannelParameter['pulse_sequence_offsets_vector'] 
            resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
-           resultDict['results_are_valid']              = True
+           resultDict['results_are_valid']             = True
            for channel in self.channels: 
                resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
-               resultDict['pulse_lens']                   = channel.pulse_lens    
+               resultDict['pulse_lens']                  = channel.pulse_lens    
                channel.resultDict_list.insert(0,resultDict)
     
            # broadcast the start of the next integration period to all usrp
@@ -1100,7 +1100,7 @@ class RadarHardwareManager:
         if transmittingChannelAvailable:
            # CUDA_PROCESS for processingSwing
            self.logger.debug('start CUDA_PROCESS')
-           cmd = cuda_process_command(self.cudasocks, swingManager.processingSwing)
+           cmd = cuda_process_command(self.cudasocks, swing=swingManager.processingSwing, nSamples=nSamples_rx_requested_of_last_trigger)
            cmd.transmit()
            cmd.client_return()
            self.logger.debug('end CUDA_PROCESS')
@@ -1354,12 +1354,13 @@ class RadarChannelHandler:
     # return a sequence object, used for passing pulse sequence and channel infomation over to the CUDA driver
     def get_current_sequence(self):
         self.update_ctrlprm_class('current')
-        seq = sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        self.logger.debug("Getting current sequence with {} samples (305x1500x {}) rbeam {}".format(self.nrf_rx_samples_per_integration_period, self.nrf_rx_samples_per_integration_period/305/1500, self.ctrlprm_struct.payload['rbeam']))
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def get_next_sequence(self):
         self.update_ctrlprm_class('next')
-        seq = sequence(self.npulses_per_sequence, self.nrf_rx_samples_per_integration_period, self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def DefaultHandler(self, rmsg):
