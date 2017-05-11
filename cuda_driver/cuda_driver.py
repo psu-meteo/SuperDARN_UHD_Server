@@ -34,6 +34,7 @@ import dsp_filters
 from phasing_utils import *
 import logging_usrp
 
+
 # import pycuda stuff
 SWING0 = 0
 SWING1 = 1
@@ -785,7 +786,9 @@ class ProcessingGPU(object):
             plt.figure()
             for iAnt in range(8):
                ax = plt.subplot(811+iAnt) 
-               mpt.plot_time(self.rx_rf_samples[iAnt], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               plotData = self.rx_rf_samples[iAnt][::2] + 1j*self.rx_rf_samples[iAnt][1::2]
+               plt.hist(np.abs(plotData), bins=20,normed=True)
+            #   mpt.plot_time(self.rx_rf_samples[iAnt], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
             plt.show()
         
 

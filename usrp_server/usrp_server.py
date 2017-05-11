@@ -282,6 +282,7 @@ class scanManager():
     def __init__(self, restricted_frequency_list, beamSep, numBeams):
         self.scan_beam_list        = []
         self.clear_freq_range_list = []
+        self.fixFreq = None
         
         self.current_period = 0
         self.repeat_clrfreq_recording = False # 2nd period is triggered automatically before ROS finishes 1st. if CLR_FRQ was requested for 1st => also do record on 2nd
@@ -299,13 +300,16 @@ class scanManager():
         self.restricted_frequency_list = restricted_frequency_list
         self.logger = logging.getLogger('scanManager')
 
-    def init_new_scan(self, freq_range_list, scan_beam_list):
+    def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq):
   
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
         self.clear_freq_range_list = freq_range_list
 
         # list of [bmnum, bmnum..] 
         self.scan_beam_list = scan_beam_list
+
+        # 
+        self.fixFreq = fixFreq
 
         # rest all other parameter
         self.current_period = 0
@@ -355,14 +359,22 @@ class scanManager():
 
     def get_current_clearFreq_result(self):
         if self.current_clrFreq_result is None:
-           # print("  calc current clr_freq (period {})".format(self.current_period))
-            self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
+           if self.fixFreq != -1 and self.fixFreq != 0: # it looks like control program could use -1 and 0 to disable it
+               self.current_clrFreq_result = [self.fixFreq, 0, 0]
+               self.logger.debug("Using fixed frequency of {} kHz for current period".format(self.fixFreq))
+           else:
+               # print("  calc current clr_freq (period {})".format(self.current_period))
+               self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
         return self.current_clrFreq_result
         
     def get_next_clearFreq_result(self):
         if self.next_clrFreq_result is None:
-           # print("  calc next clr_freq (period {})".format(self.current_period+1))
-            self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
+           if self.fixFreq != -1 and self.fixFreq != 0: # it looks like control program could use -1 and 0 to disable it
+               self.next_clrFreq_result = [self.fixFreq, 0, 0]
+               self.logger.debug("Using fixed frequency of {} kHz for next period".format(self.fixFreq))
+           else:
+               # print("  calc next clr_freq (period {})".format(self.current_period+1))
+               self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
@@ -1817,8 +1829,12 @@ class RadarChannelHandler:
               time.sleep(0.01)
            self.logger.debug('end SetActiveHandler: waiting for trigger_next() to finish')
 
+
         scan_num_beams = recv_dtype(self.conn, np.int32)
         self.logger.debug('SetActiveHandler number of beams per scan: {}'.format(scan_num_beams))
+
+        fixFreq  =  recv_dtype(self.conn, np.int32)
+        self.logger.debug('SetActiveHandler fixFreq: {}'.format(fixFreq))
 
         clrfreq_start_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         self.logger.debug('SetActiveHandler clear frequency search start frequencies: {}'.format(clrfreq_start_list))
@@ -1829,10 +1845,12 @@ class RadarChannelHandler:
         scan_beam_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))
 
+
+
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.scanManager.init_new_scan(freq_range_list, scan_beam_list)
+        self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq)
 
         self.swingManager.reset()
         self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
