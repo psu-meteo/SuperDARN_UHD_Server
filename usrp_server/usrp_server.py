@@ -455,7 +455,6 @@ class RadarHardwareManager:
 
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time()
-                controlLoop_logger.info('setting period start time to: {}'.format(self.starttime_period))
 
                 # check if there are any disconnected URSPs
                 if len(self.usrpManager.addressList_inactive):
@@ -1150,8 +1149,8 @@ class RadarHardwareManager:
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
         nSamples = main_samples.shape[2]
-        beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
-        beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
+        beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
+        beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         debugPlot = False
     
         for iChannel, channel in enumerate(RHM.channels):
@@ -1174,7 +1173,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
-                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
                 if debugPlot:
@@ -1198,7 +1197,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
-                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_back_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
                 if debugPlot:
                    import matplotlib.pyplot as plt
@@ -1734,8 +1733,7 @@ class RadarChannelHandler:
         
 ##        self.resultData_ctrlprm = []
 
-    
-        # send back samples with pulse start times 
+
         for iSequence in range(resultDict['nSequences_per_period']):
             self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
             
@@ -1755,6 +1753,7 @@ class RadarChannelHandler:
         
             # send the packed complex int16 samples to the control program.. 
             self.logger.debug('GET_DATA sending main samples')
+
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
 
             self.logger.debug('GET_DATA sending back samples')
@@ -1766,7 +1765,7 @@ class RadarChannelHandler:
             sample_send_status = recv_dtype(self.conn, np.int32)
             assert sample_send_status == iSequence 
 
-
+        sys.exit(0)
         self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
 
 
@@ -1878,4 +1877,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
