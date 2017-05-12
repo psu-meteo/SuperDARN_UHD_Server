@@ -18,7 +18,6 @@ sys.path.insert(0, '../python_include')
 from drivermsg_library import *
 
 
-nAntennas = 8
 
 def read_and_plot():
    with open(data_file, 'rb') as f:
@@ -38,29 +37,37 @@ def read_and_plot():
    for key in parDict.keys():
       if key != 'ctrlprm_dataqueue':
          print(" {} = {}".format(key, parDict[key]))
-   
-   #plt.figure()
-   #plt.pcolor(np.abs(main_data[0]))
-   #plt.colorbar()
-   #plt.show()
-   
-   #plt.figure()
-   #plotData =  main_data[0][0]
-   #timeVec = [iSample / parDict['baseband_samplerate'] for iSample in range(len(plotData))]
-   #plt.plot(timeVec, np.abs(plotData))
-   
+   nAntennas = len(main_data[0] )
+   nSamples = len(main_data[0][0])
+   nSamples_sequence = parDict['number_of_samples']
+   nSequences =  parDict['nSequences_per_period']
+   assert nSamples == nSamples_sequence * nSequences
+
+
+   antennaPlotData =  np.array(main_data[0])
+   beamformedPlotData = parDict['main_beamformed']
+
+
+   average_active = True
+
+   if average_active:
+      antennaPlotData = np.reshape(antennaPlotData, [nAntennas, nSequences, nSamples_sequence ])
+      antennaPlotData = np.mean(antennaPlotData, axis=1)
+
+      beamformedPlotData = np.reshape(beamformedPlotData, [nSequences,nSamples_sequence ])
+      beamformedPlotData = np.mean(beamformedPlotData, axis=0)
+      xAxis_scaling = 1
+      xAxis_label = "BB Samples"
+   else:
+      xAxis_scaling = nSamples_sequence
+      xAxis_label = "Sequences"
+
+
    for iAnt in range(nAntennas):
       plt.subplot(821+iAnt) 
       plt.cla()
-      plotData =  main_data[0][iAnt]
-      timeVec = [iSample / parDict['baseband_samplerate'] for iSample in range(parDict['nbb_rx_samples_per_sequence'])]
-      plt.plot([i /305 for i in range(len(plotData))], np.abs(plotData))
-    #  plt.pcolor( np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) )))
-      #plt.pcolor( np.abs(np.reshape(plotData, (parDict['nbb_rx_samples_per_sequence'], parDict['nSequences_per_period']) )))
+      plt.plot([i /xAxis_scaling for i in range(len(antennaPlotData[iAnt]))], np.abs(antennaPlotData[iAnt]))
       plt.grid(True) 
-    # plt.figure()
-    # plt.plot( np.transpose(np.abs(np.reshape(plotData, ( parDict['nSequences_per_period'],parDict['nbb_rx_samples_per_sequence']) ))))
-      #plt.plot( np.abs(plotData ))
       
       
       # start of sequences
@@ -68,25 +75,28 @@ def read_and_plot():
       seqStartTimes = seqStartTimes - seqStartTimes[0]
       seqValueVec = [100000 for i in range(len(seqStartTimes))]
       #plt.plot( seqStartTimes, seqValueVec, 'o')
+      plt.ylabel("ant {} ".format(iAnt) )
       if iAnt == 0:
          plt.title("nSequences_per_period={}, tbeam={}, rfreq={}".format(parDict["nSequences_per_period"], parDict["tbeam"] , parDict["rfreq"]), ) 
-   #   plt.show()
-      plt.ylabel("ant {} ".format(iAnt) )
-
+      elif iAnt in [6,7]:
+         plt.xlabel(xAxis_label)
+ 
+   
+   # plot beamformed data
    plt.subplot(413) 
    plt.cla()
-   plotData = parDict['main_beamformed']
-   plt.plot([i /305 for i in range(len(plotData))], np.abs(plotData))
+   plt.plot([i /xAxis_scaling for i in range(len(beamformedPlotData))], 20*np.log10(np.abs(beamformedPlotData)/np.iinfo(np.int16).max/np.sqrt(2)))
    plt.grid(True)
-   plt.title("Beamformed main samples")
+   plt.ylabel("Beamformed (dB)")
+   plt.xlabel(xAxis_label)
 
 
    plt.subplot(414)
    plt.cla()
-   idx2checkVec = [1, 305, 306]
+   idx2checkVec = [0, 70, 109]
    colorList = cm.rainbow(np.linspace(0,1,len(idx2checkVec)))
    for idx2check, plotColor in zip(idx2checkVec, colorList):
-      exampleTXsamples = [main_data[0][iAnt][305] for iAnt in range(nAntennas)]
+      exampleTXsamples = [antennaPlotData[iAnt][idx2check] for iAnt in range(nAntennas)]
       arrayAngle = np.angle(exampleTXsamples, deg=True)
       arrayAngle = arrayAngle - arrayAngle[0]
       plt.scatter(np.arange(nAntennas)+(np.random.rand(1)-0.5)/5, arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)), color=plotColor)
@@ -103,7 +113,7 @@ def read_and_plot():
    plt.grid(True)
    plt.ylabel("phase difference in deg")
    plt.xlabel("antenna number")
-   plt.axis([-0.5, nAntennas+0.5, 0, 360])
+   plt.axis([-0, nAntennas+3, 0, 360])
    legendList = ["Measured sample {}".format(idx) for idx in idx2checkVec]
    legendList.insert(0, "Theory")
    plt.legend(legendList)

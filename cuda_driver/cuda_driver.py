@@ -240,7 +240,7 @@ class cuda_add_channel_handler(cudamsg_handler):
         cmd.receive(self.sock) 
         swing    = cmd.payload['swing']
         sequence = cmd.sequence
-        self.logger.debug('received sequence, swing {}'.format(swing))
+        self.logger.debug('ADD_CHANNEL: received sequence: swing {}, tbeam={}, rbeam={}, tfreq={}, rfreq={}'.format(swing, sequence.ctrlprm['tbeam'], sequence.ctrlprm['rbeam'], sequence.ctrlprm['tfreq'], sequence.ctrlprm['rfreq']))
 
 
         self.logger.debug('entering cuda_add_channel_handler, waiting for swing semaphores')
