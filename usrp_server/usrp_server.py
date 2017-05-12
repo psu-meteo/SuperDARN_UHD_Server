@@ -296,7 +296,7 @@ class scanManager():
         self.isPostLast = False # to handle last trigger_next_swing() call
 
         self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
-
+        self.isInitSetParameter = True
         self.restricted_frequency_list = restricted_frequency_list
         self.logger = logging.getLogger('scanManager')
 
@@ -317,6 +317,7 @@ class scanManager():
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast = False # to handle last trigger_next_swing() call
+        self.isInitSetParameter = True
 
 
     def switch_swings(self):
@@ -584,7 +585,7 @@ class RadarHardwareManager:
             cmd.transmit() 
 
             usrptimes = []
-            for usrpsock in self.usrpManager.socks:
+            for iUSRP, usrpsock in enumerate(self.usrpManager.socks):
                 usrptimes.append(cmd.recv_time(usrpsock))
            
             cmd.client_return()
@@ -665,17 +666,24 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
-        RHM.gain_control_divide_by_nChannels()
+
 
         RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
         newChannelList = RHM.newChannelList.copy()  #  make a copy in case another channel is added during this function call
+        
+        nChannelsNew = 0
+        for ch2add in newChannelList:
+           if ch2add not in RHM.channels:
+              nChannelsNew += 1
+        RHM.gain_control_divide_by_nChannels(nChannelsWillBeAdded=nChannelsNew)
+
         RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
         for channel in newChannelList:
      
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            RHM.logger.debug('start CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
+            RHM.logger.debug('calling CUDA_ADD_CHANNEL at initialize_channel() (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
             cmd.transmit()
             cmd.client_return()      
             if channel.active_state == CS_INACTIVE: 
@@ -1140,11 +1148,11 @@ class RadarHardwareManager:
                   ch.scanManager.period_finished()
 
 
-    def gain_control_divide_by_nChannels(self):
-        nChannels = len(self.channels)
-        for ch in self.channels:
+    def gain_control_divide_by_nChannels(self, nChannelsWillBeAdded=0):
+        nChannels = len(self.channels) + nChannelsWillBeAdded
+        self.logger.debug("Setting channel scaling factor to 1/{} ".format("nChannels"))
+        for ch in self.channels + self.newChannelList:
             ch.channelScalingFactor = 1 / nChannels * self.totalScalingFactor 
-
     # BEAMFORMING
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
@@ -1552,9 +1560,16 @@ class RadarChannelHandler:
 
         RHM = self.parent_RadarHardwareManager
 
+        if self.scanManager.isInitSetParameter:
+           self.scanManager.isInitSetParameter = False
+           self.ctrlprm_struct.receive(self.conn)
+           self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+           return RMSG_SUCCESS
+           
+
 
         # period not jet triggered
-        if self.active_state == CS_INACTIVE or self.active_state == CS_READY: 
+        if self.active_state == CS_INACTIVE: #or self.active_state == CS_READY:#  not neede with change of site.c 
            RHM.set_par_semaphore.acquire()
 
            if self.active_state == CS_READY:
@@ -1575,7 +1590,7 @@ class RadarChannelHandler:
            RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        elif self.active_state == CS_PROCESSING or self.active_state == CS_LAST_SWING: 
+        elif self.active_state == CS_READY or self.active_state == CS_LAST_SWING: 
          # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
@@ -1720,24 +1735,19 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, txstatus_agc,     np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr,  np.int32) # length num_transmitters
         
-#        # send back ctrlprm
-#        for par in ["rbeam", "tbeam", "tfreq", "rfreq"]:
-#            for item in resultDict['ctrlprm_struct']:
-#                if item.name == par:
-#                   self.logger.debug("Sending to ROS: {}={}".format(par, item.data))
-
+        # print main info of sequence
         for item in resultDict['ctrlprm_dataqueue']:
             item.transmit(self.ctrlprm_struct.clients[0])
             if item.name in ["rbeam", "tbeam", "tfreq", "rfreq"]:
                    self.logger.debug("Sending to ROS: {}={}".format(item.name, item.data))
-        
-##        self.resultData_ctrlprm = []
-
-
+    
+        # send back samples with pulse start times 
+        self.logger.debug('GET_DATA returning samples for {} pulses'.format(resultDict['nSequences_per_period']))
+    
         for iSequence in range(resultDict['nSequences_per_period']):
-            self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
+            #self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
             
-            self.logger.debug('GET_DATA sending sequence start time')
+            #self.logger.debug('GET_DATA sending sequence start time')
             transmit_dtype(self.conn, resultDict['sequence_start_time_secs'][iSequence],  np.uint32)
             transmit_dtype(self.conn, resultDict['sequence_start_time_usecs'][iSequence], np.uint32)
 
@@ -1748,25 +1758,23 @@ class RadarChannelHandler:
 
             pulse_sequence_start_index = iSequence * resultDict['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + resultDict['number_of_samples']
-            self.logger.debug("Number of samples if {} (no deepcopy version is {}), main beamformed shape: {}".format(resultDict['number_of_samples'], rd_shallow['number_of_samples'], resultDict['main_beamformed'].shape))
-            self.logger.debug("start index: {}, end index: {}".format(pulse_sequence_start_index, pulse_sequence_end_index))
+            #self.logger.debug("Number of samples if {} (no deepcopy version is {}), main beamformed shape: {}".format(resultDict['number_of_samples'], rd_shallow['number_of_samples'], resultDict['main_beamformed'].shape))
+            #self.logger.debug("start index: {}, end index: {}".format(pulse_sequence_start_index, pulse_sequence_end_index))
         
             # send the packed complex int16 samples to the control program.. 
-            self.logger.debug('GET_DATA sending main samples')
-
+            #self.logger.debug('GET_DATA sending main samples')
             transmit_dtype(self.conn, resultDict['main_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
 
-            self.logger.debug('GET_DATA sending back samples')
+            #self.logger.debug('GET_DATA sending back samples')
             transmit_dtype(self.conn, resultDict['back_beamformed'][pulse_sequence_start_index:pulse_sequence_end_index], np.uint32)
             
             # wait for confirmation before sending the next antenna..
             # if we start catching this assert or timing out, maybe add some more error handling here
-            self.logger.debug('GET_DATA waiting on ack from site library')
+            #self.logger.debug('GET_DATA waiting on ack from site library')
             sample_send_status = recv_dtype(self.conn, np.int32)
             assert sample_send_status == iSequence 
 
-        sys.exit(0)
-        self.logger.warning('GET_DATA: sending main array samples twice instead of main then back array!')
+        self.logger.warning('GET_DATA: sending back array samples, but not sure if this is correct!')
 
 
     
