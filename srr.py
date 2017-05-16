@@ -8,6 +8,8 @@
 #     srr.py start   PROCESS       : start a process or process group (see below for processes) 
 #     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
 #     srr.py restart PROCESS       : restart a process or process group with needed wait times
+#     srr.py networkTool           : calls networkTool.py 
+#     srr.py rawView               : plot raw rx bb samples of all antennas
 #     srr.py help                  : show this help
 #
 #  Available PROCESSES:
@@ -28,6 +30,13 @@
 #     driver                       : cuda_driver and usrp_driver
 #     all                          : cuda_driver, usrp_driver and usrp_server
 #     allscans                     : all porcesses with scan in their name
+#
+#
+#  TIP:
+#    set alias to shorten "srr.py" to "srr" and call it from anywhere:
+#       alias srr="/home/radar/SuperDARN_UHD_Server/srr.py "
+#    and make it permanent by including it in ~/.bash_aliases
+#
 
 #  TODO:
 # restart is processes already running?
@@ -397,7 +406,9 @@ def start_usrps_from_config(usrp_sleep = False):
       # TODO: remove intclk when octoclock is connected
       # TODO: or do this with threading module?
        myPrint("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
-       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
+       #with internal clock
+#       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
+       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
           time.sleep(8)
     os.chdir(basePath)
@@ -472,6 +483,16 @@ def start_errorlog():
     subprocess.Popen(commandList)
 
 
+def start_network_tool():
+    myPrint("Starting networkTool.py...")
+    os.chdir(os.path.join(basePath, "tools") )   
+    subprocess.Popen(['./networkTool.py' ])
+
+def start_liveRawView_tool():
+    myPrint("Starting tools/liveRawView.py...")
+    os.chdir(os.path.join(basePath, "tools") )   
+    subprocess.Popen(['./liveRawView.py' ])
+
 
 
 
@@ -490,7 +511,10 @@ else:
        print_status()
    elif firstArg == "init":
        initialize(inputArg)
-
+   elif firstArg.lower() in ["liverawview", "rawview"]:
+        start_liveRawView_tool()  
+   elif firstArg.lower() in ["network", "networktool"]:
+        start_network_tool()  
    elif firstArg == "start":
       if nArguments == 1 or inputArg[1].lower == "all":
          myPrint("Starting all...")
