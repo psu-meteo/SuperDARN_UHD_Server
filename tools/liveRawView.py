@@ -39,9 +39,10 @@ def read_and_plot():
          print(" {} = {}".format(key, parDict[key]))
    nAntennas = len(main_data[0] )
    nSamples = len(main_data[0][0])
-   nSamples_sequence = parDict['number_of_samples']
    nSequences =  parDict['nSequences_per_period']
-   assert nSamples == nSamples_sequence * nSequences
+   nSamples_sequence = parDict['number_of_samples']
+   nSamples_sequence_padded = nSamples/nSequences
+   # assert nSamples == nSamples_sequence * nSequences
 
 
    antennaPlotData =  np.array(main_data[0])
@@ -51,15 +52,15 @@ def read_and_plot():
    average_active = True
 
    if average_active:
-      antennaPlotData = np.reshape(antennaPlotData, [nAntennas, nSequences, nSamples_sequence ])
+      antennaPlotData = np.reshape(antennaPlotData, [nAntennas, nSequences, nSamples_sequence_padded ])
       antennaPlotData = np.mean(antennaPlotData, axis=1)
 
-      beamformedPlotData = np.reshape(beamformedPlotData, [nSequences,nSamples_sequence ])
+      beamformedPlotData = np.reshape(beamformedPlotData, [nSequences,nSamples_sequence_padded ])
       beamformedPlotData = np.mean(beamformedPlotData, axis=0)
       xAxis_scaling = 1
       xAxis_label = "BB Samples"
    else:
-      xAxis_scaling = nSamples_sequence
+      xAxis_scaling = nSamples_sequence_padded
       xAxis_label = "Sequences"
 
 
