@@ -463,6 +463,8 @@ class RadarHardwareManager:
 
                 # check if there are any disconnected URSPs
                 if len(self.usrpManager.addressList_inactive):
+
+                   controlLoop_logger.info('restoring lost connections')
                    self.usrpManager.restore_lost_connections()
 
                 # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
@@ -480,6 +482,7 @@ class RadarHardwareManager:
 
                 # FRIST CUDA_ADD FOR NEW CHANNELS
                 if len(self.newChannelList) != 0:
+                   controlLoop_logger.info('initializing channel')
                    self.initialize_channel()
                            
 
@@ -765,33 +768,41 @@ class RadarHardwareManager:
     def _calc_period_details(self, newChannels=[]):
         """ calculate details for integration period and save it in channel objects"""
 
-         
-#        sequence_length = self.commonChannelParameter['pulse_sequence_offsets_vector'][-1] 
-#        pulse_sequence_period = (PULSE_SEQUENCE_PADDING_TIME + sequence_length)
-
         # calculate the pulse sequence period with padding
         nSamples_per_sequence = self.commonChannelParameter['number_of_samples'] + int(PULSE_SEQUENCE_PADDING_TIME / self.commonChannelParameter['baseband_samplerate'])
         pulse_sequence_period = nSamples_per_sequence / self.commonChannelParameter['baseband_samplerate']  
 
+        self.logger.debug("nSamples_per_sequence: {}, pulse_sequence_period: {}".format(nSamples_per_sequence, pulse_sequence_period))
+
+        self.logger.debug("self.starttime_period: {}".format(self.starttime_period))
+        self.logger.debug("self.commonChannelParameter['integration_period_duration: {}".format(self.commonChannelParameter['integration_period_duration']))
+        self.logger.debug("time.time(): {}".format(time.time()))
+        self.logger.debug("INTEGRATION_PERIOD_SYNC_TIME: {}".format(INTEGRATION_PERIOD_SYNC_TIME))
+
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
         transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME
+        if transmitting_time_left < 0:
+            self.logger.error("no time is left in integration period for sampling!, {} seconds remain".format(transmitting_time_left))
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
         nSequences_per_period = int(transmitting_time_left / pulse_sequence_period)
-###        sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
+        ### sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
 
 
         # calculate the number of RF transmit and receive samples 
         nSamples_per_sequence_if =  int(self.ini_cuda_settings['IFBBRATE'])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(self.ini_cuda_settings['NTapsRX_ifbb']) 
         num_requested_rx_samples =  int(self.ini_cuda_settings['RFIFRATE'])* (nSamples_per_sequence_if                      - 1 ) +  int(self.ini_cuda_settings['NTapsRX_rfif'])
 
-        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
-        self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
+        self.logger.debug("RFIFRATE: {}, IFBBRATE: {}, nSamples_per_sequence_if: {}, nSamples_per_sequence: {}, nSequences_per_period: {}, NTapsRX_ifbb: {}, NTapsRX_rfif: {}".format( \
+                self.ini_cuda_settings['RFIFRATE'], self.ini_cuda_settings['IFBBRATE'], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, self.ini_cuda_settings['NTapsRX_ifbb'], self.ini_cuda_settings['NTapsRX_rfif']))
+        
 
-        # XXX
-        if num_requested_rx_samples < nSequences_per_period * self.nsamples_per_sequence:
-            self.logger.error("number of requested samples is too low for integration period!")
-            sys.exit(0)
+        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
+
+        if num_requested_rx_samples < 0:
+            self.logger.error("a negative number of samples was requested for an integration period!")
+
+        self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
 
         # then calculate sample indicies at which pulse sequences start within a pulse sequence
         nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
@@ -1148,8 +1159,8 @@ class RadarHardwareManager:
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
         nSamples = main_samples.shape[2]
-        beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
-        beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.int32)
+        beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
+        beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         debugPlot = False
     
         for iChannel, channel in enumerate(RHM.channels):
@@ -1172,7 +1183,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
-                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
                 if debugPlot:
@@ -1196,7 +1207,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
-                complexInt32_pack_mat = (np.int32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
                 beamformed_back_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
                 if debugPlot:
                    import matplotlib.pyplot as plt
@@ -1731,10 +1742,10 @@ class RadarChannelHandler:
             item.transmit(self.ctrlprm_struct.clients[0])
             if item.name in ["rbeam", "tbeam", "tfreq", "rfreq"]:
                    self.logger.debug("Sending to ROS: {}={}".format(item.name, item.data))
-
-        self.logger.debug('GET_DATA returning samples for {} pulses'.format(resultDict['nSequences_per_period']))
     
         # send back samples with pulse start times 
+        self.logger.debug('GET_DATA returning samples for {} pulses'.format(resultDict['nSequences_per_period']))
+    
         for iSequence in range(resultDict['nSequences_per_period']):
             #self.logger.debug('GET_DATA returning samples from pulse {}'.format(iSequence))
             
@@ -1764,7 +1775,6 @@ class RadarChannelHandler:
             #self.logger.debug('GET_DATA waiting on ack from site library')
             sample_send_status = recv_dtype(self.conn, np.int32)
             assert sample_send_status == iSequence 
-
 
         self.logger.warning('GET_DATA: sending back array samples, but not sure if this is correct!')
 
@@ -1877,4 +1887,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
