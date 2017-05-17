@@ -419,7 +419,9 @@ class RadarHardwareManager:
      #   self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
 
-        self.nRegisteredChannels = 0
+        self.nRegisteredChannels = 0  # number of channels after compatibility check 
+        self.nControlPrograms    = 0  # number of control programs, also include unregistered channels
+
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks)
 
@@ -438,12 +440,14 @@ class RadarHardwareManager:
     def run(self):
         def spawn_channel(conn):
             # start new radar channel handler
+            self.nControlPrograms += 1
             channel = RadarChannelHandler(conn, self)
             try:
                 channel.run()
             except socket.error:
                 self.logger.error("RadarChannelHandler: Socket error => Deleting channel... ")
                 self.unregister_channel_from_HardwareManager(channel)
+            self.nControlPrograms -= 1
 
         # TODO: add lock support
         def radar_main_control_loop():
@@ -484,7 +488,7 @@ class RadarHardwareManager:
                     # wait for all channels to be in TRIGGER state
                     executeTrigger = True
                     for ch in self.channels:
-                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE, CS_LAST_SWING]:
+                        if  ch.active_state not in [CS_TRIGGER, CS_INACTIVE]:
                             controlLoop_logger.debug('remaining in TRIGGER because channel {} state is {} (active swing is {})'.format(ch.cnum, ch.active_state, ch.swingManager.activeSwing))
                             time.sleep(sleepTime)
                             executeTrigger = False
@@ -663,7 +667,10 @@ class RadarHardwareManager:
   
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
-
+        wait_start_time = time.time()
+        while (time.time() - wait_start_time < 0.2) and (RHM.nControlPrograms > len(RHM.channels) + len(RHM.newChannelList) ):
+           RHM.logger.debug("initialize_channel: waiting 5 ms for other control program to SET_PARAMETER")
+           time.sleep(0.005)
 
         RHM.set_par_semaphore.acquire()
         RHM.logger.debug("start initialize_channel")
@@ -809,9 +816,6 @@ class RadarHardwareManager:
             ch.nSequences_per_period                 = nSequences_per_period
             ch.nrf_rx_samples_per_integration_period = num_requested_rx_samples
             ch.nbb_rx_samples_per_sequence           = nSamples_per_sequence  
-            print(ch.nbb_rx_samples_per_sequence)
-            print(pulse_sequence_period)
-            print(self.commonChannelParameter['baseband_samplerate'])
             assert abs(ch.nbb_rx_samples_per_sequence - pulse_sequence_period * self.commonChannelParameter['baseband_samplerate']) < 1e4 / self.commonChannelParameter['baseband_samplerate'], 'pulse sequences lengths must be a multiple of the baseband sampling rate'
             ch.integration_period_pulse_sample_offsets = integration_period_pulse_sample_offsets
         self.nSequences_per_period = nSequences_per_period
@@ -830,12 +834,10 @@ class RadarHardwareManager:
         self._calc_period_details()
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
-        self.logger.debug("nSamples_per_pulse: ".format(nSamples_per_pulse))
         for ch in self.channels:
-            if ch.ctrlprm_struct.payload['tfreq'] != 0: 
-                self.logger.debug('pretrigger() tfreq: {}, rfreq: {}. usrp_center: tx={} rx={} '.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate))
-                if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
-                    self.logger.warning('pretrigger() tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
+            self.logger.debug('cnum {}: tfreq={}, rfreq={}, usrp_center={} rx_rate={}Mhz '.format(ch.cnum, ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate/1e6))
+            if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
+                    self.logger.warning('tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
         
         # look for one active channel
         transmittingChannelAvailable = False
@@ -1139,7 +1141,7 @@ class RadarHardwareManager:
 
     def gain_control_divide_by_nChannels(self, nChannelsWillBeAdded=0):
         nChannels = len(self.channels) + nChannelsWillBeAdded
-        self.logger.debug("Setting channel scaling factor to 1/{} ".format("nChannels"))
+        self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.totalScalingFactor, nChannels))
         for ch in self.channels + self.newChannelList:
             ch.channelScalingFactor = 1 / nChannels * self.totalScalingFactor 
     # BEAMFORMING
@@ -1422,7 +1424,7 @@ class RadarChannelHandler:
 
     def SetReadyFlagHandler(self, rmsg):
         # ROS calls it ready, we call it trigger
-        self.logger.debug("ch {}: SetReadyFlagHandler: waiting for nextSwingToTrigger (swing {}) become  CS_READY".format(self.cnum, self.swingManager.nextSwingToTrigger))
+        self.logger.debug("ch {}: SetReadyFlagHandler: waiting for nextSwingToTrigger (swing {}) become  CS_READY or CS_LAST_SWING".format(self.cnum, self.swingManager.nextSwingToTrigger))
         self._waitForState(self.swingManager.nextSwingToTrigger, [CS_READY, CS_LAST_SWING])
  #       transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
         self.logger.debug("ch {}: SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.cnum, self.swingManager.nextSwingToTrigger))
@@ -1558,7 +1560,7 @@ class RadarChannelHandler:
 
 
         # period not jet triggered
-        if self.active_state == CS_INACTIVE: #or self.active_state == CS_READY:#  not neede with change of site.c 
+        if self.active_state == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
            RHM.set_par_semaphore.acquire()
 
            if self.active_state == CS_READY:
@@ -1614,7 +1616,7 @@ class RadarChannelHandler:
             self.logger.error("Pulse lengths in one sequence have to be the equal! ") # TODO raise error?
             pdb.set_trace()
             return False
-        if hardwareManager.nRegisteredChannels == 1 and hardwareManager.channels[0] == self:
+        if hardwareManager.nRegisteredChannels == 1 and (len(hardwareManager.channels) == 0 or hardwareManager.channels[0] == self): 
            self.logger.info("Compatibility check: This channel is already registered at HardwareManager and is the only one. Renewing registration.")
            hardwareManager.nRegisteredChannels == 0
 
