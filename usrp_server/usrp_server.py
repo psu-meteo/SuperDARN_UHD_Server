@@ -1867,8 +1867,18 @@ class RadarChannelHandler:
 
         return RMSG_SUCCESS
 
-    def SetInactiveHandler(self, rmsg):
-        self.active = False
+    def SetInactiveHandler(channelObject, rmsg):
+        RHM = channelObject.parent_RadarHardwareManager
+
+        if channelObject in RHM.channels:
+            RHM.logger.info('ROS:SET_INACTVIVE removing channel {} from HardwareManager'.format(RHM.channels.index(channelObject)))
+            RHM.channels.remove(channelObject)
+
+            RHM.nRegisteredChannels -= 1
+            if RHM.nRegisteredChannels == 0:  
+                RHM.commonChannelParameter = {}
+
+        channelObject.active = False
         # TODO: return failure status if the radar or channel number is invalid?
         return RMSG_SUCCESS
 
