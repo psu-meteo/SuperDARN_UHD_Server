@@ -1000,7 +1000,7 @@ class RadarHardwareManager:
                self.logger.debug('start rx beamforming')
                beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples)
                for iChannel, channel in enumerate(self.channels):
-                  if channel.processing_state is CS_PROCESSING:
+                  if channel.processing_state == CS_PROCESSING:
                      # copy samples and ctrlprm to transmit later to control program
                      if 'main_beamformed' in channel.resultDict_list[-1]:
                         channel.logger.error("Main beamformed data already exist. Overwriting it. This is not correct. GetDataHandler too slow??")
@@ -1016,8 +1016,9 @@ class RadarHardwareManager:
 
                if os.path.isfile("./bufferLiveData.flag"):
                   self.logger.info("Buffering raw data to disk.")
+                  chResExportList = [ ch.resultDict_list[-1] for ch in self.channels if ch.processing_state == CS_PROCESSING]
                   with open('tmpRawData.pkl', 'wb') as f:
-                     pickle.dump([main_samples, back_samples, channel.resultDict_list[-1]],f,  pickle.HIGHEST_PROTOCOL)
+                     pickle.dump([main_samples, back_samples,chResExportList],f,  pickle.HIGHEST_PROTOCOL)
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
            else:
@@ -1183,7 +1184,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
-                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.int16(imag_mat) 
+                complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.uint16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
                 if debugPlot:
