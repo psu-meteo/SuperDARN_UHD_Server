@@ -769,7 +769,7 @@ class RadarHardwareManager:
         """ calculate details for integration period and save it in channel objects"""
 
         # calculate the pulse sequence period with padding
-        nSamples_per_sequence = self.commonChannelParameter['number_of_samples'] + int(PULSE_SEQUENCE_PADDING_TIME / self.commonChannelParameter['baseband_samplerate'])
+        nSamples_per_sequence = self.commonChannelParameter['number_of_samples'] + int(PULSE_SEQUENCE_PADDING_TIME * self.commonChannelParameter['baseband_samplerate'])
         pulse_sequence_period = nSamples_per_sequence / self.commonChannelParameter['baseband_samplerate']  
 
         self.logger.debug("nSamples_per_sequence: {}, pulse_sequence_period: {}".format(nSamples_per_sequence, pulse_sequence_period))
