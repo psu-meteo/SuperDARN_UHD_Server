@@ -908,7 +908,7 @@ class RadarHardwareManager:
            for channel in self.channels: 
                resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
                resultDict['pulse_lens']                  = channel.pulse_lens    
-               channel.resultDict_list.insert(0,resultDict)
+               channel.resultDict_list.insert(0,resultDict.copy())
     
            # broadcast the start of the next integration period to all usrp
            self.logger.debug('start USRP_TRIGGER')
