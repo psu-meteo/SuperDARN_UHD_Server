@@ -1506,7 +1506,7 @@ class RadarChannelHandler:
         tr_window  = seq_buf & R_BIT
         rf_pulse   = seq_buf & X_BIT
         atten      = seq_buf & A_BIT
-        phase_mask = seq_buf & P_BIT
+        phase_mask = (seq_buf & P_BIT) >> int(np.log2(P_BIT))
 
         # extract and number of samples
         sample_idx = np.nonzero(samples)[0]
@@ -1545,6 +1545,11 @@ class RadarChannelHandler:
         self.pulse_masks = pulse_masks
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay
+
+      #  print("phase masks (len {}) (len(phase_masks[0]) = {}):".format(len(phase_masks), len(phase_masks[0])))
+      #  print(phase_masks)
+      #  print("pulse masks (len {}):".format(len(pulse_masks)))
+      #  print(pulse_masks)
 
         self.logger.debug("pulse0 length: {} us, tr_pulse_delay: {} us, tx_time: {} us".format(self.pulse_lens[0], tr_to_pulse_delay,  self.pulse_lens[0] + 2 * self.tr_to_pulse_delay))
         if npulses_per_sequence == 0:

@@ -10,7 +10,7 @@ INTEGRATION_PERIOD_SYNC_TIME = .2
 # starting from the last transmit pulse within a sequence
 # so, this needs to be long enough to avoid any ambiguity between pulse sequences
 # for assuming a maximum range of 5000 kilometers, this could be about .033 seconds
-# if this is not an integer multiple of the baseband sampling period, strange stuff might happen
+# if this is not an integer multiple of the baseband sampling period, the values will be round down
 # the rf baseband sampling period is probably 3.333333... kHz
-PULSE_SEQUENCE_PADDING_TIME = .0
+PULSE_SEQUENCE_PADDING_TIME = .033
 
