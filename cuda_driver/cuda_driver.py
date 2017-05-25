@@ -212,6 +212,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
                 # apply phase shifting to pulse using phase_mask
                 psamp = np.copy(pulsesamps)
+                print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
+                print("phase mask size: {}".format(channel.phase_masks[iPulse]))
                 psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse])
                 # TODO: support non-1us resolution phase masks
         
@@ -662,7 +664,10 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_rx_decimationRates, self.rx_decimationRates)
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
-        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"  
+        if not  np.abs(rx_bb_samplingRate - self.rx_bb_samplingRate) < 0.1:
+           errorMsg = "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program (bb rate: ctrlprm={}, rf/downsampling = {})".format( rx_bb_samplingRate, self.rx_bb_samplingRate)
+           self.logger.error(errorMsg)
+        assert np.abs(rx_bb_samplingRate - self.rx_bb_samplingRate) < 0.1 , errorMsg
 
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nChannels, self.ntaps_rfif, 2]))
@@ -752,6 +757,7 @@ class ProcessingGPU(object):
     # transfer rf samples from shm to memory pagelocked to gpu (TODO: make sure it is float32..)
     def rxsamples_shm_to_gpu(self, shm):      
         for aidx in range(self.nAntennas):
+            self.logger.debug("Getting ant {}".format(aidx))
             shm[aidx].seek(0)
             self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
             self.logger.debug("Input from SHM, Ant {} meanAbs= {} #sampleTrace (copied {} samples)".format(aidx, np.mean(np.abs(self.rx_rf_samples[aidx])), self.rx_rf_nSamples ))
