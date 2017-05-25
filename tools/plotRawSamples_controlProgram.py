@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 # 
-# function to show diagnostic samples of control program
+# Function to show recorded diagnostic samples of control program
+#
 # usage:
 # 
 #  ./rawGUI.sh                     : load newest file in /data/diagnostic_samples/

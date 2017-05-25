@@ -491,7 +491,7 @@ def start_network_tool():
 def start_liveRawView_tool():
     myPrint("Starting tools/liveRawView.py...")
     os.chdir(os.path.join(basePath, "tools") )   
-    subprocess.Popen(['./liveRawView.py' ])
+    subprocess.Popen(['./plotRawSamples_usrpServer.py' ])
 
 
 

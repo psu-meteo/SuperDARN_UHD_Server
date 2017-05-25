@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # 
-# function to 
+# function to plot the raw samples from ursp_server in real time 
 # usage:
 # 
 
@@ -54,7 +54,7 @@ def read_and_plot():
    print("nChannels {}, nAntennas {}, nSamples {}, nSequences {}, nSamples/seq {}, nSamples_padded/seq {}".format(nChannels, nAntennas, nSamples, nSequences, nSamples_sequence, nSamples_sequence_padded))
 
 
-   average_active = True
+   average_active = False
 
    for iChannel in range(nChannels):
 #       pdb.set_trace()
