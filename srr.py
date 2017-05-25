@@ -392,6 +392,9 @@ def read_config(fileName):
 def start_usrps_from_config(usrp_sleep = False):
     myPrint("Starting usrp_driver from config:")
     fileName = os.path.join(basePath, 'usrp_config.ini')
+    if not os.path.isfile(fileName):
+       myPrint("  ERROR: usrp_config.ini not found! Run srr init or symlink correct init file by hand.")
+       return -1
     usrp_config = read_config(fileName)
     
     usrpNameList = usrp_config.sections()
