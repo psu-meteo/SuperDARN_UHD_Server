@@ -3,6 +3,7 @@ import numpy as np
 import uuid
 import collections
 import pdb
+import logging
 from socket_utils import *
 from termcolor import cprint
 
@@ -25,6 +26,7 @@ CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('l')
 
+CONNECTION_ERROR = "CONNECTION_ERROR"
 
 # NOT USED:
 CUDA_SETUP = ord('s')
@@ -67,6 +69,7 @@ class driver_command(object):
         self.dataqueue = [] # ordered list of variables to transmit/receive
         self.payload = {} # dictionary to store received values
         self.command = np.uint8(command)
+        self.logger = logging.getLogger('socket_data')
     
     def queue(self, data, dtype, name = '', nitems = 1):
         # pdb.set_trace()
@@ -88,27 +91,35 @@ class driver_command(object):
 
     def transmit(self):
         for clientsock in self.clients:
-            if self.command != NO_COMMAND:
-                transmit_dtype(clientsock, np.uint8(self.command))
+            try:
+               if self.command != NO_COMMAND:
+                   transmit_dtype(clientsock, np.uint8(self.command))
 
-            for item in self.dataqueue:
-         #       pdb.set_trace()
-                if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
-                   raise ValueError("swing has been not defined!")
-                item.transmit(clientsock)
+               for item in self.dataqueue:
+            #       pdb.set_trace()
+                   if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
+                      raise ValueError("swing has been not defined!")
+                   item.transmit(clientsock)
 
-               # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+                  # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+            except:
+               self.logger.error("Error transmitting command {} to cient {}:{}".format(self.command, clientsock.getsockname()[0], clientsock.getsockname()[1] ))
 
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
     def client_return(self, dtype = np.uint8, check_return = True):
         returns = []
         for client in self.clients:
-            r = recv_dtype(client, dtype)
-            if check_return:
-                assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
-            
-            returns.append(r)
+            try:
+               r = recv_dtype(client, dtype)
+               if check_return:
+                   assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
+               
+               returns.append(r)
+            except:
+               self.logger.error("Error receiving client_return for command {} from  cient {}:{}".format(self.command, client.getsockname()[0], client.getsockname()[1] ))
+               returns.append(CONNECTION_ERROR)
+
         #cprint('command return success', 'yellow')
         return returns
 
@@ -201,9 +212,10 @@ class cuda_pulse_init_command(driver_command):
         self.queue(swing, np.uint32, 'swing')
 
 class cuda_process_command(driver_command):
-    def __init__(self, cudas, swing = -1):
+    def __init__(self, cudas, swing = -1, nSamples = -1):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
+        self.queue(nSamples, np.uint64, 'nSamples')
 
 class cuda_setup_command(driver_command):
     def __init__(self, cudas, sequence = None):
@@ -260,9 +272,10 @@ class cuda_remove_channel_command(driver_command):
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
-    def __init__(self, cudas, swing = -1):
+    def __init__(self, cudas, swing=-1, mixing_freq=-1 ):
         driver_command.__init__(self, cudas, CUDA_GENERATE_PULSE)
         self.queue(swing, np.uint32, 'swing')
+        self.queue(mixing_freq, np.float32, 'mixing_freq')
 
 
 # re-initialize the usrp driver for a new pulse sequence
@@ -308,6 +321,21 @@ class usrp_ready_data_command(driver_command):
         driver_command.__init__(self, usrps, UHD_READY_DATA)
         self.queue(swing , np.int16,   'swing' )
         
+    def receive_all_metadata(self):
+       payloadList = []
+       for sock in self.clients:
+           try:
+              payload = {}
+              payload['status']   = recv_dtype(sock, np.int32)
+              payload['antenna']  = recv_dtype(sock, np.int32)
+              payload['nsamples'] = recv_dtype(sock, np.int32)
+              payload['fault']    = recv_dtype(sock, np.bool_)
+              payloadList.append(payload)
+           except:
+              payloadList.append(CONNECTION_ERROR)
+              self.logger.error("Connection error.")
+       return payloadList
+
     def recv_metadata(self, sock):
         payload = {}
         payload['status']   = recv_dtype(sock, np.int32)
@@ -357,14 +385,13 @@ class usrp_exit_command(driver_command):
 
 # class with pulse sequence information
 class sequence(object):
-    def __init__(self, npulses, nrf_rx_samples_per_integration_period, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
+    def __init__(self, npulses, tr_to_pulse_delay, pulse_offsets_vector, pulse_lens, phase_masks, pulse_masks, channelScalingFactor, ctrlprm):
         self.ctrlprm = ctrlprm
         self.npulses = npulses
         self.pulse_offsets_vector = pulse_offsets_vector
         self.pulse_lens = pulse_lens # length of pulses, in seconds
         self.phase_masks = phase_masks # phase masks are complex number to multiply phase by, so, 1 + j0 is no rotation
         self.pulse_masks = pulse_masks
-        self.nrf_rx_samples_per_integration_period = nrf_rx_samples_per_integration_period
         self.tr_to_pulse_delay = tr_to_pulse_delay
         self.ready = True # TODO: what is ready flag for?
         self.tx_time = self.pulse_lens[0] + 2 * self.tr_to_pulse_delay

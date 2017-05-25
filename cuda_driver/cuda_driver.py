@@ -34,6 +34,7 @@ import dsp_filters
 from phasing_utils import *
 import logging_usrp
 
+
 # import pycuda stuff
 SWING0 = 0
 SWING1 = 1
@@ -51,7 +52,8 @@ DEBUG = True
 verbose = 1
 C = 3e8
 
-
+RF_IF_GAIN = 6
+IF_BB_GAIN = 6 
 
 rx_shm_list = [[ [] for iSwing in allSwings] for iSide in range(2)]
 tx_shm_list = [ [] for iSwing in allSwings]  # so far same tx data for both sides
@@ -79,13 +81,13 @@ if sys.hexversion < 0x030300F0:
 class cudamsg_handler(object):
     def __init__(self, serversock, command, gpu, antennas, array_info, hardware_limits):
         self.sock = serversock
-        self.antennas = np.uint16(antennas)
+        self.antenna_index_list = np.uint16(antennas)
         self.command = command
         self.status = 0
         self.gpu = gpu
         self.array_info = array_info
         self.hardware_limits = hardware_limits
-        self.logger = logging.getLogger('msg_handler')
+        self.logger = logging.getLogger('cudamsg_handler')
 
     def respond(self):
         transmit_dtype(self.sock, self.command, np.uint8)
@@ -101,6 +103,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         cmd = cuda_generate_pulse_command([self.sock])
         cmd.receive(self.sock)
         swing = cmd.payload['swing']
+        self.gpu.usrp_mixing_freq[swing] = cmd.payload['mixing_freq']
  
         if not any(self.gpu.sequences[swing]):
             self.logger.error("no sequences are defined. Pulse generation not possible")
@@ -115,10 +118,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         bb_signal    = [None for c in range(nChannels)] 
         for chIndex, currentSequence in enumerate(self.gpu.sequences[swing]):
             if currentSequence != None:
-                bb_signal[chIndex]  = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
+                bb_signal[chIndex] = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
-
         self.logger.warning('TODO: refactor cuda_generate_pulse_handler to fix accessing rx bb samples per integration period by hardcoded first sequence')
         self.gpu.synth_channels(bb_signal, swing)
 
@@ -171,8 +173,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
-        nPulses   = len(channel.pulse_lens)
-        nAntennas = len(self.antennas)
+        nPulses   = 1 # TODO, don't hardcode this and support differing pulses within a sequence?
+        nAntennas = len(self.antenna_index_list)
         
         # tbuffer is the time between tr gate and transmit pulse 
         padding    = np.zeros(int(np.round(tbuffer * self.gpu.tx_bb_samplingRate)))
@@ -185,6 +187,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         nbeams    = int(self.array_info['nbeams'])
         x_spacing = float(self.array_info['x_spacing']) # meters
         beamnum   = ctrlprm['tbeam']
+        self.logger.debug("generating bb samples for beam {}.".format(beamnum))
 
         # convert beam number of radian angle
         bmazm = calc_beam_azm_rad(nbeams, beamnum, beam_sep)
@@ -193,7 +196,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         pshift = calc_phase_increment(bmazm, tx_center_freq, x_spacing)
 
         # calculate a complex number representing the phase shift for each antenna
-        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antennas]
+        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antenna_index_list]
         
         # construct baseband tx sample array
         bb_signal = np.complex128(np.zeros((nAntennas, nPulses, len(pulsesamps))))
@@ -209,6 +212,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
                 # apply phase shifting to pulse using phase_mask
                 psamp = np.copy(pulsesamps)
+                print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
+                print("phase mask size: {}".format(channel.phase_masks[iPulse]))
                 psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse])
                 # TODO: support non-1us resolution phase masks
         
@@ -237,7 +242,7 @@ class cuda_add_channel_handler(cudamsg_handler):
         cmd.receive(self.sock) 
         swing    = cmd.payload['swing']
         sequence = cmd.sequence
-        self.logger.debug('received sequence, swing {}'.format(swing))
+        self.logger.debug('ADD_CHANNEL: received sequence: swing {}, tbeam={}, rbeam={}, tfreq={}, rfreq={}'.format(swing, sequence.ctrlprm['tbeam'], sequence.ctrlprm['rbeam'], sequence.ctrlprm['tfreq'], sequence.ctrlprm['rfreq']))
 
 
         self.logger.debug('entering cuda_add_channel_handler, waiting for swing semaphores')
@@ -281,7 +286,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_remove_channel_command([self.sock])
         cmd.receive(self.sock)
-        swing = cmp.payload['swing']
+        swing = cmd.payload['swing']
 
         sequence = cmd.sequence
         channelNumber = sequence.ctrlprm['channel']
@@ -321,11 +326,11 @@ class cuda_get_data_handler(cudamsg_handler):
             self.logger.debug('received channel number ={}(cuda index: {}))'.format(channel, channelIndex))
 
             for iAntenna in range(nAntennas):
-                transmit_dtype(self.sock, self.antennas[iAntenna], np.uint16)
+                transmit_dtype(self.sock, self.antenna_index_list[iAntenna], np.uint16)
                 self.logger.debug('transmitted antenna index {}'.format(iAntenna))
                 transmit_dtype(self.sock, nSamples, np.uint32)
                 self.logger.debug('transmitted number of samples ({})'.format(nSamples))
-                self.logger.debug(" transmitting sum : {}".format(np.sum(samples[iAntenna][channelIndex]) ))
+                self.logger.debug("rx_bb ant {} transmitting mean abs : {} #sampleTrace".format(iAntenna, np.mean(np.abs(samples[iAntenna][channelIndex]) )))
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
 
             channel = recv_dtype(self.sock, np.int32) 
@@ -343,10 +348,12 @@ class cuda_process_handler(cudamsg_handler):
 #        pdb.set_trace()
 
 #        acquire_sem(rx_sem_list[SIDEA][swing])
-        self.gpu.rx_init(swing)
+        self.gpu.rx_init(swing, cmd.payload['nSamples'])
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
         self.gpu._set_rx_phaseIncrement(swing) 
+        self.logger.debug("end copy data, start rx process")
+ 
         self.gpu.rxsamples_process(swing) 
  #       release_sem(rx_sem_list[SIDEA][swing])
         self.logger.debug('leaving cuda_process_handler (swing {})'.format(swing))
@@ -454,7 +461,7 @@ class ProcessingGPU(object):
 
         self.logger = logging.getLogger("cuda_gpu")
         self.logger.info('initializing cuda gpu')
-        self.antennas = np.int16(antennas)
+        self.antenna_index_list = np.int16(antennas)
         # maximum supported channels
         self.nChannels = int(maxchannels)
         self.nAntennas = len(antennas)
@@ -463,6 +470,9 @@ class ProcessingGPU(object):
         # number of taps for baseband and if filters
         self.ntaps_rfif = int(ntapsrx_rfif)
         self.ntaps_ifbb = int(ntapsrx_ifbb)
+
+        if (self.ntaps_rfif % 2) != 0:
+            ValueError("Number of filter taps for rf=>if has to be even number! (NTapsRX_rfif in driver_config.ini)")
 
         # rf to if downsampling ratio 
         self.rx_rf2if_downsamplingRate = int(rfifrate)
@@ -513,19 +523,22 @@ class ProcessingGPU(object):
             self.cu_tx_mixer_freq_rads = self.cu_tx.get_global('txfreq_rads')[0]
             self.cu_txoffsets_rads = self.cu_tx.get_global('txphasedelay_rads')[0]
                 
-        self.streams = [cuda.Stream() for i in range(self.nChannels)]
+        self.streams = [cuda.Stream() for i in range(nSwings)]
+        self.cu_rx_filtertaps_rfif = [None for i in range(nSwings)] # TODO initialize meory once here and not each rx_init
+        self.cu_rx_filtertaps_ifbb =  [None for i in range(nSwings)]
 
     # add a USRP with some constant calibration time delay and phase offset (should be frequency dependant?)
     # instead, calibrate VNA on one path then measure S2P of other paths, use S2P file as calibration?
     def addUSRP(self, usrp_hostname = '', driver_hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
-        self.tdelays[int(array_idx)] = tdelay
-        self.phase_offsets[int(array_idx)] = phase_offset
+        iAntenna =  self.antenna_index_list.tolist().index(int(array_idx))
+        self.tdelays[iAntenna] = tdelay
+        self.phase_offsets[iAntenna] = phase_offset
     
     # generate tx rf samples from sequence
     def synth_tx_rf_pulses(self, bb_signal, tx_bb_nSamples_per_pulse, swing):
         for iChannel in range(self.nChannels):
             if self.sequences[swing][iChannel] != None:  # if channel is defined
-                for (iAntenna, ant) in enumerate(self.antennas):
+                for (iAntenna, ant) in enumerate(self.antenna_index_list):
                     for iPulse in range(bb_signal[iChannel].shape[1]):
                         # bb_signal[channel][nantennas, nPulses, len(pulsesamps)]
                         # create interleaved real/complex bb vector
@@ -541,6 +554,7 @@ class ProcessingGPU(object):
 
         self._set_tx_mixerfreq(swing)
         self._set_tx_phasedelay(swing)
+#        self._set_rx_phaseIncrement( swing)
         
         # upsample baseband samples on GPU, write samples to shared memory
         self.interpolate_and_multiply()
@@ -589,28 +603,55 @@ class ProcessingGPU(object):
 
            self.logger.debug('  TX Block: {}'.format( str(self.tx_block)))
            self.logger.debug('  TX Grid:  {}'.format( str(self.tx_grid )))
-
-# some of the rx variable do not exist, since rx_init moved to process_handler
-#           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
-#           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
-#           self.logger.debug("RF => IF")
-#           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
-#           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
-#           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
-#
-#           self.logger.debug("RF => IF")
-#           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
-#           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
-#           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
-#
-#           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
-
  
         max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
         assert self._threadsPerBlock(self.tx_block) <= max_threadsPerBlock, 'tx upsampling block size exceeds CUDA limits, reduce stage upsampling rate, number of pulses, or number of channels'
 
+    def rx_init(self, swing, nSamples_rx_rf_period):
+        self.rx_rf_nSamples = int(nSamples_rx_rf_period)
+        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif ) / self.rx_rf2if_downsamplingRate + 1 )
+        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb ) / self.rx_if2bb_downsamplingRate + 1 )
 
-    def rx_init(self, swing): 
+        self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
+
+        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
+        self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
+
+        self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
+        self.cu_rx_if_samples = cuda.mem_alloc_like(self.rx_if_samples)
+        self.cu_rx_bb_samples = cuda.mem_alloc_like(self.rx_bb_samples)
+
+        # define cuda grid and block sizes
+        self.rx_if_grid  = self._intify((rx_if_nSamples, self.nAntennas, 1))
+        self.rx_bb_grid  = self._intify((rx_bb_nSamples, self.nAntennas, 1))
+        self.rx_if_block = self._intify((self.ntaps_rfif / 2, self.nChannels, 1))
+        self.rx_bb_block = self._intify((self.ntaps_ifbb / 2, self.nChannels, 1))
+
+        if self.logger.isEnabledFor(logging.DEBUG): # save time 
+           self.logger.debug("RX RF Sampling Rate    :  {} kHz".format(self.rx_rf_samplingRate / 1000 ))
+           self.logger.debug("RF RX nSamples         :  {}".format(self.rx_rf_nSamples))
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling rf => if : {}x ".format( self.rx_rf2if_downsamplingRate))
+           self.logger.debug('  RX Block rf => if : {}'.format( str(self.rx_if_block)))
+           self.logger.debug('  RX Grid  rf => if : {}'.format(str(self.rx_if_grid )))
+
+           self.logger.debug("RF => IF")
+           self.logger.debug(" downsampling if => bb : {}x ".format( self.rx_if2bb_downsamplingRate ))
+           self.logger.debug('  RX Block if => bb : {}'.format( str(self.rx_bb_block)))
+           self.logger.debug('  RX Grid  if => bb : {}'.format( str(self.rx_bb_grid )))
+
+           self.logger.debug(" BB Sampling Rate    :  {} kHz".format(self.rx_bb_samplingRate / 1000 ))
+
+
+        # check if up/downsampling cuda kernels block sizes exceed hardware limits 
+        max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
+        assert self._threadsPerBlock(self.rx_if_block) <= max_threadsPerBlock, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+        assert self._threadsPerBlock(self.rx_bb_block) <= max_threadsPerBlock, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
+
+
+    def rx_pre_init(self, swing): 
+        """ pre init of rx: before synth of pulses. put all posible rx_init() stuff into the waiting period. (here exact integration period is still unknown ) """
         # build arrays based on first sequence.
         seq = self.sequences[swing][0] # TODO: check if seq[0] exists
         ctrlprm = seq.ctrlprm
@@ -623,18 +664,10 @@ class ProcessingGPU(object):
         cuda.memcpy_htod(self.cu_rx_decimationRates, self.rx_decimationRates)
 
         rx_bb_samplingRate = ctrlprm['baseband_samplerate']
-        assert rx_bb_samplingRate != self.rx_bb_samplingRate, "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program"
-       
-#        # OLD: now we start with nSamples_rx_rf
-#        rx_bb_nSamples = seq.nbb_rx_samples_per_integration_period
-#        # calculate exact number of if and rf samples (based on downsampling and filtering (valid output))
-#        rx_if_nSamples      = int((rx_bb_nSamples-1) * decimationRate_if2bb + self.ntaps_ifbb)
-        
-        self.rx_rf_nSamples = int(seq.nrf_rx_samples_per_integration_period)
-        rx_if_nSamples      = int( (self.rx_rf_nSamples - self.ntaps_rfif + 1 ) / decimationRate_rf2if + 1 )
-        rx_bb_nSamples      = int( (rx_if_nSamples      - self.ntaps_ifbb + 1 ) / decimationRate_if2bb +1  )
-
-        self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
+        if not  np.abs(rx_bb_samplingRate - self.rx_bb_samplingRate) < 0.1:
+           errorMsg = "rf_samplingRate and decimation rates of ini file does not result in rx_bb_samplingRate requested from control program (bb rate: ctrlprm={}, rf/downsampling = {})".format( rx_bb_samplingRate, self.rx_bb_samplingRate)
+           self.logger.error(errorMsg)
+        assert np.abs(rx_bb_samplingRate - self.rx_bb_samplingRate) < 0.1 , errorMsg
 
         # [NCHANNELS][NTAPS][I/Q]
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nChannels, self.ntaps_rfif, 2]))
@@ -648,45 +681,23 @@ class ProcessingGPU(object):
                self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
  
 
-        self.rx_filtertap_rfif = dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)    
+        self.rx_filtertap_rfif = RF_IF_GAIN * dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)
         # dsp_filters.rolloff_filter_s1()
-        self.rx_filtertap_ifbb = dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
+        self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
-#        self._plot_filter()
+        # self._plot_filter()
         
-        self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
-        self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
-
-        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
-
-        self.cu_rx_samples_rf = np.intp(self.rx_rf_samples.base.get_device_pointer())
-
         # allocate memory on GPU
-        self.cu_rx_filtertaps_rfif = cuda.mem_alloc_like(self.rx_filtertap_rfif)
-        self.cu_rx_filtertaps_ifbb = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
+        self.cu_rx_filtertaps_rfif[swing] = cuda.mem_alloc_like(self.rx_filtertap_rfif)
+        self.cu_rx_filtertaps_ifbb[swing] = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
 
-        self.cu_rx_if_samples = cuda.mem_alloc_like(self.rx_if_samples)
-        self.cu_rx_bb_samples = cuda.mem_alloc_like(self.rx_bb_samples)
-       
-        cuda.memcpy_htod(self.cu_rx_filtertaps_rfif, self.rx_filtertap_rfif)
-        cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb, self.rx_filtertap_ifbb)
+        cuda.memcpy_htod(self.cu_rx_filtertaps_rfif[swing], self.rx_filtertap_rfif)
+        cuda.memcpy_htod(self.cu_rx_filtertaps_ifbb[swing], self.rx_filtertap_ifbb)
  
-        # define cuda grid and block sizes
-        self.rx_if_grid  = self._intify((rx_if_nSamples, self.nAntennas, 1))
-        self.rx_bb_grid  = self._intify((rx_bb_nSamples, self.nAntennas, 1))
-        self.rx_if_block = self._intify((self.ntaps_rfif / 2, self.nChannels, 1))
-        self.rx_bb_block = self._intify((self.ntaps_ifbb / 2, self.nChannels, 1))
-        
-        # check if up/downsampling cuda kernels block sizes exceed hardware limits 
-        max_threadsPerBlock = cuda.Device(0).get_attribute(pycuda._driver.device_attribute.MAX_THREADS_PER_BLOCK)
-
-        assert self._threadsPerBlock(self.rx_if_block) <= max_threadsPerBlock, 'rf to if block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-        assert self._threadsPerBlock(self.rx_bb_block) <= max_threadsPerBlock, 'if to bb block size exceeds CUDA limits, reduce downsampling rate, number of pulses, or number of channels'
-
 
         # synthesize rf waveform (beamforming, apply phase_masks, mixing in cuda)
     def synth_channels(self, bb_signal, swing):
-#        self.rx_init(swing) moved to process_handler
+        self.rx_pre_init(swing) 
 
         # TODO: this assumes all channels have the same number of samples 
         tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
@@ -746,9 +757,11 @@ class ProcessingGPU(object):
     # transfer rf samples from shm to memory pagelocked to gpu (TODO: make sure it is float32..)
     def rxsamples_shm_to_gpu(self, shm):      
         for aidx in range(self.nAntennas):
+            self.logger.debug("Getting ant {}".format(aidx))
             shm[aidx].seek(0)
             self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
-        print(self.rx_rf_samples[0][:11]) 
+            self.logger.debug("Input from SHM, Ant {} meanAbs= {} #sampleTrace (copied {} samples)".format(aidx, np.mean(np.abs(self.rx_rf_samples[aidx])), self.rx_rf_nSamples ))
+        # print(self.rx_rf_samples[0][:11]) 
 
 
                
@@ -756,10 +769,11 @@ class ProcessingGPU(object):
     def rxsamples_process(self, swing):
 
         self.logger.debug('processing rf -> if')
-        self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif, block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
- 
+        self.cu_rx_multiply_mix_add(self.cu_rx_samples_rf, self.cu_rx_if_samples, self.cu_rx_filtertaps_rfif[swing], block = self.rx_if_block, grid = self.rx_if_grid, stream = self.streams[swing])
+        self.logger.debug("  block: {}, grid : {}".format(self.rx_if_block, self.rx_if_grid)) 
         self.logger.debug('processing if -> bb')
-        self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb, block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
+        self.cu_rx_multiply_and_add(self.cu_rx_if_samples, self.cu_rx_bb_samples, self.cu_rx_filtertaps_ifbb[swing], block = self.rx_bb_block, grid = self.rx_bb_grid, stream = self.streams[swing])
+        self.logger.debug("  block: {}, grid : {}".format(self.rx_bb_block, self.rx_bb_grid)) 
 
         debugAmpCompare = False
         if debugAmpCompare:
@@ -768,6 +782,19 @@ class ProcessingGPU(object):
             maxInValue = np.max(np.absolute(self.rx_rf_samples[0][0::2]))
             maxInValue = np.max(np.absolute(self.rx_rf_samples[0][1::2]))
             plt.title("rx max value {}".format(maxInValue))
+            plt.show()
+
+        # plot all 8 input ant (slow)
+        if False:
+            import myPlotTools as mpt
+            import matplotlib.pyplot as plt
+
+            plt.figure()
+            for iAnt in range(8):
+               ax = plt.subplot(811+iAnt) 
+               plotData = self.rx_rf_samples[iAnt][::2] + 1j*self.rx_rf_samples[iAnt][1::2]
+               plt.hist(np.abs(plotData), bins=20,normed=True)
+            #   mpt.plot_time(self.rx_rf_samples[iAnt], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
             plt.show()
         
 
@@ -782,18 +809,18 @@ class ProcessingGPU(object):
 
             # PLOT all three frequency bands
             ax = plt.subplot(311)
-            mpt.plot_freq(self.rx_rf_samples[0],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_rf_samples[0][:int(self.rx_rf_samplingRate*0.1/2)*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('RF')
 
             ax = plt.subplot(312)
-            mpt.plot_freq(self.rx_if_samples[0][0], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-            mpt.plot_freq(self.rx_if_samples[0][1], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_if_samples[0][0][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_if_samples[0][1][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('IF')
 
             ax =plt.subplot(313)
-            mpt.plot_freq(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+            mpt.plot_freq(self.rx_bb_samples[0][0][:int(self.rx_bb_samplingRate*0.1/2)*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
             ax.set_ylim([50, 200])
             plt.ylabel('BB')
 
@@ -815,6 +842,7 @@ class ProcessingGPU(object):
     # pull baseband samples from GPU into host memory
     def pull_rxdata(self, swing):
         self.streams[swing].synchronize()
+        self.logger.debug("Finished waiting for synchronize streams")
         cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples)
         if False:
            import matplotlib.pyplot as plt

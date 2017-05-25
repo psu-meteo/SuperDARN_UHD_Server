@@ -32,7 +32,7 @@
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
 
-#define RX_OFFSET 0 // 290e-6 // microseconds, alex had 450-e6 set here
+#define RX_OFFSET 0
 
 void usrp_rx_worker(
     uhd::usrp::multi_usrp::sptr usrp,
@@ -57,12 +57,15 @@ void usrp_rx_worker(
     stream_cmd.num_samps = num_requested_samps;
     stream_cmd.stream_now = false;
     stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
-   
+
+    DEBUG_PRINT("rx_worker start issue stream\n");   
     usrp->issue_stream_cmd(stream_cmd);
+    DEBUG_PRINT("rx_worker end issue strem\n");
     
     size_t num_acc_samps = 0;
     const size_t num_max_request_samps = rx_stream->get_max_num_samps();
 
+    DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
         size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
         size_t num_rx_samps = rx_stream->recv(&((*rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
@@ -71,6 +74,7 @@ void usrp_rx_worker(
 
         //handle the error codes
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
+        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_LATE_COMMAND) break;
         if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
             throw std::runtime_error(str(boost::format(
                 "Receiver error %s"
@@ -86,16 +90,21 @@ void usrp_rx_worker(
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
     if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
-	if (num_acc_samps != num_requested_samps){
+    if (num_acc_samps != num_requested_samps){
         *return_status=-1;
-		uhd::time_spec_t rx_error_time = usrp->get_time_now();
-		std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
+        uhd::time_spec_t rx_error_time = usrp->get_time_now();
+        std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
 
-		std::cerr << "Error code: " << md.error_code << "\t";
-		std::cerr << "Samples rx'ed: " << num_acc_samps << 
-			" (expected " << num_requested_samps << ")" << std::endl;
-	}
+        std::cerr << "Error code: " << md.error_code << "\t";
+        std::cerr << "Samples rx'ed: " << num_acc_samps << 
+            " (expected " << num_requested_samps << ")" << std::endl;
+    }
 
+    if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_LATE_COMMAND) {
+        uhd::time_spec_t rx_error_time = usrp->get_time_now();
+        std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
+        *return_status=-1;
+    }
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;

@@ -9,7 +9,7 @@ from os import listdir
 import os
 import threading
 from queue import Queue
-
+import time
 
 # define font color and style
 HEADER = '\033[95m'
@@ -159,7 +159,7 @@ def ipScanFast(index):
 userInput = 's'
 printStatus()
 while userInput != "":
-    print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast\n  i    : IP scan (slow)\n  Enter: quit" + ENDC)
+    print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast\n  i    : IP scan (slow)\n  c    : continuous update status\n  Enter: quit" + ENDC)
     userInput = input(' Input: ')
   
     if userInput.lower() == 's':
@@ -170,6 +170,11 @@ while userInput != "":
     if userInput.lower() == 'i':
         index = input(HEADER + "  Select Interface Index:" + ENDC )
         ipScan(index)
+    if userInput.lower() == 'c':
+       while True:
+           os.system("clear")
+           printStatus()
+           time.sleep(2)
 
 
 
