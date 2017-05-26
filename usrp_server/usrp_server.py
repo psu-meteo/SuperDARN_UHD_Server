@@ -146,7 +146,7 @@ class usrpMixingFreqManager():
        channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager")
    
        if newLower > (self.current_mixing_freq - self.usrp_bandwidth/2) and newUpper < (self.current_mixing_freq + self.usrp_bandwidth/2):
-          channel.logger.degug("channel range is within USRP bandwidth")
+          channel.logger.debug("channel range is within USRP bandwidth")
           self.channelRangeList.append([newLower, newUpper])
           self.channelList.append(channel)
           result = True
@@ -180,7 +180,7 @@ class usrpMixingFreqManager():
 
     def get_range_of_channel(self, channel):
        rangeList = channel.scanManager.clear_freq_range_list
-       lower = rangList[0][0] 
+       lower = rangeList[0][0] 
        upper = rangeList[0][1]
        for periodRange in rangeList[1:]:
           lower = min(lower, periodRange[0])
@@ -574,7 +574,15 @@ class RadarHardwareManager:
       self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
 
       self._resync_usrps()
-
+    def send_cuda_setup_command(self):
+      if self.commonChannelParameter == {}:
+         self.logger.debug("Skipping call of cuda_setup because up/down samplingRates are unknown.")
+      else:
+         self.logger.debug("start CUDA_SETUP")
+         cmd = cuda_setup_command(self.cudasocks, self.commonChannelParameter['upsample_rate'],self.commonChannelParameter['downsample_rates'][0],self.commonChannelParameter['downsample_rates'][1], self.mixingFreqManager.current_mixing_freq )
+         cmd.transmit()
+         cmd.client_return() 
+         self.logger.debug("end CUDA_SETUP")
 
     def _resync_usrps(self):
         usrps_synced = False
@@ -790,12 +798,13 @@ class RadarHardwareManager:
         ### sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
 
 
-        # calculate the number of RF transmit and receive samples 
-        nSamples_per_sequence_if =  int(self.ini_cuda_settings['IFBBRATE'])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(self.ini_cuda_settings['NTapsRX_ifbb']) 
-        num_requested_rx_samples =  int(self.ini_cuda_settings['RFIFRATE'])* (nSamples_per_sequence_if                      - 1 ) +  int(self.ini_cuda_settings['NTapsRX_rfif'])
+        # calculate the number of RF transmit and receive samples
+        downsamplingRates =  self.commonChannelParameter["downsample_rates"]
+        nSamples_per_sequence_if =  int(downsamplingRates[1])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(downsamplingRates[1]*2) # assumes fixed nTaps for filter = 2*downsampling 
+        num_requested_rx_samples =  int(downsamplingRates[0])* (nSamples_per_sequence_if                      - 1 ) +  int(downsamplingRates[0]*2) # assumes fixed nTaps for filter = 2*downsampling 
 
         self.logger.debug("RFIFRATE: {}, IFBBRATE: {}, nSamples_per_sequence_if: {}, nSamples_per_sequence: {}, nSequences_per_period: {}, NTapsRX_ifbb: {}, NTapsRX_rfif: {}".format( \
-                self.ini_cuda_settings['RFIFRATE'], self.ini_cuda_settings['IFBBRATE'], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, self.ini_cuda_settings['NTapsRX_ifbb'], self.ini_cuda_settings['NTapsRX_rfif']))
+                downsamplingRates[0], downsamplingRates[1], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, downsamplingRates[0]*2, downsamplingRates[1]*2))
         
 
         self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
@@ -1642,6 +1651,40 @@ class RadarChannelHandler:
             hardwareManager.commonChannelParameter = {key: getattr(self, key) for key in commonParList_seq}
             hardwareManager.commonChannelParameter.update( {key: self.ctrlprm_struct.payload[key] for key in commonParList_ctrl})
             hardwareManager.commonChannelParameter.update({'pulseLength':pulseLength})
+            
+            # upsampling rates
+            #  it looks like tx_bb_samplingRate has to be 100 kHz for phase coding (but there is no documentation...)
+            upsample_rate = hardwareManager.usrp_rf_tx_rate / 100000
+            hardwareManager.commonChannelParameter.update({"upsample_rate":upsample_rate})
+            self.logger.debug("Setting cuda upsampling rate to {}".format(upsample_rate))
+
+            # determine downsample rates
+            #   bb_samplinRate = 3e8/2/rsep
+            #    resp=45km => 3.333 kHz  (default)
+            #    resp=15km => 10 kHz     (used in pcodescan_15km)
+            #    resp=6km  => 25 kHz     (used in pcodescan)
+            # TODO add 10M
+            goodDownsampleRates = [[20, 75], # 5M => 3.333k
+                                   [20, 25], # 5M => 10k 
+                                   [10 ,20], # 5M => 25k 
+            ]
+         
+            total_downsample_rate = hardwareManager.usrp_rf_rx_rate / hardwareManager.commonChannelParameter['baseband_samplerate']
+            downSampleRates = None
+            for rate in goodDownsampleRates:
+               if np.abs(rate[0]*rate[1] - total_downsample_rate) < 0.01:
+                  downSampleRates = rate
+                  break
+            if downSampleRates is None:
+               errorMsg ="No two downsample rate are defined for downsampling form {} to {}.".format(hardwareManager.usrp_rf_rx_rate, hardwareManager.commonChannelParameter['baseband_samplerate']) 
+               self.logger.error(errorMsg)
+               assert downSampleRates != None, errorMsg
+            else:
+               self.logger.debug("Setting cuda downsampling ratios to {} and {}".format(downSampleRates[0], downSampleRates[1]))
+               hardwareManager.commonChannelParameter.update({"downsample_rates":downSampleRates})
+               hardwareManager.send_cuda_setup_command()
+
+           
 
             hardwareManager.nRegisteredChannels = 1
             return True
@@ -1865,15 +1908,29 @@ class RadarChannelHandler:
 
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
+
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
         self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq)
 
-        self.swingManager.reset()
-        self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+        addFreqResult = self.parent_RadarHardwareManager.mixingFreqManager.add_new_freq_band(self)
     
-
-        return RMSG_SUCCESS
-
+        if addFreqResult == True:
+            self.swingManager.reset()
+            self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+            return RMSG_SUCCESS
+        elif addFreqResuult == False:
+            self.logger.error("Freq range of new channel (cnum {}) is not in USRP bandwidth. (freq_range_list[0][0] = {} ".format(self.cnum, freq_range_list[0][0]))
+            self.scanManager.clear_freq_range_list = None 
+            self.scan_beam_list = None
+            self.fixFreq = None
+            return RSMG_FAILURE
+        else: # new mixing freq
+            self.parent_RadarHardwareManager.send_cuda_setup_command()
+            self.swingManager.reset()
+            self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+            return RMSG_SUCCESS
+        
+ 
     def SetInactiveHandler(channelObject, rmsg):
         RHM = channelObject.parent_RadarHardwareManager
 

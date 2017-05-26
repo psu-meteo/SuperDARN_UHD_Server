@@ -374,14 +374,22 @@ class cuda_setup_handler(cudamsg_handler):
     def process(self):
         cmd = cuda_setup_command([self.sock])
         cmd.receive(self.sock)
-#        swing = cmd.payload['swing']
-        self.logger.debug('entering cuda_setup_handler (currently blank!)')
-        acquire_sem(rx_sem_list[SIDEA][SWING0])
-        acquire_sem(rx_sem_list[SIDEA][SWING1])
+        downsampleRate_rf2if = cmd.payload['downsampleRate_rf2if']
+        downsampleRate_if2bb = cmd.payload['downsampleRate_if2bb']
+        upsampleRate         = cmd.payload['upsampleRate']
+        usrp_mixing_freq     = cmd.payload['usrp_mixing_freq']
+
+        self.gpu.init_conversionRates_and_mixingFreq(upsampleRate, downsampleRate_rf2if, downsampleRate_if2bb, usrp_mixing_freq)
         
-        # release semaphores
-        release_sem(rx_sem_list[SIDEA][SWING0])
-        release_sem(rx_sem_list[SIDEA][SWING1])
+
+# OLD
+##        self.logger.debug('entering cuda_setup_handler (currently blank!)')
+##        acquire_sem(rx_sem_list[SIDEA][SWING0])
+##        acquire_sem(rx_sem_list[SIDEA][SWING1])
+##        
+##        # release semaphores
+##        release_sem(rx_sem_list[SIDEA][SWING0])
+##        release_sem(rx_sem_list[SIDEA][SWING1])
 
 # NOT USED:    
 # prepare for a refresh of sequences 
@@ -457,7 +465,8 @@ def sigint_handler(signum, frame):
 # and host/gpu communication and initialization
 # bb_signal is now [NANTS, NPULSES, NCHANNELS, NSAMPLES]
 class ProcessingGPU(object):
-    def __init__(self, antennas, maxchannels, maxpulses, ntapsrx_rfif, ntapsrx_ifbb, rfifrate, ifbbrate, fsamptx, fsamprx, txupsamplerate):
+
+    def __init__(self, antennas, maxchannels, maxpulses,  fsamptx, fsamprx):
 
         self.logger = logging.getLogger("cuda_gpu")
         self.logger.info('initializing cuda gpu')
@@ -467,28 +476,18 @@ class ProcessingGPU(object):
         self.nAntennas = len(antennas)
         self.nPulses   = int(maxpulses)
 
-        # number of taps for baseband and if filters
-        self.ntaps_rfif = int(ntapsrx_rfif)
-        self.ntaps_ifbb = int(ntapsrx_ifbb)
 
-        if (self.ntaps_rfif % 2) != 0:
-            ValueError("Number of filter taps for rf=>if has to be even number! (NTapsRX_rfif in driver_config.ini)")
-
-        # rf to if downsampling ratio 
-        self.rx_rf2if_downsamplingRate = int(rfifrate)
-        self.rx_if2bb_downsamplingRate = int(ifbbrate)
+        # this will be initialized later when ratios are known ( function init_conversionRates_and_mixingFreq() )
+        self.tx_upsamplingRate = None  
+        self.rx_rf2if_downsamplingRate = None
+        self.rx_if2bb_downsamplingRate = None
+        self.ntaps_rfif = None
+        self.ntaps_ifbb = None
+        self.usrp_mixing_freq = [None, None]
 
         # USRP rx/tx sampling rates
         self.tx_rf_samplingRate = int(fsamptx)
         self.rx_rf_samplingRate = int(fsamprx)
-
-        # USRP NCO mixing frequency TODO: get from usrp_server
-        self.usrp_mixing_freq = [13e6, 13e6]
-        
-        self.tx_upsamplingRate = int(txupsamplerate) #  TODO: adjust name later
-        # calc base band sampling rates 
-        self.tx_bb_samplingRate = self.tx_rf_samplingRate / self.tx_upsamplingRate
-        self.rx_bb_samplingRate = self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate / self.rx_if2bb_downsamplingRate
 
         # calibration tables for phase and time delay offsets
         self.tdelays = np.zeros(self.nAntennas) # table to account for constant time delay to antenna, e.g cable length difference
@@ -533,6 +532,27 @@ class ProcessingGPU(object):
         iAntenna =  self.antenna_index_list.tolist().index(int(array_idx))
         self.tdelays[iAntenna] = tdelay
         self.phase_offsets[iAntenna] = phase_offset
+
+
+    def init_conversionRates_and_mixingFreq(self, upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq):
+       
+        self.logger.debug("CUDA_SETUP: upRate: {}x, downRates: {}x and {}x, usrp_mixing_freq: {} MHz".format(upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq))
+        self.tx_upsamplingRate         = int(upRate) 
+        self.rx_rf2if_downsamplingRate = int(downRate_rf2if)
+        self.rx_if2bb_downsamplingRate = int(downRate_if2bb)
+
+        # calc base band sampling rates 
+        self.tx_bb_samplingRate = self.tx_rf_samplingRate / self.tx_upsamplingRate
+        self.rx_bb_samplingRate = self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate / self.rx_if2bb_downsamplingRate
+
+        # number of taps for baseband and if filters (jeff: 2x downsamplingRate => no aliasing)
+        self.ntaps_rfif = self.rx_rf2if_downsamplingRate * 2
+        self.ntaps_ifbb = self.rx_if2bb_downsamplingRate * 2
+
+        # USRP NCO mixing frequency
+        self.usrp_mixing_freq = [usrp_mixing_freq, usrp_mixing_freq]
+
+
     
     # generate tx rf samples from sequence
     def synth_tx_rf_pulses(self, bb_signal, tx_bb_nSamples_per_pulse, swing):

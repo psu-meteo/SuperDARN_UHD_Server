@@ -25,11 +25,11 @@ CUDA_EXIT = ord('e')
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
 CUDA_GENERATE_PULSE = ord('l')
+CUDA_SETUP = ord('s')
 
 CONNECTION_ERROR = "CONNECTION_ERROR"
 
 # NOT USED:
-CUDA_SETUP = ord('s')
 CUDA_PULSE_INIT = ord('i')
 NO_COMMAND = ord('n')
 UHD_SETUP_READY = ord('y')
@@ -218,18 +218,13 @@ class cuda_process_command(driver_command):
         self.queue(nSamples, np.uint64, 'nSamples')
 
 class cuda_setup_command(driver_command):
-    def __init__(self, cudas, sequence = None):
+    def __init__(self, cudas, upsampleRate = 0, downsampleRate_rf2if=0, downsampleRate_if2bb=0, usrp_mixing_freq=0):
         driver_command.__init__(self, cudas, CUDA_SETUP)
-        self.sequence = sequence
-        
-    def receive(self, sock):
-        super().receive(sock)
-        self.sequence = pickle_recv(sock)
-
-    def transmit(self):
-        super().transmit()
-        for sock in self.clients:
-            pickle_send(sock, self.sequence)
+        self.queue(upsampleRate, np.uint32, 'upsampleRate') 
+        self.queue(downsampleRate_rf2if, np.uint32, 'downsampleRate_rf2if')
+        self.queue(downsampleRate_if2bb, np.uint32, 'downsampleRate_if2bb')
+        self.queue(usrp_mixing_freq, np.uint32, 'usrp_mixing_freq')
+  
 
 # add a pulse sequence/channel 
 class cuda_add_channel_command(driver_command):
