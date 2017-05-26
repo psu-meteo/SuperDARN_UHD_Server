@@ -155,26 +155,28 @@ def ipScanFast(index):
 
 
 
-
-userInput = 's'
-printStatus()
-while userInput != "":
-    print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast\n  i    : IP scan (slow)\n  c    : continuous update status\n  Enter: quit" + ENDC)
-    userInput = input(' Input: ')
-  
-    if userInput.lower() == 's':
-        printStatus()
-    if userInput.lower() == 'f':
-        index = input(HEADER + "  Select Interface Index:" + ENDC )
-        ipScanFast(index)
-    if userInput.lower() == 'i':
-        index = input(HEADER + "  Select Interface Index:" + ENDC )
-        ipScan(index)
-    if userInput.lower() == 'c':
-       while True:
-           os.system("clear")
+def main():
+   userInput = 's'
+   printStatus()
+   while userInput != "":
+       print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast\n  i    : IP scan (slow)\n  c    : continuous update status\n  Enter: quit" + ENDC)
+       userInput = input(' Input: ')
+     
+       if userInput.lower() == 's':
            printStatus()
-           time.sleep(2)
+       if userInput.lower() == 'f':
+           index = input(HEADER + "  Select Interface Index:" + ENDC )
+           ipScanFast(index)
+       if userInput.lower() == 'i':
+           index = input(HEADER + "  Select Interface Index:" + ENDC )
+           ipScan(index)
+       if userInput.lower() == 'c':
+          while True:
+              os.system("clear")
+              printStatus()
+              time.sleep(2)
 
+if __name__ == '__main__':
+    main()
 
 
