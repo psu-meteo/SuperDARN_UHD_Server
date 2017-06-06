@@ -318,8 +318,10 @@ class scanManager():
         return seconds_in_this_scan
 
     def set_start_period(self): 
+        """  OLD: start beam is now calculated by control program """
         """ Sets the current period to the start periods depending on the current time. 
             Corresponds to the skip variable of the old ontrol program """
+        return 
         time_in_scan = self.get_time_in_scan()
         current_time = time_in_scan + self.integration_duration - 0.1 # taken over from old control program code 
         iPeriod = np.floor((current_time % self.scan_duration) / self.integration_duration) 
@@ -338,7 +340,7 @@ class scanManager():
               self.logger.debug("No waiting. ({} + {}) s too late.".format(time_to_wait + INTEGRATION_PERIOD_SYNC_TIME, INTEGRATION_PERIOD_SYNC_TIME))
             
            
-    def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_duration, integration_duration):
+    def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_duration, integration_duration, start_period):
   
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
         self.clear_freq_range_list = freq_range_list
@@ -355,7 +357,7 @@ class scanManager():
         self.fixFreq = fixFreq
 
         # rest all other parameter
-        self.current_period = 0
+        self.current_period         = start_period
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.isPrePeriod            = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
@@ -740,7 +742,6 @@ class RadarHardwareManager:
         for channel in newChannelList:
      
             # CUDA_ADD_CHANNEL in first period
-            channel.scanManager.set_start_period()
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
             RHM.logger.debug('calling CUDA_ADD_CHANNEL at initialize_channel() (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
             cmd.transmit()
@@ -1963,6 +1964,8 @@ class RadarChannelHandler:
         integration_time = integration_time_sec + integration_time_us/1e6
         self.logger.debug('SetActiveHandler integration_duration: {}'.format(integration_time))
         
+        start_period =  recv_dtype(self.conn, np.int32) 
+ 
         if syncBeams == 1:
            scan_times_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams) / 1000
            self.logger.debug('SetActiveHandler scan_times_list: {}'.format(scan_times_list))
@@ -1975,7 +1978,7 @@ class RadarChannelHandler:
 
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_time, integration_time)
+        self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_time, integration_time, start_period)
 
         addFreqResult = self.parent_RadarHardwareManager.mixingFreqManager.add_new_freq_band(self)
     
