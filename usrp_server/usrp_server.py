@@ -21,6 +21,7 @@ import logging
 import pdb
 import socket
 import time
+import datetime
 import configparser
 import copy
 import posix_ipc
@@ -275,7 +276,8 @@ class swingManager():
 class scanManager():
     """ Class to handle
         - last recorded clear frequency search raw data
-        - keep track of beam numbers and transmit frequencies 
+        - keep track of beam numbers and transmit frequencies
+        - times when periods starts 
         created for each RadarChannelHandler """
         
 
@@ -300,7 +302,43 @@ class scanManager():
         self.restricted_frequency_list = restricted_frequency_list
         self.logger = logging.getLogger('scanManager')
 
-    def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq):
+        self.syncBeams  = False
+        self.beam_times = None
+        self.scan_duration = None
+        self.integration_duration = None 
+ 
+        self.isFirstPeriod = True
+
+    def get_time_in_scan(self):
+        """ Returns the time in seconds from the scheduled start of the scan. """
+
+        current_time = datetime.datetime.now().time()
+        nSeconds_in_this_hour = current_time.minute*60 + current_time.second + current_time.microsecond/1e6
+        seconds_in_this_scan = nSeconds_in_this_hour % self.scan_duration
+        return seconds_in_this_scan
+
+    def set_start_period(self): 
+        """ Sets the current period to the start periods depending on the current time. 
+            Corresponds to the skip variable of the old ontrol program """
+        time_in_scan = self.get_time_in_scan()
+        current_time = time_in_scan + self.integration_duration - 0.1 # taken over from old control program code 
+        iPeriod = np.floor((current_time % self.scan_duration) / self.integration_duration) 
+        if iPeriod > (self.numBeams - 1) or iPeriod < 0:
+            iPeriod = 0
+        self.current_period = int(iPeriod)
+        self.logger.info("Starting scan with period  {}.".format(iPeriod))
+
+    def wait_for_next_trigger(self):
+        if self.syncBeams:
+           time_to_wait = self.beam_times[self.current_period] - self.get_time_in_scan() - INTEGRATION_PERIOD_SYNC_TIME
+           if time_to_wait > 0:
+              self.logger.debug("Waiting for {} s".format(time_to_wait))
+              time.sleep(time_to_wait)
+           else:
+              self.logger.debug("No waiting. ({} + {}) s too late.".format(time_to_wait + INTEGRATION_PERIOD_SYNC_TIME, INTEGRATION_PERIOD_SYNC_TIME))
+            
+           
+    def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_duration, integration_duration):
   
         # list of [fstart, fstop] lists in Hz, desired frequency range for each period
         self.clear_freq_range_list = freq_range_list
@@ -308,16 +346,22 @@ class scanManager():
         # list of [bmnum, bmnum..] 
         self.scan_beam_list = scan_beam_list
 
-        # 
+        # sync paramater
+        self.syncBeams  = scan_times_list != None
+        self.beam_times = scan_times_list
+        self.scan_duration   = scan_duration
+        self.integration_duration = integration_duration 
+    
         self.fixFreq = fixFreq
 
         # rest all other parameter
         self.current_period = 0
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
-        self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
-        self.isPostLast = False # to handle last trigger_next_swing() call
-        self.isInitSetParameter = True
+        self.isPrePeriod            = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
+        self.isPostLast             = False # to handle last trigger_next_swing() call
+        self.isInitSetParameter     = True
+        self.isFirstPeriod          = True
 
 
     def switch_swings(self):
@@ -388,9 +432,6 @@ class scanManager():
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
         return (clearFreq, noise, recordTime)
 
-    @property
-    def isFirstPeriod(self): # TODO delete if unused
-        return self.current_period == 0
 
     @property
     def isForelastPeriod(self):
@@ -459,7 +500,7 @@ class RadarHardwareManager:
             while True:
 
                 # set start time of integration period (will be overwriten if not triggered)
-                self.starttime_period = time.time()
+                self.starttime_period = time.time() # TODO change this to refence clock and scan times
 
                 # check if there are any disconnected URSPs
                 if len(self.usrpManager.addressList_inactive):
@@ -586,6 +627,7 @@ class RadarHardwareManager:
 
     def _resync_usrps(self):
         usrps_synced = False
+        iResync = 1
 
         while not usrps_synced:
             cmd = usrp_sync_time_command(self.usrpManager.socks)
@@ -608,7 +650,8 @@ class RadarHardwareManager:
                 print('USRPs synchronized, approximate times: ' + str(usrptimes))
             else:
                 # TODO: why does USRP synchronization fail?
-                self.logger.warning('_resync_USRP USRP syncronization failed, trying again..')
+                self.logger.warning('_resync_USRP USRP syncronization failed, trying again ({}) ...'.format(iResync))
+                iResync += 1 
                 time.sleep(1)
 
     #@timeit
@@ -697,6 +740,7 @@ class RadarHardwareManager:
         for channel in newChannelList:
      
             # CUDA_ADD_CHANNEL in first period
+            channel.scanManager.set_start_period()
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
             RHM.logger.debug('calling CUDA_ADD_CHANNEL at initialize_channel() (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
             cmd.transmit()
@@ -881,6 +925,11 @@ class RadarHardwareManager:
            self.usrpManager.eval_client_return(cmd)
            self.logger.debug("end USRP_SETUP")
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
+
+           # wait is periods should be time synchronized  
+           for tmpChannel in self.channels:
+              if (tmpChannel is not None): 
+                 tmpChannel.scanManager.wait_for_next_trigger()
 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
@@ -1145,9 +1194,10 @@ class RadarHardwareManager:
               
            # automatic trigger of second period (without ROS:SET_READY)
            for channel in  self.channels:
-              if channel.scanManager.current_period == 0:  # first period 
+              if channel.scanManager.isFirstPeriod: 
                  channel.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(channel.cnum, self.swingManager.activeSwing))
                  channel.active_state = CS_TRIGGER
+                 channel.scanManager.isFirstPeriod = False
  
         self.trigger_next_function_running = False
         
@@ -1156,8 +1206,6 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager.period_finished()
         for ch in self.channels:
             if ch is not None: 
-          #    if (not ch.scanManager.isFirstPeriod):
-          #    if (not ch.scanManager.isLastPeriod) and (not ch.scanManager.isFirstPeriod):
                   ch.scanManager.period_finished()
 
 
@@ -1904,13 +1952,30 @@ class RadarChannelHandler:
         scan_beam_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))
 
+        syncBeams  =  recv_dtype(self.conn, np.int32)
+        scan_time_sec =  recv_dtype(self.conn, np.int32)  
+        scan_time_us =  recv_dtype(self.conn, np.int32) 
+        scan_time        = scan_time_sec + scan_time_us/1e6 
+        self.logger.debug('SetActiveHandler scan_duration: {}'.format(scan_time))
+
+        integration_time_sec =  recv_dtype(self.conn, np.int32)  
+        integration_time_us =  recv_dtype(self.conn, np.int32)  
+        integration_time = integration_time_sec + integration_time_us/1e6
+        self.logger.debug('SetActiveHandler integration_duration: {}'.format(integration_time))
+        
+        if syncBeams == 1:
+           scan_times_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams) / 1000
+           self.logger.debug('SetActiveHandler scan_times_list: {}'.format(scan_times_list))
+        else:
+           scan_times_list  = None       
+           self.logger.debug('SetActiveHandler: no time sync of beams')
 
 
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
 
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
-        self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq)
+        self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_time, integration_time)
 
         addFreqResult = self.parent_RadarHardwareManager.mixingFreqManager.add_new_freq_band(self)
     

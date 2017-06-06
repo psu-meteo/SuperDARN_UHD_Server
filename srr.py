@@ -57,7 +57,9 @@ import time
 import errno
 import signal
 
-sys.path.insert(0, 'tools')
+basePath = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, basePath + '/tools')
+
 import networkTool
 
 
@@ -71,7 +73,7 @@ UHD_EXIT = ord('e')
 USRP_SERVER_PORT = 45000
 USRP_SERVER_QUIT  = '.'
 
-basePath = os.path.dirname(os.path.realpath(__file__))
+
 
 nSecs_restart_pause = 10
 
