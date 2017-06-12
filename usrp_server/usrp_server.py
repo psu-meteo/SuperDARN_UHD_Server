@@ -1531,6 +1531,25 @@ class RadarChannelHandler:
         intsc = recv_dtype(self.conn, np.int32)
         intus = recv_dtype(self.conn, np.int32)
 
+        self.oversample_export_data = dict()
+        self.oversample_export_data['nrang'] = recv_dtype(self.conn, np.int32)
+        self.oversample_export_data['mpinc'] = recv_dtype(self.conn, np.int32)
+        self.oversample_export_data['smsep'] = recv_dtype(self.conn, np.int32)
+        self.oversample_export_data['lagfr'] = recv_dtype(self.conn, np.int32)
+        self.oversample_export_data['mppul'] = recv_dtype(self.conn, np.int32)
+        pat = []
+        for iBaudCode in range(self.oversample_export_data['mppul']):
+           pat.append(recv_dtype(self.conn, np.int32))
+        self.oversample_export_data['ppat'] = pat
+
+        self.oversample_export_data['nbaud'] = recv_dtype(self.conn, np.int32)
+        pcode = []
+        for iBaudCode in range(self.oversample_export_data['nbaud']):
+           pcode.append(recv_dtype(self.conn, np.int32))
+        self.oversample_export_data['pcode'] = pcode
+
+        print(self.oversample_export_data)
+      
         self.logger.debug('RegisterSeqHandler, received intsc: {}, intus: {}'.format(intsc, intus))
         self.integration_period_duration = intsc + (intus / 1e6)
 
@@ -1617,6 +1636,57 @@ class RadarChannelHandler:
             raise ValueError('number of samples in sequence must be nonzero!')
 
         return RMSG_SUCCESS
+    def export_oversamples_rawdata(channel):
+        time_now = datetime.datetime.now()
+        version = 2 
+        nAntennas = 20
+        hardwareManager = channel.parent_RadarHardwareManager
+        
+        
+        savePath = "/data/image_samples"
+        if not os.path.isdir(savePath):
+            os.mkdir(savePath)
+                    
+        fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.second, cnum.rnum, 97+channel.cnum)
+
+        # get chnaging data TODO
+        oversample_export_data['rawData']
+        oversample_export_data['beam']            
+        oversample_export_data['rfreq'] # in kHz  
+
+
+        exportArray = np.zeros(100, dtype=np.int32)
+ 
+   
+        exportArray[0]  = version
+        exportArray[1]  = time_now.year
+        exportArray[2]  = time_now.month
+        exportArray[3]  = time_now.day
+        exportArray[4]  = time_now.hour
+        exportArray[5]  = time_now.minute
+        exportArray[6]  = time_now.second
+        exportArray[7]  = time_now.microsecond *1000
+        exportArray[8]  = oversample_export_data['nrang']
+        exportArray[9]  = oversample_export_data['mpinc']
+        exportArray[10] = oversample_export_data['smsep']
+        exportArray[11] = oversample_export_data['lagfr']
+        exportArray[12] = hardwareManager.commonChannelParameter['pulseLength']  # in micro sec
+        exportArray[13] = oversample_export_data['beam']
+        exportArray[14] = oversample_export_data['rfreq'] # in kHz
+        exportArray[15] = oversample_export_data['mppul']
+#        exportArray[16..16+mppul] = ppat
+#        exportArray[] = oversample_export_data['nbaud']
+#        exportArray[..] = oversample_export_data['pcode']
+#        exportArray[] = RECV_SAMPLE_HEADER
+#        exportArray[] = nSamples
+#        exportArray[] = nAntennas
+#        exportArray[] = #loop 20 antennas, each 4*sample bytes
+
+        rawFile = open(os.path.join(savePath, fileName), "ba")
+        rawFile.write(bytes(11))
+        rawFile.close()
+        # %%
+
     
     # receive a ctrlprm struct
     #@timeit
