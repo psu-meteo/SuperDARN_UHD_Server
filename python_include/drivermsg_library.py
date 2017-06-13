@@ -21,6 +21,7 @@ UHD_EXIT = ord('e')
 
 CUDA_PROCESS = ord('p')
 CUDA_GET_DATA = ord('g')
+CUDA_GET_IF_DATA = ord('o')
 CUDA_EXIT = ord('e')
 CUDA_ADD_CHANNEL = ord('q')
 CUDA_REMOVE_CHANNEL = ord('r')
@@ -197,6 +198,11 @@ class server_ctrlprm(driver_command):
         description_arr = np.uint8(np.zeros(120))
         self.queue(description_arr, np.uint8, name='desc_arr', nitems=120)
 
+class cuda_get_if_data_command(driver_command):
+    def __init__(self, cudas, swing = -1):
+        driver_command.__init__(self, cudas, CUDA_GET_IF_DATA)
+        self.queue(swing, np.uint32, 'swing')
+    
 class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GET_DATA)

@@ -1002,8 +1002,9 @@ class RadarHardwareManager:
                  channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
                  channel.resultDict_list[-1]['results_are_valid'] = False
                  channel.resultDict_list[-1]['nSequences_per_period'] = 0
-
-
+                 channel.oversample_export_data['beam']  = channel.ctrlprm_struct.payload['rbeam'] 
+                 channel.oversample_export_data['rfreq'] = channel.ctrlprm_struct.payload['rfreq']
+ 
                  for item in channel.ctrlprm_struct.dataqueue:
                     if item.name == 'rbeam':
                        channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
@@ -1081,6 +1082,11 @@ class RadarHardwareManager:
                      pickle.dump([main_samples, back_samples,chResExportList],f,  pickle.HIGHEST_PROTOCOL)
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
+
+               for iChannel, channel in enumerate(self.channels):
+                  if channel.processing_state == CS_PROCESSING and  os.path.isfile("/collect.if.{:s}".format(97+iChannel)):
+                     channel.get_if_data()
+                     channel.write_if_data()
            else:
               self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
@@ -1636,12 +1642,49 @@ class RadarChannelHandler:
             raise ValueError('number of samples in sequence must be nonzero!')
 
         return RMSG_SUCCESS
-    def export_oversamples_rawdata(channel):
+    def get_if_data(channel):
+      RHM = channel.parent_RadarHardwareManager
+      # CUDA_GET_IF_DATA
+      channel.logger.debug('start CUDA_IF_GET_DATA')
+      cmd = cuda_get_if_data_command(RHM.cudasocks, RHM.swingManager.processingSwing)
+      cmd.transmit()
+
+      if_samples = None
+
+      for cudasock in self.cudasocks:
+          nAntennas = recv_dtype(cudasock, np.uint32)
+
+          if channel.processing_state == CS_PROCESSING:
+              transmit_dtype(cudasock, channel.cnum, np.int32)
+
+              for iAntenna in range(nAntennas):
+                  antIdx = recv_dtype(cudasock, np.uint16)
+                  nSamples_if = int(recv_dtype(cudasock, np.uint32) / 2)
+                  self.logger.debug("Receiving {} if samples.".format(nSamples_if))
+                  if if_samples is None:
+                     if_samples = np.zeros(( nAntennas, nSamples_if), dtype=np.complex64)
+
+                  samples = recv_dtype(cudasock, np.float32, nSamples_if * 2)
+                  samples = samples[0::2] + 1j * samples[1::2] # TODO change to match export format. i/q int32 ????
+                  
+                  # TODO also mapping from antIdx to antenna????
+                  # iAntenna = self.antenna_idx_list_main.index(antIdx)
+                  if_samples[iChannel][antIdx] = samples[:]
+      
+          transmit_dtype(cudasock, -1, np.int32) # to end transfer process
+                   
+          cmd.client_return()
+          channel.oversample_export_data['data'] = if_samples
+          channel.oversample_export_data['nAntennas'] = nAntennas
+          self.logger.debug('end CUDA_GET_IF_DATA')
+
+
+    def wirte_if_data(channel):
         time_now = datetime.datetime.now()
         version = 2 
         nAntennas = 20
+        RECV_SAMPLE_HEADER = 0 # TODO is this an offset???
         hardwareManager = channel.parent_RadarHardwareManager
-        
         
         savePath = "/data/image_samples"
         if not os.path.isdir(savePath):
@@ -1649,44 +1692,36 @@ class RadarChannelHandler:
                     
         fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.second, cnum.rnum, 97+channel.cnum)
 
-        # get chnaging data TODO
-        oversample_export_data['rawData']
-        oversample_export_data['beam']            
-        oversample_export_data['rfreq'] # in kHz  
-
-
         exportArray = np.zeros(100, dtype=np.int32)
- 
-   
-        exportArray[0]  = version
-        exportArray[1]  = time_now.year
-        exportArray[2]  = time_now.month
-        exportArray[3]  = time_now.day
-        exportArray[4]  = time_now.hour
-        exportArray[5]  = time_now.minute
-        exportArray[6]  = time_now.second
-        exportArray[7]  = time_now.microsecond *1000
-        exportArray[8]  = oversample_export_data['nrang']
-        exportArray[9]  = oversample_export_data['mpinc']
-        exportArray[10] = oversample_export_data['smsep']
-        exportArray[11] = oversample_export_data['lagfr']
-        exportArray[12] = hardwareManager.commonChannelParameter['pulseLength']  # in micro sec
-        exportArray[13] = oversample_export_data['beam']
-        exportArray[14] = oversample_export_data['rfreq'] # in kHz
-        exportArray[15] = oversample_export_data['mppul']
-#        exportArray[16..16+mppul] = ppat
-#        exportArray[] = oversample_export_data['nbaud']
-#        exportArray[..] = oversample_export_data['pcode']
-#        exportArray[] = RECV_SAMPLE_HEADER
-#        exportArray[] = nSamples
-#        exportArray[] = nAntennas
-#        exportArray[] = #loop 20 antennas, each 4*sample bytes
+         
+        exportList = version
+        exportList.append( time_now.year )
+        exportList.append( time_now.month )
+        exportList.append( time_now.day )
+        exportList.append( time_now.hour )
+        exportList.append( time_now.minute )
+        exportList.append( time_now.second )
+        exportList.append( time_now.microsecond *1000 )
+        exportList.append( oversample_export_data['nrang'])
+        exportList.append( oversample_export_data['mpinc'])
+        exportList.append( oversample_export_data['smsep'])
+        exportList.append( oversample_export_data['lagfr'])
+        exportList.append( hardwareManager.commonChannelParameter['pulseLength'])  # in micro sec
+        exportList.append( oversample_export_data['beam'])
+        exportList.append( oversample_export_data['rfreq']) # in kHz
+        exportList.append( oversample_export_data['mppul'])
+        exportList.append( oversample_export_data['ppat'])
+        exportList.append( oversample_export_data['nbaud'])
+        exportList = exportList + oversample_export_data['pcode']
+        exportList.append( RECV_SAMPLE_HEADER)
+        exportList.append( oversample_export_data['nSamples'])
+        exportList.append( nAntennas)
+        for iAntenna in range(nAntennas):
+            exportList = exportList + oversample_export_data['data'][iAntenna]
 
         rawFile = open(os.path.join(savePath, fileName), "ba")
-        rawFile.write(bytes(11))
+        rawFile.write(np.array(exportList, dtype=np.int32))
         rawFile.close()
-        # %%
-
     
     # receive a ctrlprm struct
     #@timeit

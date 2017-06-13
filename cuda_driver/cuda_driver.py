@@ -303,7 +303,7 @@ class cuda_remove_channel_handler(cudamsg_handler):
 
 
 
-# take copy and process data from shared memory, send to usrp_server via socks 
+# take copy and process BB data from shared memory, send to usrp_server via socks 
 class cuda_get_data_handler(cudamsg_handler):
     def process(self):
         self.logger.debug('entering cuda_get_data handler')
@@ -335,6 +335,40 @@ class cuda_get_data_handler(cudamsg_handler):
 
             channel = recv_dtype(self.sock, np.int32) 
 
+#       release_sem(rx_sem_list[SIDEA][swing]) # TODO why is this here so lonely? (mgu)
+
+# take copy and process IF data from shared memory, send to usrp_server via socks 
+class cuda_get_if_data_handler(cudamsg_handler):
+    def process(self):
+        self.logger.debug('entering cuda_get_if_data handler')
+
+        cmd = cuda_get_data_command([self.sock])
+        cmd.receive(self.sock)
+        swing    = cmd.payload['swing']    
+
+        self.logger.debug('pulling data from gpu memory...(swing {})'.format(swing))
+        cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
+        samples = self.rx_if_samples
+        nAntennas, nChannels, nSamples = samples.shape
+        self.logger.debug('finished pulling if data from GPU, format: (antennas, channels, samples): {}'.format(samples.shape))
+
+        self.logger.debug('transmitting nAntennas {}'.format(nAntennas)) 
+        transmit_dtype(self.sock, nAntennas, np.uint32)
+        # transmit requested channels
+        channel = recv_dtype(self.sock, np.int32) 
+        while (channel != -1):
+            channelIndex = self.gpu.channelNumbers[swing].index(channel)
+            self.logger.debug('received channel number ={}(cuda index: {}))'.format(channel, channelIndex))
+
+            for iAntenna in range(nAntennas):
+                transmit_dtype(self.sock, self.antenna_index_list[iAntenna], np.uint16)
+                self.logger.debug('transmitted antenna index {}'.format(iAntenna))
+                transmit_dtype(self.sock, nSamples, np.uint32)
+                self.logger.debug('transmitted number of samples ({})'.format(nSamples))
+                self.logger.debug("rx_if ant {} transmitting mean abs : {} #sampleTrace".format(iAntenna, np.mean(np.abs(samples[iAntenna][channelIndex]) )))
+                self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
+
+            channel = recv_dtype(self.sock, np.int32) 
 #       release_sem(rx_sem_list[SIDEA][swing]) # TODO why is this here so lonely? (mgu)
 
 
@@ -405,6 +439,7 @@ class cuda_pulse_init_handler(cudamsg_handler):
 cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
         CUDA_GET_DATA: cuda_get_data_handler, \
+        CUDA_GET_IF_DATA: cuda_get_if_data_handler, \
         CUDA_PROCESS: cuda_process_handler, \
         CUDA_ADD_CHANNEL: cuda_add_channel_handler, \
         CUDA_REMOVE_CHANNEL: cuda_remove_channel_handler, \
@@ -415,6 +450,7 @@ cudamsg_handlers = {\
 cudamsg_handler_names = {\
         CUDA_SETUP: 'CUDA_SETUP', \
         CUDA_GET_DATA: 'CUDA_GET_DATA', \
+        CUDA_GET_IF_DATA: 'CUDA_GET_IF_DATA', \
         CUDA_PROCESS: 'CUDA_PROCESS', \
         CUDA_ADD_CHANNEL: 'CUDA_ADD_CHANNEL', \
         CUDA_REMOVE_CHANNEL: 'CUDA_REMOVE_CHANNEL', \
