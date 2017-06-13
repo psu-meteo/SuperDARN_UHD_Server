@@ -347,8 +347,8 @@ class cuda_get_if_data_handler(cudamsg_handler):
         swing    = cmd.payload['swing']    
 
         self.logger.debug('pulling data from gpu memory...(swing {})'.format(swing))
-        cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
-        samples = self.rx_if_samples
+        cuda.memcpy_dtoh(self.gpu.rx_if_samples, self.gpu.cu_rx_if_samples) 
+        samples = self.gpu.rx_if_samples
         nAntennas, nChannels, nSamples = samples.shape
         self.logger.debug('finished pulling if data from GPU, format: (antennas, channels, samples): {}'.format(samples.shape))
 
