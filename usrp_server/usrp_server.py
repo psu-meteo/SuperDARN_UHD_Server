@@ -161,7 +161,7 @@ class usrpMixingFreqManager():
              allCh_upper = max(allCh_upper, otherChRange[1])
 
 
-          if (allCh_upper - allCh_lower) > self.usrp_bandwith:
+          if (allCh_upper - allCh_lower) > self.usrp_bandwidth:
              channel.logger.error("new channel can not be added. USPR bandwidth too small")
              result =  False
           else:
@@ -1693,7 +1693,9 @@ class RadarChannelHandler:
         if not os.path.isdir(savePath):
             os.mkdir(savePath)
                     
+
         fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute, channel.rnum, 96+channel.cnum)
+
 
         exportList = []
         exportList.append( version )
@@ -1718,14 +1720,20 @@ class RadarChannelHandler:
         exportList.append( RECV_SAMPLE_HEADER)
         exportList.append(channel.oversample_export_data['nSamples']) 
         exportList.append(channel.oversample_export_data['nAntennas'])
-        print(exportList)
-        for iAntenna in range(channel.oversample_export_data['nAntennas']):
-            exportList += channel.oversample_export_data['data'][iAntenna].tolist()
 
         rawFile = open(os.path.join(savePath, fileName), "ba")
         rawFile.write(np.array(exportList, dtype=np.int32))
+
+        print(exportList)
+
+        for iAntenna in range(channel.oversample_export_data['nAntennas']):
+            channel.oversample_export_data['data'][iAntenna].tofile(rawFile)
+
         rawFile.close()
-        channel.logger.debug('end saving IF samples')
+        time_end = datetime.datetime.now()
+
+        channel.logger.debug('end saving IF samples (it took {} seconds)'.format(str(time_end - time_now)))
+
     
     # receive a ctrlprm struct
     #@timeit
@@ -2095,7 +2103,7 @@ class RadarChannelHandler:
             self.swingManager.reset()
             self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
             return RMSG_SUCCESS
-        elif addFreqResuult == False:
+        elif addFreqResult == False:
             self.logger.error("Freq range of new channel (cnum {}) is not in USRP bandwidth. (freq_range_list[0][0] = {} ".format(self.cnum, freq_range_list[0][0]))
             self.scanManager.clear_freq_range_list = None 
             self.scan_beam_list = None
