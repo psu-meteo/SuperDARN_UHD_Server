@@ -472,7 +472,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     std::vector<uint64_t> channel_numbers = {0, 1};
-    stream_args.channels = channel_numbers;
+//    stream_args.channels = channel_numbers;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
