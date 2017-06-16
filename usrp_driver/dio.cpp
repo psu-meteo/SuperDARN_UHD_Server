@@ -136,10 +136,10 @@
 
 void init_timing_signals(
     uhd::usrp::multi_usrp::sptr usrp,
-    bool mimic_active
+    bool mimic_active,
+    int nSides
 ) {
-    int nSides = 2;
-    std::vector<std::string> side_name_list = {"TXA", "TXB"};
+    char bank_name[4];
     int iSide;
 
     double debugt = usrp->get_time_now().get_real_secs();
@@ -147,16 +147,19 @@ void init_timing_signals(
 
     // setup gpio to manual control and direction (output)
     for (iSide=0; iSide<nSides; iSide++) {
-       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, SYNC_PINS);
-       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, TR_PINS);
-       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
+       sprintf(bank_name, "TX%c",65 + iSide);
+       fprintf( stderr, "Bank name: %s\n",bank_name ); 
+       
+       usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, SYNC_PINS);
+       usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, TR_PINS);
+       usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
        // TODO: set in one step
        //  usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + noFAULT)); // + or | should be the same here
-    }
 
-    usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS, SYNC_PINS);
-    usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,   TR_PINS);
-    usrp->set_gpio_attr("TXA","DDR" ,      0,   NOT_FAULT_PIN); // NOT_FAULT as input
+       usrp->set_gpio_attr(bank_name,"DDR" ,SYNC_PINS, SYNC_PINS);
+       usrp->set_gpio_attr(bank_name,"DDR" ,TR_PINS,   TR_PINS);
+       usrp->set_gpio_attr(bank_name,"DDR" ,      0,   NOT_FAULT_PIN); // NOT_FAULT as input
+    }
 
    if (mimic_active) {
        usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL,MIMIC_PINS);
@@ -171,9 +174,12 @@ void init_timing_signals(
 }
 
 bool read_FAULT_status_from_control_board(
-    uhd::usrp::multi_usrp::sptr usrp
+    uhd::usrp::multi_usrp::sptr usrp,
+    int iSide
 ) {
-    uint32_t input = usrp->get_gpio_attr("TXA", "READBACK");
+    char bank_name[4];
+    sprintf(bank_name, "TX%c",65 + iSide);
+    uint32_t input = usrp->get_gpio_attr(bank_name, "READBACK");
     DEBUG_PRINT("Readback from control board: %d\n", input);
     bool notFAULT = (input & NOT_FAULT_PIN) != 0;
     DEBUG_PRINT("Returning FAULT = %d\n", !notFAULT);
@@ -201,35 +207,43 @@ public:
 
 
 
-
+// CREATE QUEUE WITH ALL SIGNAL CHANGES
 void send_timing_for_sequence(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::time_spec_t start_time,
     std::vector<uhd::time_spec_t> pulse_times,
     double pulseLength,
     bool mimic_active,
-    float mimic_delay
+    float mimic_delay,
+    int nSides
 ) {
 
+    char bank_name[4];
+    int iSide;
+
+
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
-
     std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
-
-
-    // CREATE QUEUE WITH ALL SIGNAL CHANGES
     
     // set SYNC to high
-    c.port     = "TXA";
     c.gpiocmd  = "OUT";
     c.mask     = SYNC_PINS;
     c.value    = SYNC_PINS;
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_START);
-    cmdq.push(c);
+    for (iSide=0; iSide<nSides; iSide++) {
+       sprintf(bank_name, "TX%c",65 + iSide);
+       c.port     = bank_name;
+       cmdq.push(c);
+    }
 
     // lower SYNC pin
     c.value = 0;
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END);
-    cmdq.push(c);
+    for (iSide=0; iSide<nSides; iSide++) {
+       sprintf(bank_name, "TX%c",65 + iSide);
+       c.port     = bank_name;
+       cmdq.push(c);
+    }
     
     //debug
     fprintf( stderr, "DIO setting start of SYNC to %2.11f\n", offset_time_spec(start_time, SYNC_OFFSET_START).get_real_secs() ); 
@@ -260,16 +274,26 @@ void send_timing_for_sequence(
         c.mask     = TR_PINS;
         c.value    = TR_TX;   
         c.cmd_time = pulse_times[iPulse];
-        cmdq.push(c);
+        for (iSide=0; iSide<nSides; iSide++) {
+           sprintf(bank_name, "TX%c",65 + iSide);
+           c.port     = bank_name;
+           cmdq.push(c);
+        }
+    
 
         // set RX high and TX low
         c.value    = TR_RX;
         c.cmd_time = offset_time_spec(pulse_times[iPulse], pulseLength);
-        cmdq.push(c);
+        for (iSide=0; iSide<nSides; iSide++) {
+           sprintf(bank_name, "TX%c",65 + iSide);
+           c.port     = bank_name;
+           cmdq.push(c);
+        }
 
         if (mimic_active) {
            // DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
-            // set mimic TX high, mimic RX low    
+            // set mimic TX high, mimic RX low   
+            c.port     = "TXA";
             c.mask     = MIMIC_PINS;
             c.value    = MIMIC_TX;   
             c.cmd_time = offset_time_spec(pulse_times[iPulse], mimic_delay);
@@ -351,7 +375,8 @@ total of 80 GPIO pins
 
 void kodiak_set_rxfe(
     uhd::usrp::multi_usrp::sptr usrp,
-    struct RXFESettings rf_settings
+    struct RXFESettings rf_settings,
+    int nSides
 ) {
     // load up rxfe_dio with rf_setting struct
     uint16_t rxfe_dio = 0; 
@@ -371,21 +396,30 @@ void kodiak_set_rxfe(
     DEBUG_PRINT("DIO.cpp: sending rxfe_dio:  %d\n", rxfe_dio);
 
     usrp->set_gpio_attr("RXA", "OUT", rxfe_dio, RXFE_MASK);
+    if (nSides ==2) {
+        usrp->set_gpio_attr("RXB", "OUT", rxfe_dio, RXFE_MASK);
+    }
+
 }
 
 
-void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp)
+void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp, int nSides)
 {
-    // hardcode RXFE settings...
-    usrp->set_gpio_attr("RXA", "CTRL", MANUAL_CONTROL, RXFE_MASK); // set GPIO to manual control
-    usrp->set_gpio_attr("RXA", "DDR", RXFE_MASK, RXFE_MASK); // set everybody as outputs
+    char bank_name[4];
 
-    // start up with rxfe disabled, rx mode
-    usrp->set_gpio_attr("RXA", "OUT", 0xFF, RXFE_AMP_MASK);
-    usrp->set_gpio_attr("RXA", "OUT", 0xFF, RXFE_ATT_MASK);
+    for (int iSide=0; iSide<nSides; iSide++) {
 
-    // set to 1/2 full attenuation, both amps online 
-    usrp->set_gpio_attr("RXA", "OUT", (255 - (AMP_1 + AMP_2 + ATT_D5)), RXFE_MASK);
+         sprintf(bank_name, "RX%c",65 + iSide);
+         // hardcode RXFE settings...
+         usrp->set_gpio_attr(bank_name, "CTRL", MANUAL_CONTROL, RXFE_MASK); // set GPIO to manual control
+         usrp->set_gpio_attr(bank_name, "DDR", RXFE_MASK, RXFE_MASK); // set everybody as outputs
 
+         // start up with rxfe disabled, rx mode
+         usrp->set_gpio_attr(bank_name, "OUT", 0xFF, RXFE_AMP_MASK);
+         usrp->set_gpio_attr(bank_name, "OUT", 0xFF, RXFE_ATT_MASK);
+
+         // set to 1/2 full attenuation, both amps online 
+         usrp->set_gpio_attr(bank_name, "OUT", (255 - (AMP_1 + AMP_2 + ATT_D5)), RXFE_MASK);
+    }
 }
 

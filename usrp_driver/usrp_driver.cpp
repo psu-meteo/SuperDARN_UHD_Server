@@ -364,6 +364,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     bool mimic_active;
     float mimic_delay;
 
+    int nSides = 2;  // TODO get from parameter file
+    int iSide;
+
     int32_t verbose = 1; 
     int32_t rx_worker_status = 0; // TODO: change to swing vector is we need this
 
@@ -481,9 +484,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
     // initialize rxfe gpio
-    kodiak_init_rxfe(usrp);
+    kodiak_init_rxfe(usrp, nSides);
     // initialize other gpio on usrp
-    init_timing_signals(usrp, mimic_active);
+    init_timing_signals(usrp, mimic_active, nSides);
     
     //if(CAPTURE_ERRORS) {
     //    signal(SIGINT, siginthandler);
@@ -651,7 +654,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     rf_settings.att_8_dB  = ( attTimes2 & 0x10 ) != 0;
                     rf_settings.att_16_dB = ( attTimes2 & 0x20 ) != 0;
                    
-                    kodiak_set_rxfe(usrp, rf_settings);
+                    kodiak_set_rxfe(usrp, rf_settings, nSides);
                     sock_send_uint8(driverconn, RXFE_SET);
                     break;
                     }
@@ -728,7 +731,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
-                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay)); 
+                        uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
 
 
                         DEBUG_PRINT("TRIGGER_PULSE recv and tx worker threads on swing %d\n", swing);
@@ -769,8 +772,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_int32(driverconn, ant);   // send antenna
                     sock_send_int32(driverconn, nSamples_rx);     // nsamples;  send send number of samples
                    
-                    // read FAULT status    
-                    bool fault = read_FAULT_status_from_control_board(usrp);
+                    // read FAULT status   
+                    bool fault;
+                    for (iSide =0; iSide<nSides; iSide++){  
+                        fault = read_FAULT_status_from_control_board(usrp, iSide);
+                    }
+                    // TODO move this in loop as soon as usrp_server receives both sides
                     sock_send_bool(driverconn, fault);     // FAULT status from conrol board
                 
 
