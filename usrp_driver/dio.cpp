@@ -1,11 +1,38 @@
 // Function uses GPIO of USRP to generate timing signals and control RXFE
-//  Timing signals:
-//   io_tx[1]   SYNC
-//   io_tx[3]   TR_TX
-//   io_tx[4]   TR_RX
-//   io_tx[11]  MIMIC_TX
-//   io_tx[12]  MIMIC_RX
-//
+//  Outputs are:
+//     
+//  To control board
+//     io_tx[00] 
+//     io_tx[01] NOT_FAULT
+//     io_tx[02]
+//     io_tx[03]   TR_TX
+//     io_tx[04]   TR_RX
+//     io_tx[05]
+//     io_tx[06]
+//     Io_tx[07]
+//      
+//  Not connected
+//     io_tx[08]   SYNC
+//     io_tx[09]
+//     io_tx[10]
+//     io_tx[11]  MIMIC_TX
+//     io_tx[12]  MIMIC_RX
+//     io_tx[13]
+//     io_tx[14]
+//     io_tx[15]
+//      
+//  To RXFE
+//     io_rx[00] ATT_D5    // -16  dB
+//     io_rx[01] ATT_D4    // - 8  dB
+//     io_rx[02] ATT_D3    // - 4  dB
+//     io_rx[03] ATT_D2    // - 2  dB
+//     io_rx[04] ATT_D1    // - 1  dB
+//     io_rx[05] ATT_D0    // -0.5 dB
+//     io_rx[06] AMP_2     // + 15 dB
+//     io_rx[07] AMP_1     // + 15 dB
+//     
+//     
+//     
 // Functions to handle timing card/dio card on USRP
 // broken out and expanded from Alex's recv_and_hold.cpp timing card code
 // added rxfe dio and command issue time sorting
@@ -111,16 +138,21 @@ void init_timing_signals(
     uhd::usrp::multi_usrp::sptr usrp,
     bool mimic_active
 ) {
+    int nSides = 2;
+    std::vector<std::string> side_name_list = {"TXA", "TXB"};
+    int iSide;
 
     double debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("DIO queing GPIO commands at usrp_time %2.4f\n", debugt);
 
     // setup gpio to manual control and direction (output)
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, SYNC_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, TR_PINS);
-    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
-    // TODO: set in one step
-//    usrp->set_gpio_attr("TXA","CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + noFAULT));
+    for (iSide=0; iSide<nSides; iSide++) {
+       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, SYNC_PINS);
+       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, TR_PINS);
+       usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
+       // TODO: set in one step
+       //  usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + noFAULT)); // + or | should be the same here
+    }
 
     usrp->set_gpio_attr("TXA","DDR" ,SYNC_PINS, SYNC_PINS);
     usrp->set_gpio_attr("TXA","DDR" ,TR_PINS,   TR_PINS);
@@ -146,11 +178,8 @@ bool read_FAULT_status_from_control_board(
     bool notFAULT = (input & NOT_FAULT_PIN) != 0;
     DEBUG_PRINT("Returning FAULT = %d\n", !notFAULT);
     return !notFAULT;
-
-
-
-
 }
+
 
 
 struct GPIOCommand {
@@ -344,6 +373,7 @@ void kodiak_set_rxfe(
     usrp->set_gpio_attr("RXA", "OUT", rxfe_dio, RXFE_MASK);
 }
 
+
 void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp)
 {
     // hardcode RXFE settings...
@@ -356,7 +386,6 @@ void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp)
 
     // set to 1/2 full attenuation, both amps online 
     usrp->set_gpio_attr("RXA", "OUT", (255 - (AMP_1 + AMP_2 + ATT_D5)), RXFE_MASK);
-
 
 }
 

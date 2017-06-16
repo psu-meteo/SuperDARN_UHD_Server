@@ -471,11 +471,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
+    std::vector<uint64_t> channel_numbers = {0, 1};
+    stream_args.channels = channel_numbers;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
-    // TODO: this should be sized for a maximum reasonable sample request 
-    //
+
+    // TODO: this should be sized for a maximum reasonable sample request  
     std::vector<std::complex<int16_t>> rx_data_buffer;
 
     // initialize rxfe gpio
