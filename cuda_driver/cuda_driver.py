@@ -40,7 +40,7 @@ SWING0 = 0
 SWING1 = 1
 allSwings = [SWING0, SWING1]
 nSwings = len(allSwings)
-
+nSides = 2
 
 SIDEA = 0
 SIDEB = 1
@@ -50,19 +50,18 @@ TXDIR = 'tx'
 
 DEBUG = True
 verbose = 1
+
 C = 3e8
+nAntennas_per_polarization = 20 # used to reset (modulo) the tx phasing input antenna number 
+
 
 RF_IF_GAIN = 6
 IF_BB_GAIN = 6 
 
-rx_shm_list = [[ [] for iSwing in allSwings] for iSide in range(2)]
+rx_shm_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)]
 tx_shm_list = [ [] for iSwing in allSwings]  # so far same tx data for both sides
-rx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(2)]
-tx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(2)] # side is hard coded to SIDEA 
-
-
-swings = [SWING0, SWING1]
-sides = [SIDEA]
+rx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)]
+tx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)] # side is hard coded to SIDEA 
 
 # list of all semaphores/shared memory paths for cleaning up
 shm_list = []
@@ -196,7 +195,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         pshift = calc_phase_increment(bmazm, tx_center_freq, x_spacing)
 
         # calculate a complex number representing the phase shift for each antenna
-        beamforming_shift = [rad_to_rect(a * pshift) for a in self.antenna_index_list]
+        beamforming_shift = [rad_to_rect((antenna_idx % nAntennas_per_polarization)  * pshift) for antenna_idx in self.antenna_index_list]   # modulo 20 for 2nd polarization
         
         # construct baseband tx sample array
         bb_signal = np.complex128(np.zeros((nAntennas, nPulses, len(pulsesamps))))

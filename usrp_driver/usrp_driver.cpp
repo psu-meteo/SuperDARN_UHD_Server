@@ -42,24 +42,25 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-
+#define SAVE_RAW_SAMPLES_DEBUG 0 
+#define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
+
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); } while( false )
 #else
 #define DEBUG_PRINT(...) do{ } while ( false )
 #endif
 
-#define SETUP_WAIT 1
-#define SWING0 0
-#define SWING1 1
-#define SIDEA 0
-#define SIDEB 1
-#define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
-#define nSwings 2 // swings are slots in the swing buffer
-#define VERBOSE 1
+#define SETUP_WAIT 1 // in seconds
+// DEL
+//#define SWING0 0
+//#define SWING1 1
+//#define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
+//#define VERBOSE 1
 
-#define SAVE_RAW_SAMPLES_DEBUG 0 
+#define nSwings 2 // swings are slots in the swing buffer
+
 
 #define MAX_SOCKET_RETRYS 5
 #define TRIGGER_BUSY 'b'
@@ -79,7 +80,6 @@
 
 #define TXDIR 1
 #define RXDIR 0
-#define SUPRESS_UHD_PRINTS 0
 #define INIT_SHM 1
 
 #define CAPTURE_ERRORS 0
@@ -365,18 +365,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     float mimic_delay;
 
     int nSides = 2;  // TODO get from parameter file
-    int iSide;
+    int iSide, iSwing; // often used loop variables
 
     int32_t verbose = 1; 
     int32_t rx_worker_status = 0; // TODO: change to swing vector is we need this
 
     // clean up to fix it later..
-    std::vector<void *> shm_rx_vec(nSwings);
-    std::vector<void *> shm_tx_vec(nSwings);
+    std::vector<std::vector<void *>> shm_rx_vec(nSides, std::vector<void *>( nSwings));
+    std::vector<std::vector<void *>> shm_tx_vec(nSides, std::vector<void *>( nSwings));
+//    std::vector<void *> shm_rx_vec(nSwings);
+//    std::vector<void *> shm_tx_vec(nSwings);
     std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
-    uint32_t swing = SWING0;
+    uint32_t swing; // = SWING0;
     
     size_t nSamples_rx, nSamples_tx_pulse;
 
@@ -493,11 +495,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     //}
     
     // open shared memory buffers and semaphores created by cuda_driver.py
-    for(int iSwing = 0; iSwing < nSwings; iSwing++) {
-        shm_rx_vec[iSwing] = open_sample_shm(ant, RXDIR, SIDEA, iSwing, rxshm_size);
-        sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing, RXDIR);
-        shm_tx_vec[iSwing] = open_sample_shm(ant, TXDIR, SIDEA, iSwing, txshm_size);
-        sem_tx_vec[iSwing] = open_sample_semaphore(ant, iSwing, TXDIR);
+    // for dual polarization we use antenna numbers 20 to 35 (side is always 0)
+    for(iSwing = 0; iSwing < nSwings; iSwing++) {
+        for(iSide = 0; iSide < nSides; iSide++) {
+            shm_side = 0;
+            shm_rx_vec[iSide][iSwing] = open_sample_shm(ant, RXDIR, shm_side, iSwing, rxshm_size);
+            sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing, RXDIR);
+            shm_tx_vec[iSide][iSwing] = open_sample_shm(ant, TXDIR, shm_side, iSwing, txshm_size);
+            sem_tx_vec[iSwing] = open_sample_semaphore(ant, iSwing, TXDIR);
+        }
     }
 
 
@@ -599,9 +605,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(rx_data_buffer.size() != nSamples_rx) {
                         rx_data_buffer.resize(nSamples_rx);
                     }
-                   
-                    DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[swing]);
-
+                    for (iSide=0; iSide<nSides;iSide++) {
+                        DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
+                    }
                     
                     // if necessary, retune USRP frequency and sampling rate
                     if(rxrate != rxrate_new) {
@@ -680,12 +686,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         // create local copy of transmit pulse data from shared memory
                         size_t spb = tx_stream->get_max_num_samps();
-                        tx_samples.resize(nSamples_tx_pulse+2*spb);
-
-                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[swing])[0];
-
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * nSamples_tx_pulse;
 
+
+                        // TODO side loop
+                        tx_samples.resize(nSamples_tx_pulse+2*spb);
+                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[swing])[0];
                         memcpy(&tx_samples[spb], shm_pulseaddr, pulse_bytes);
 
                         if(SAVE_RAW_SAMPLES_DEBUG) {
@@ -784,7 +790,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
-                    memcpy(shm_rx_vec[swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * nSamples_rx);
+                    iSide = 0;
+                    memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * nSamples_rx);
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
@@ -964,11 +971,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("entering EXIT command\n");
                     close(driverconn);
 
-                    for(int iSwing = 0; iSwing < nSwings; iSwing++) {
-                        munmap(shm_rx_vec[iSwing], rxshm_size);
-                        munmap(shm_tx_vec[iSwing], txshm_size);
-                        sem_close(&sem_rx_vec[iSwing]);
-                        sem_close(&sem_tx_vec[iSwing]);
+                    for(iSide = 0; iSide < nSides; iSide++) {
+                        for(iSwing = 0; iSwing < nSwings; iSwing++) {
+                            munmap(shm_rx_vec[iSide][iSwing], rxshm_size);
+                            munmap(shm_tx_vec[iSwing], txshm_size);
+                            sem_close(&sem_rx_vec[iSwing]);
+                            sem_close(&sem_tx_vec[iSwing]);
+                        }
                     }
 
                     // TODO: close usrp streams?
