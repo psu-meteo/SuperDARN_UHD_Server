@@ -468,7 +468,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::string usrpargs(as_host->sval[0]);
     usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
     
-    uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
+    uhd::usrp::multi_usrp::sptr usrp;
+    for(uint32_t i = 0; i < MAX_SOCKET_RETRYS; i++) {
+        try {
+            usrp = uhd::usrp::multi_usrp::make(usrpargs);
+            break;
+        }
+        catch(...) {
+            printf("connecting to USRP failed on attemp %d, retrying after delay...\n", i);
+            boost::this_thread::sleep(boost::posix_time::seconds(5));
+        }
+
+    }
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
