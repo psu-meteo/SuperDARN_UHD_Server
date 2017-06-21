@@ -630,6 +630,10 @@ class RadarHardwareManager:
     def _resync_usrps(self):
         usrps_synced = False
         iResync = 1
+        
+        if not len(self.usrpManager.socks):
+            self.logger.error('no USRPs drivers are connected to usrp_server! exiting..')
+            sys.exit(0)
 
         while not usrps_synced:
             cmd = usrp_sync_time_command(self.usrpManager.socks)
