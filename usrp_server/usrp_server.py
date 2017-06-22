@@ -46,6 +46,7 @@ CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 nSwings = 2 
+nAntennas_per_polarization = 20 # TODO read from config file # antenna number above that are on side B of a USRP
 
 debug = True 
 
@@ -66,24 +67,26 @@ class usrpSockManager():
       self.RHM = RHM
       self.logger = logging.getLogger("usrpSockManager")      
       
-      addressList = []
-      for usrp in RHM.ini_usrp_configs:
-          addressList.append((usrp['driver_hostname'], int(usrp['array_idx']) + usrp_driver_base_port))
-      
-      self.nUSRPs = len(addressList) # TODO should this be all USRPs or only active?
+      self.nUSRPs = len(RHM.ini_usrp_configs) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
       
-      # open each 
-      for usrp in addressList:
-         try: 
-            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            usrpsock.connect(usrp)
-            self.socks.append(usrpsock)
-            self.addressList_active.append(usrp)
-            self.logger.debug('connected to usrp driver on port {}'.format(usrp[1]))
+      # open each
+      connected_usrp_list = [] 
+      for usrpConfig in RHM.ini_usrp_configs:
+         try:
+            if usrpConfig['usrp_hostname'] in connected_usrp_list:
+               self.logger.debug("Already connected to USRP {}".format(usrpConfig['usrp_hostname']))
+            else:
+               usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+               connectPar = (usrpConfig['driver_hostname'], int(usrpConfig['array_idx']) + usrp_driver_base_port)
+               usrpsock.connect(connectPar)
+               self.socks.append(usrpsock)
+               self.addressList_active.append(connectPar)
+               self.logger.debug('connected to usrp driver on port {}'.format(usrpConfig['array_idx']))
+               connected_usrp_list.append(usrpConfig['usrp_hostname'])
          except ConnectionRefusedError:
-            self.logger.error('USRP server connection failed on port {}'.format(usrp[1]))
-            self.addressList_inactive.append(usrp)
+            self.logger.error('USRP server connection failed on port {}'.format(usrpConfig['array_idx']))
+            self.addressList_inactive.append((usrpConfig['driver_hostname'], int(usrpConfig['array_idx']) + usrp_driver_base_port))
 
 
    def eval_client_return(self, cmd, fcn=None):
@@ -1669,9 +1672,9 @@ class RadarChannelHandler:
                   samples = recv_dtype(cudasock, np.float32, nSamples_if )
 #                  samples = samples[0::2] + 1j * samples[1::2] # TODO change to match export format. i/q int32 ????
                   
-                  # TODO also mapping from antIdx to antenna????
-                  # iAntenna = channel.antenna_idx_list_main.index(antIdx)
-                  if_samples[antIdx] = samples[:]
+                  # TODO add back array
+                  iAntenna = RHM.antenna_idx_list_main.index(antIdx)
+                  if_samples[iAntenna] = samples[:]
       
           transmit_dtype(cudasock, -1, np.int32) # to end transfer process
                    

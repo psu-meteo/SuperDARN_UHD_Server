@@ -365,6 +365,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     float mimic_delay;
 
     int nSides = 2;  // TODO get from parameter file
+    int nAntennas_per_polarization = 20;
     int iSide, iSwing; // often used loop variables
 
     int32_t verbose = 1; 
@@ -477,13 +478,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     std::vector<uint64_t> channel_numbers = {0, 1};
-//    stream_args.channels = channel_numbers;
+    if (nSides ==2) {
+        stream_args.channels = channel_numbers;
+    }
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
 
     // TODO: this should be sized for a maximum reasonable sample request  
-    std::vector<std::complex<int16_t>> rx_data_buffer;
+//    std::vector<std::complex<int16_t>> rx_data_buffer;
+    std::vector <std::vector<std::complex<int16_t>>> rx_data_buffer(nSides, std::vector<std::complex<int16_t>>(0));
 
     // initialize rxfe gpio
     kodiak_init_rxfe(usrp, nSides);
@@ -498,10 +502,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // for dual polarization we use antenna numbers 20 to 35 (side is always 0)
     for(iSwing = 0; iSwing < nSwings; iSwing++) {
         for(iSide = 0; iSide < nSides; iSide++) {
-            shm_side = 0;
-            shm_rx_vec[iSide][iSwing] = open_sample_shm(ant, RXDIR, shm_side, iSwing, rxshm_size);
+            int shm_side = 0;
+            shm_rx_vec[iSide][iSwing] = open_sample_shm(ant+iSide*nAntennas_per_polarization, RXDIR, shm_side, iSwing, rxshm_size);
             sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing, RXDIR);
-            shm_tx_vec[iSide][iSwing] = open_sample_shm(ant, TXDIR, shm_side, iSwing, txshm_size);
+            shm_tx_vec[iSide][iSwing] = open_sample_shm(ant+iSide*nAntennas_per_polarization, TXDIR, shm_side, iSwing, txshm_size);
             sem_tx_vec[iSwing] = open_sample_semaphore(ant, iSwing, TXDIR);
         }
     }
@@ -602,8 +606,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     }
 
-                    if(rx_data_buffer.size() != nSamples_rx) {
-                        rx_data_buffer.resize(nSamples_rx);
+                    if(rx_data_buffer[0].size() != nSamples_rx) {
+                       for(iSide = 0; iSide < nSides; iSide++) {
+                           rx_data_buffer[iSide].resize(nSamples_rx);
+                       }
                     }
                     for (iSide=0; iSide<nSides;iSide++) {
                         DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
@@ -690,18 +696,20 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
 
                         // TODO side loop
+                        iSide = 0;
                         tx_samples.resize(nSamples_tx_pulse+2*spb);
-                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[swing])[0];
+                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[0];
                         memcpy(&tx_samples[spb], shm_pulseaddr, pulse_bytes);
 
                         if(SAVE_RAW_SAMPLES_DEBUG) {
                             FILE *raw_dump_fp;
                             char raw_dump_name[80];
-
-                            sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", ant);
-                            raw_dump_fp = fopen(raw_dump_name, "wb");
-                            fwrite(&tx_samples[0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
-                            fclose(raw_dump_fp);
+                            for (iSide =0; iSide < nSides; iSide++){
+                                sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d_side%d.cint16", ant, iSide);
+                                raw_dump_fp = fopen(raw_dump_name, "wb");
+                                fwrite(&tx_samples[0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
+                                fclose(raw_dump_fp);
+                            }
                         }
 
                         // read in time for start of pulse sequence over socket
@@ -790,8 +798,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
-                    iSide = 0;
-                    memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[0], sizeof(std::complex<int16_t>) * nSamples_rx);
+                    for (iSide = 0; iSide<nSides; iSide++) {
+                         memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[iSide][0], sizeof(std::complex<int16_t>) * nSamples_rx);
+                    }
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
@@ -974,7 +983,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     for(iSide = 0; iSide < nSides; iSide++) {
                         for(iSwing = 0; iSwing < nSwings; iSwing++) {
                             munmap(shm_rx_vec[iSide][iSwing], rxshm_size);
-                            munmap(shm_tx_vec[iSwing], txshm_size);
+                            munmap(shm_tx_vec[iSide][iSwing], txshm_size);
                             sem_close(&sem_rx_vec[iSwing]);
                             sem_close(&sem_tx_vec[iSwing]);
                         }

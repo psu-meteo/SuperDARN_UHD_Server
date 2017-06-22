@@ -411,13 +411,20 @@ def start_usrps_from_config(usrp_sleep = False):
        myPrint("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
+    started_host_list = []
     for usrpName in usrpNameList:
-      # TODO: remove intclk when octoclock is connected
-      # TODO: or do this with threading module?
+
+       if usrp_config[usrpName]['usrp_hostname'] in started_host_list:
+          myPrint("USRP host {} already started. Not starting if for 2nd polarization.".format(usrp_config[usrpName]['usrp_hostname']))
+          continue
+       
+
+
        myPrint("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
        #with internal clock
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
+       started_host_list.append(usrp_config[usrpName]['usrp_hostname'])
        if usrp_sleep:
           time.sleep(8)
     os.chdir(basePath)

@@ -1040,10 +1040,11 @@ def main():
     # create shared memory buffers and semaphores for rx and tx
     for ant in antennas:
         for iSwing in allSwings:
-            rx_shm_list[SIDEA][iSwing].append( create_shm(ant, iSwing, SIDEA, rxshm_size,  RXDIR))
-            tx_shm_list[iSwing].append(        create_shm(ant, iSwing, SIDEA, txshm_size,  TXDIR))
-            rx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, RXDIR))
-            tx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, TXDIR)) 
+            for iSide in range(nSides):
+                rx_shm_list[SIDEA][iSwing].append( create_shm(ant+iSide*nAntennas_per_polarization, iSwing, SIDEA, rxshm_size,  RXDIR))
+                tx_shm_list[iSwing].append(        create_shm(ant+iSide*nAntennas_per_polarization, iSwing, SIDEA, txshm_size,  TXDIR))
+                rx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, RXDIR))
+                tx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, TXDIR)) 
 
 
 

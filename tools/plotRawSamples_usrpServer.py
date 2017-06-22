@@ -73,7 +73,7 @@ def read_and_plot():
     
     
        for iAnt in range(nAntennas):
-          plt.subplot(821+iAnt)
+          plt.subplot(nAntennas, 2, 1+iAnt)
           if iChannel == 0: 
              plt.cla()
           plt.plot([i /xAxis_scaling for i in range(len(channelPlotData[iAnt]))], np.abs(channelPlotData[iAnt]))

@@ -37,7 +37,7 @@
 void usrp_rx_worker(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,
-    std::vector<std::complex<int16_t>> *rx_data_buffer,
+    std::vector<std::vector<std::complex<int16_t>>> *rx_data_buffer,
     size_t num_requested_samps,
     uhd::time_spec_t start_time,
     int32_t *return_status
@@ -45,6 +45,8 @@ void usrp_rx_worker(
 
     DEBUG_PRINT("entering RX_WORKER\n");
     fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
+    int nSides = (*rx_data_buffer).size();
+    fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
 
 
     //setup streaming
@@ -64,11 +66,20 @@ void usrp_rx_worker(
     
     size_t num_acc_samps = 0;
     const size_t num_max_request_samps = rx_stream->get_max_num_samps();
+    std::vector<std::complex<int16_t>*> buff_ptrs(nSides);
 
     DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
         size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
-        size_t num_rx_samps = rx_stream->recv(&((*rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
+//        size_t num_rx_samps = rx_stream->recv(&((*rx_data_buffer)[num_acc_samps]), samp_request, md, timeout);
+        for (int iSide = 0; iSide < nSides; iSide++) {
+//            buff_ptrs.push_back(&buffs[i].front());
+//            buff_ptrs.push_back(rx_data_buffer[iSide][num_acc_samps]);
+            buff_ptrs[iSide] = &(*rx_data_buffer)[iSide][num_acc_samps];
+        }
+
+//        size_t num_rx_samps = rx_stream->recv( &( (*rx_data_buffer)[num_acc_samps] ), samp_request, md, timeout);
+        size_t num_rx_samps = rx_stream->recv(buff_ptrs , samp_request, md, timeout);
         
         timeout = 0.1;
 
