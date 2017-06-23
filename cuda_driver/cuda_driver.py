@@ -40,10 +40,8 @@ SWING0 = 0
 SWING1 = 1
 allSwings = [SWING0, SWING1]
 nSwings = len(allSwings)
-nSides = 2
 
-SIDEA = 0
-SIDEB = 1
+SIDEA = 0 # just for compatibility of shm names
 
 RXDIR = 'rx'
 TXDIR = 'tx'
@@ -58,10 +56,10 @@ nAntennas_per_polarization = 20 # used to reset (modulo) the tx phasing input an
 RF_IF_GAIN = 6
 IF_BB_GAIN = 6 
 
-rx_shm_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)]
-tx_shm_list = [ [] for iSwing in allSwings]  # so far same tx data for both sides
-rx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)]
-tx_sem_list = [[ [] for iSwing in allSwings] for iSide in range(nSides)] # side is hard coded to SIDEA 
+rx_shm_list = [ [] for iSwing in allSwings] 
+tx_shm_list = [ [] for iSwing in allSwings]
+rx_sem_list = [ [] for iSwing in allSwings]
+tx_sem_list = [ [] for iSwing in allSwings]
 
 # list of all semaphores/shared memory paths for cleaning up
 shm_list = []
@@ -125,7 +123,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         
         # copy rf waveform to shared memory from GPU memory 
-        acquire_sem( tx_sem_list[SIDEA][swing])
+        acquire_sem( tx_sem_list[swing])
         self.gpu.txsamples_host_to_shm(swing)
 
         if os.path.isfile('./cuda.dump.tx'):
@@ -137,7 +135,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         self.logger.debug('finishing generate_pulse, releasing semaphores') 
 
-        release_sem(tx_sem_list[SIDEA][swing])
+        release_sem(tx_sem_list[swing])
 
         self.logger.debug('semaphores released') 
 
@@ -245,7 +243,7 @@ class cuda_add_channel_handler(cudamsg_handler):
 
 
         self.logger.debug('entering cuda_add_channel_handler, waiting for swing semaphores')
-        acquire_sem(rx_sem_list[SIDEA][swing])
+        acquire_sem(rx_sem_list[swing])
 
         # determine (internal cuda) channel index
         channelNumber = sequence.ctrlprm['channel']
@@ -277,7 +275,7 @@ class cuda_add_channel_handler(cudamsg_handler):
 #        self.gpu._set_rx_phaseIncrement(chIdx, swing)
  
         # release semaphores
-        release_sem(rx_sem_list[SIDEA][swing])
+        release_sem(rx_sem_list[swing])
         self.logger.debug('semaphores released and leaving cuda_add_channel_handler')
 
 # remove a channel from the GPU
@@ -334,7 +332,7 @@ class cuda_get_data_handler(cudamsg_handler):
 
             channel = recv_dtype(self.sock, np.int32) 
 
-#       release_sem(rx_sem_list[SIDEA][swing]) # TODO why is this here so lonely? (mgu)
+#       release_sem(rx_sem_list[swing]) # TODO why is this here so lonely? (mgu)
 
 # take copy and process IF data from shared memory, send to usrp_server via socks 
 class cuda_get_if_data_handler(cudamsg_handler):
@@ -368,7 +366,7 @@ class cuda_get_if_data_handler(cudamsg_handler):
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
 
             channel = recv_dtype(self.sock, np.int32) 
-#       release_sem(rx_sem_list[SIDEA][swing]) # TODO why is this here so lonely? (mgu)
+#       release_sem(rx_sem_list[swing]) # TODO why is this here so lonely? (mgu)
 
 
 # copy data to gpu, start processing
@@ -380,15 +378,15 @@ class cuda_process_handler(cudamsg_handler):
         self.logger.debug('enter cuda_process_handler (swing {})'.format(swing))
 #        pdb.set_trace()
 
-#        acquire_sem(rx_sem_list[SIDEA][swing])
+#        acquire_sem(rx_sem_list[swing])
         self.gpu.rx_init(swing, cmd.payload['nSamples'])
 
-        self.gpu.rxsamples_shm_to_gpu(rx_shm_list[SIDEA][swing])
+        self.gpu.rxsamples_shm_to_gpu(rx_shm_list[swing])
         self.gpu._set_rx_phaseIncrement(swing) 
         self.logger.debug("end copy data, start rx process")
  
         self.gpu.rxsamples_process(swing) 
- #       release_sem(rx_sem_list[SIDEA][swing])
+ #       release_sem(rx_sem_list[swing])
         self.logger.debug('leaving cuda_process_handler (swing {})'.format(swing))
 
 
@@ -417,12 +415,12 @@ class cuda_setup_handler(cudamsg_handler):
 
 # OLD
 ##        self.logger.debug('entering cuda_setup_handler (currently blank!)')
-##        acquire_sem(rx_sem_list[SIDEA][SWING0])
-##        acquire_sem(rx_sem_list[SIDEA][SWING1])
+##        acquire_sem(rx_sem_list[SWING0])
+##        acquire_sem(rx_sem_list[SWING1])
 ##        
 ##        # release semaphores
-##        release_sem(rx_sem_list[SIDEA][SWING0])
-##        release_sem(rx_sem_list[SIDEA][SWING1])
+##        release_sem(rx_sem_list[SWING0])
+##        release_sem(rx_sem_list[SWING1])
 
 # NOT USED:    
 # prepare for a refresh of sequences 
@@ -432,8 +430,8 @@ class cuda_pulse_init_handler(cudamsg_handler):
         cmd = cuda_pulse_init_command([self.sock])
         cmd.receive(self.sock)
         swing # TODO: receive        
-        acquire_sem(rx_sem_list[SIDEA][swing])
-        release_sem(rx_sem_list[SIDEA][swing])
+        acquire_sem(rx_sem_list[swing])
+        release_sem(rx_sem_list[swing])
 
 cudamsg_handlers = {\
         CUDA_SETUP: cuda_setup_handler, \
@@ -468,6 +466,7 @@ def shm_namer(antenna, swing, side, direction):
 
 def create_shm(antenna, swing, side, shm_size, direction):
     name = shm_namer(antenna, swing, side, direction)
+    print("create shm: {}".format(name))
     memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=int(shm_size))
     mapfile = mmap.mmap(memory.fd, memory.size)
     memory.close_fd()
@@ -917,12 +916,11 @@ class ProcessingGPU(object):
     
     # copy rf samples to shared memory for transmission by usrp driver
     def txsamples_host_to_shm(self, swing):
-        # TODO: assumes single polarization
-        for aidx in range(self.nAntennas):
-            tx_shm_list[swing][aidx].seek(0)
-            self.logger.debug('copy tx sampes to shm (ant {}): {}'.format( aidx, tx_shm_list[swing][aidx]))
-            tx_shm_list[swing][aidx].write(self.tx_rf_outdata[aidx].tobytes())
-            tx_shm_list[swing][aidx].flush()
+        for (iAntenna, ant_number) in enumerate(self.antenna_index_list):
+            tx_shm_list[swing][iAntenna].seek(0)
+            self.logger.debug('copy tx sampes to shm (ant {}): {}'.format( ant_number, tx_shm_list[swing][iAntenna]))
+            tx_shm_list[swing][iAntenna].write(self.tx_rf_outdata[iAntenna].tobytes())
+            tx_shm_list[swing][iAntenna].flush()
 
     # update host-side mixer frequency table with current channel sequence, then refresh array on GPU
     def _set_tx_mixerfreq(self, swing):
@@ -1038,13 +1036,14 @@ def main():
     txshm_size = shm_settings.getint('txshm_size')
     
     # create shared memory buffers and semaphores for rx and tx
+    print(antennas)
     for ant in antennas:
         for iSwing in allSwings:
-            for iSide in range(nSides):
-                rx_shm_list[SIDEA][iSwing].append( create_shm(ant+iSide*nAntennas_per_polarization, iSwing, SIDEA, rxshm_size,  RXDIR))
-                tx_shm_list[iSwing].append(        create_shm(ant+iSide*nAntennas_per_polarization, iSwing, SIDEA, txshm_size,  TXDIR))
-                rx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, RXDIR))
-                tx_sem_list[SIDEA][iSwing].append( create_sem(ant, iSwing, TXDIR)) 
+                print("Shm ant {}, iSwing {}".format(ant, iSwing))
+                rx_shm_list[iSwing].append( create_shm(ant, iSwing, SIDEA, rxshm_size,  RXDIR))
+                tx_shm_list[iSwing].append(        create_shm(ant, iSwing, SIDEA, txshm_size,  TXDIR))
+                rx_sem_list[iSwing].append( create_sem(ant, iSwing, RXDIR))
+                tx_sem_list[iSwing].append( create_sem(ant, iSwing, TXDIR)) 
 
 
 

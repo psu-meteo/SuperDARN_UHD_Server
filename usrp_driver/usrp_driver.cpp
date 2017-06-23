@@ -42,7 +42,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 0 
+#define SAVE_RAW_SAMPLES_DEBUG 1 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
@@ -475,6 +475,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
     
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
+    usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
+    usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
     std::vector<uint64_t> channel_numbers = {0, 1};
