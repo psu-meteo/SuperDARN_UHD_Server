@@ -1828,6 +1828,7 @@ class RadarChannelHandler:
             goodDownsampleRates = [[20, 75], # 5M => 3.333k
                                    [20, 25], # 5M => 10k 
                                    [10 ,20], # 5M => 25k 
+                                   [10 ,75], # 2.5M => 3.333k 
             ]
          
             total_downsample_rate = hardwareManager.usrp_rf_rx_rate / hardwareManager.commonChannelParameter['baseband_samplerate']
@@ -1837,7 +1838,7 @@ class RadarChannelHandler:
                   downSampleRates = rate
                   break
             if downSampleRates is None:
-               errorMsg ="No two downsample rate are defined for downsampling form {} to {}.".format(hardwareManager.usrp_rf_rx_rate, hardwareManager.commonChannelParameter['baseband_samplerate']) 
+               errorMsg ="No downsample rates are defined for downsampling from {} to {}.".format(hardwareManager.usrp_rf_rx_rate, hardwareManager.commonChannelParameter['baseband_samplerate']) 
                self.logger.error(errorMsg)
                assert downSampleRates != None, errorMsg
             else:

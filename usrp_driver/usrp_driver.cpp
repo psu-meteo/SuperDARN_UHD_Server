@@ -359,23 +359,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uhd::set_thread_priority_safe(); 
    
     size_t rxshm_size, txshm_size;
-    uint32_t ant = 0;
 
     bool mimic_active;
     float mimic_delay;
 
-    int nSides = 2;  // TODO get from parameter file
     int nAntennas_per_polarization = 20;
     int iSide, iSwing; // often used loop variables
 
     int32_t verbose = 1; 
     int32_t rx_worker_status = 0; // TODO: change to swing vector is we need this
 
-    // clean up to fix it later..
-    std::vector<std::vector<void *>> shm_rx_vec(nSides, std::vector<void *>( nSwings));
-    std::vector<std::vector<void *>> shm_tx_vec(nSides, std::vector<void *>( nSwings));
-//    std::vector<void *> shm_rx_vec(nSwings);
-//    std::vector<void *> shm_tx_vec(nSwings);
     std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
@@ -426,13 +419,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
     fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
 
+    // TODO also read usrp_config.ini and get antenna and side information from it. remove antenna input argument. 
+
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
-    struct arg_int  *ai_ant    = arg_int0(NULL, "antenna", NULL, "Antenna position index for the USRP (0-19)"); 
-    struct arg_str  *as_host   = arg_str0(NULL, "host", NULL, "Hostname or IP address of USRP to control (e.g usrp1)"); 
-    struct arg_lit  *al_intclk = arg_lit0(NULL, "intclk", "Select internal clock (default is external)"); 
+//    struct arg_int  *ai_ant    = arg_intn("a", "antenna", NULL, 1, 2, "Antenna position index for the USRP"); 
+    struct arg_int  *ai_ant_a  = arg_int0("a", "antennaA", NULL, "Antenna position index for the USRP on side A"); 
+    struct arg_int  *ai_ant_b  = arg_int0("b", "antennaB", NULL, "Antenna position index for the USRP on side B"); 
+    struct arg_str  *as_host   = arg_str0("h", "host", NULL, "Hostname or IP address of USRP to control (e.g usrp1)"); 
+    struct arg_lit  *al_intclk = arg_lit0("i", "intclk", "Select internal clock (default is external)"); 
     struct arg_end  *ae_argend = arg_end(ARG_MAXERRORS);
-    void* argtable[] = {al_help, ai_ant, as_host, al_intclk, ae_argend};
+    void* argtable[] = {al_help, ai_ant_a, ai_ant_b, as_host, al_intclk, ae_argend};
     
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
@@ -448,6 +445,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     nerrors = arg_parse(argc,argv,argtable);
     if (nerrors > 0) {
         arg_print_errors(stdout,ae_argend,"usrp_driver");
+        exit(1);
     }
     if (argc == 1) {
         printf("No arguments found, try running again with --help for more information.\n");
@@ -460,9 +458,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));
         return 0;
     }
-    
-    if(ai_ant->count == 0 || ai_ant->ival[0] < 0 || ai_ant->ival[0] > 19) {
-        printf("No or invalid antenna index, exiting...");
+   
+    DEBUG_PRINT("ant_a input count: %d, ant: %d\n\n", ai_ant_a->count, ai_ant_a->ival[0]);
+    DEBUG_PRINT("ant_b input count: %d, ant: %d\n\n", ai_ant_b->count, ai_ant_b->ival[0]);
+    int nSides =  ai_ant_a->count + ai_ant_b->count; 
+    if( nSides == 0 ) {
+        printf("No antenna index, exiting...");
         return 0;
     }
     
@@ -470,7 +471,41 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         printf("Missing usrp host command line argument, exiting...");
         return 0;
     }
-    ant = ai_ant->ival[0];
+
+    std::vector<int> antennaVector(nSides);
+    if( nSides == 2 ) {
+        printf("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
+        antennaVector[0] = ai_ant_a->ival[0];
+
+        printf("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
+        antennaVector[1] = ai_ant_b->ival[1];
+
+        
+    } else {
+     if (ai_ant_a->count == 1) {
+        printf("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
+        antennaVector[0] = ai_ant_a->ival[0];
+
+     } else {
+        printf("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
+        antennaVector[0] = ai_ant_b->ival[1];
+        printf("Warning: For one side use DIO output is always on Side A!!!!!!!!!!!!!"); // TODO correct this
+
+
+     }
+
+    }
+
+
+
+    // clean up to fix it later..
+    std::vector<std::vector<void *>> shm_rx_vec(nSides, std::vector<void *>( nSwings));
+    std::vector<std::vector<void *>> shm_tx_vec(nSides, std::vector<void *>( nSwings));
+//    std::vector<void *> shm_rx_vec(nSwings);
+//    std::vector<void *> shm_tx_vec(nSwings);
+
+
+
     std::string usrpargs(as_host->sval[0]);
     usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
     
@@ -479,11 +514,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
-    std::vector<uint64_t> channel_numbers = {0, 1};
-    if (nSides ==2) {
-        stream_args.channels = channel_numbers;
-    }
+//    std::vector<uint64_t> channel_numbers = {1};
+//    if (nSides ==2) {
+//        stream_args.channels =  boost::assign::list_of(0)(1);;
+//    }else {
+//        stream_args.channels = channel_numbers;
+//    }
+     
+    
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
+    std::vector<uint64_t> channel_numbers = {0,1};
+    stream_args.channels = channel_numbers;
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
 
@@ -505,10 +546,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     for(iSwing = 0; iSwing < nSwings; iSwing++) {
         for(iSide = 0; iSide < nSides; iSide++) {
             int shm_side = 0;
-            shm_rx_vec[iSide][iSwing] = open_sample_shm(ant+iSide*nAntennas_per_polarization, RXDIR, shm_side, iSwing, rxshm_size);
-            sem_rx_vec[iSwing] = open_sample_semaphore(ant, iSwing, RXDIR);
-            shm_tx_vec[iSide][iSwing] = open_sample_shm(ant+iSide*nAntennas_per_polarization, TXDIR, shm_side, iSwing, txshm_size);
-            sem_tx_vec[iSwing] = open_sample_semaphore(ant, iSwing, TXDIR);
+            shm_rx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], RXDIR, shm_side, iSwing, rxshm_size);
+            shm_tx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], TXDIR, shm_side, iSwing, txshm_size);
+
+            if (antennaVector[iSide] < 19 ) { // semaphores only for antennas of first polarization TODO check if this is enough
+               sem_rx_vec[iSwing] = open_sample_semaphore(antennaVector[iSide], iSwing, RXDIR);
+               sem_tx_vec[iSwing] = open_sample_semaphore(antennaVector[iSide], iSwing, TXDIR);
+            }
         }
     }
 
@@ -535,8 +579,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         // TODO: maybe limit addr to interface connected to usrp_server
         sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + ant);
-        sockaddr.sin_port = htons(usrp_driver_base_port + ant);
+        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + antennaVector[0]); // TODO maybe change this to base_port + ip of USRP (40...60)
+        sockaddr.sin_port = htons(usrp_driver_base_port + antennaVector[0]);
         
 
         if( bind(driversock, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0){
@@ -707,7 +751,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             FILE *raw_dump_fp;
                             char raw_dump_name[80];
                             for (iSide =0; iSide < nSides; iSide++){
-                                sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d_side%d.cint16", ant, iSide);
+                                sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
                                 raw_dump_fp = fopen(raw_dump_name, "wb");
                                 fwrite(&tx_samples[0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
                                 fclose(raw_dump_fp);
@@ -783,9 +827,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
        
 
-                    DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], ant, nSamples_rx);
+                    DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
                     sock_send_int32(driverconn, state_vec[swing]);  // send status
-                    sock_send_int32(driverconn, ant);   // send antenna
+                    sock_send_int32(driverconn, antennaVector[0]);   // send antenna TODO do this for both antennas?
                     sock_send_int32(driverconn, nSamples_rx);     // nsamples;  send send number of samples
                    
                     // read FAULT status   
@@ -807,10 +851,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
-                        sprintf(raw_dump_name,"diag/raw_samples_rx_ant_%d.cint16", ant);
-                        raw_dump_fp = fopen(raw_dump_name, "wb");
-                        fwrite(&rx_data_buffer[0], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
-                        fclose(raw_dump_fp);
+                        for (iSide=0; iSide<nSides; iSide++) {
+                           sprintf(raw_dump_name,"diag/raw_samples_rx_ant_%d.cint16", antennaVector[iSide]);
+                           raw_dump_fp = fopen(raw_dump_name, "wb");
+                           fwrite(&rx_data_buffer[iSide], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
+                           fclose(raw_dump_fp);
+                        }
 
                     }
 
@@ -956,7 +1002,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
                     DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
                     
-                    sock_send_int32(driverconn, (int32_t) ant);
+                    sock_send_int32(driverconn, (int32_t) antennaVector[0]); // TODO both sides?
                     sock_send_float64(driverconn, clrfreq_rate);
 
                     // send back samples                   
