@@ -407,24 +407,38 @@ def start_usrps_from_config(usrp_sleep = False):
     usrpPIDlist  = []
     
     myPrint("  Found {} usrps in config {}:".format(len(usrpNameList), fileName))
+    start_arg_list = []
     for usrpName in usrpNameList:
-       myPrint("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+        myPrint("     {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+        if usrp_config[usrpName]['side'].lower()[0] == 'a':
+           ant_arg = "--antennaA"
+        elif usrp_config[usrpName]['side'].lower() == "b":
+           ant_arg = "--antennaB"
+        else:
+            print("Error: unknown side: {}".format(usrp_config[usrpName]['side'].lower()))
+            return -1
+
+        newDevice = True
+        for arg in start_arg_list:
+            if arg[0] == usrp_config[usrpName]['usrp_hostname']:
+                arg += [ant_arg, usrp_config[usrpName]['array_idx'] ]
+                newDevice = False
+                break
+        if newDevice:
+           start_arg_list.append( [usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ])
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
-    started_host_list = []
-    for usrpName in usrpNameList:
 
-       if usrp_config[usrpName]['usrp_hostname'] in started_host_list:
-          myPrint("USRP host {} already started. Not starting if for 2nd polarization.".format(usrp_config[usrpName]['usrp_hostname']))
-          continue
-       
+    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
+#    baseStartArg = ['./usrp_driver',  '--host' ]
+    
+    for start_arg in start_arg_list:
+       all_start_arg = baseStartArg + start_arg 
+       myPrint("Starting {}".format(" ".join(all_start_arg) ))
 
-
-       myPrint("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
-       #with internal clock
+       usrpPIDlist.append( subprocess.Popen(all_start_arg))
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
-       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
-       started_host_list.append(usrp_config[usrpName]['usrp_hostname'])
+#       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
           time.sleep(8)
     os.chdir(basePath)
