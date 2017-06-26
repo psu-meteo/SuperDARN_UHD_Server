@@ -1084,7 +1084,7 @@ class RadarHardwareManager:
                   self.logger.info("Buffering raw data to disk.")
                   chResExportList = [ ch.resultDict_list[-1] for ch in self.channels if ch.processing_state == CS_PROCESSING]
                   with open('tmpRawData.pkl', 'wb') as f:
-                     pickle.dump([main_samples, back_samples,chResExportList],f,  pickle.HIGHEST_PROTOCOL)
+                     pickle.dump([main_samples, back_samples,chResExportList, self.antenna_idx_list_main, self.antenna_idx_list_back],f,  pickle.HIGHEST_PROTOCOL)
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
 

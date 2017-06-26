@@ -31,7 +31,7 @@ extern int verbose;
  **********************************************************************/
 void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
-    std::vector<std::complex<int16_t>> pulse_samples,
+    std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
     uhd::time_spec_t burst_start_time,
     std::vector<size_t> pulse_sample_idx_offsets 
 ){
@@ -51,9 +51,10 @@ void usrp_tx_worker(
 
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
     size_t spb = tx_stream->get_max_num_samps();
-    int32_t samples_per_pulse = pulse_samples.size() - 2*spb; 
-
-    
+    int32_t samples_per_pulse = pulse_samples[0].size() - 2*spb; 
+    int iSide;
+    int nSides = pulse_samples.size();
+    std::vector<std::complex<int16_t>*> buffer(nSides); 
 
     // assume at least spb length zero padding before first pulse
     size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + samples_per_pulse; 
@@ -61,7 +62,10 @@ void usrp_tx_worker(
     size_t sample_idx = 0;
     uint32_t pulse_idx = 0;
 
-    nacc_samples += tx_stream->send(&pulse_samples[sample_idx], spb, md, timeout);
+    for (iSide =0; iSide<nSides; iSide++) {
+        buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+    }
+    nacc_samples += tx_stream->send(buffer, spb, md, timeout);
 
     md.start_of_burst = false;
     md.has_time_spec = false;
@@ -90,8 +94,12 @@ void usrp_tx_worker(
             sample_idx = 0;
         }
 
+        for (iSide =0; iSide<nSides; iSide++) {
+            buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+        }
 
-        size_t ntx_samples = tx_stream->send(&pulse_samples[sample_idx], nsamples_to_send, md, timeout);
+//        size_t ntx_samples = tx_stream->send(&pulse_samples[sample_idx], nsamples_to_send, md, timeout);
+        size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
 
         md.start_of_burst = false;
         md.has_time_spec = false;

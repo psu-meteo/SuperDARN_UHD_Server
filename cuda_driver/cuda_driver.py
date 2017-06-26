@@ -18,6 +18,8 @@ import functools
 import configparser
 import logging
 
+import ctypes #  oly for debug
+
 import posix_ipc
 import pycuda.driver as cuda
 import pycuda.compiler
@@ -466,9 +468,10 @@ def shm_namer(antenna, swing, side, direction):
 
 def create_shm(antenna, swing, side, shm_size, direction):
     name = shm_namer(antenna, swing, side, direction)
-    print("create shm: {}".format(name))
     memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=int(shm_size))
     mapfile = mmap.mmap(memory.fd, memory.size)
+#    pdb.set_trace()
+    print("create shm: {} ({:x}) ".format(name, ctypes.c_int.from_buffer(mapfile).value))
     memory.close_fd()
     shm_list.append(name)
     return mapfile
@@ -1039,8 +1042,9 @@ def main():
     print(antennas)
     for ant in antennas:
         for iSwing in allSwings:
-                print("Shm ant {}, iSwing {}".format(ant, iSwing))
+#                print("Shm ant {}, iSwing {}".format(ant, iSwing))
                 rx_shm_list[iSwing].append( create_shm(ant, iSwing, SIDEA, rxshm_size,  RXDIR))
+#                print("added cuda rx_shm addr {} (ant {}, swing {})".format(rx_shm_list[iSwing][-1], ant, iSwing))
                 tx_shm_list[iSwing].append(        create_shm(ant, iSwing, SIDEA, txshm_size,  TXDIR))
                 rx_sem_list[iSwing].append( create_sem(ant, iSwing, RXDIR))
                 tx_sem_list[iSwing].append( create_sem(ant, iSwing, TXDIR)) 

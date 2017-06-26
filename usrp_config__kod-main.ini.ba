@@ -10,86 +10,43 @@
 # phaseoffset   constant phase offset, useful for controlling polarization or compensating for 180 phase flip..
 # side          Side of usrp x300
 
-# antenna_idx > 19 will be handled by cuda with modulo 20. (tx phasing for 2nd polarization)
-
 [usrp1a]
-usrp_hostname = 192.168.48.2
+usrp_hostname = usrp1
 driver_hostname = localhost
 mainarray = True
 array_idx = 0
 x_position = 0 
 tdelay = 0
-side = a
+side = 'a'
 phase_offset = 0
 
 [usrp2a]
-usrp_hostname = 192.168.49.2
+usrp_hostname = usrp2
 driver_hostname = localhost
 mainarray = True
 array_idx = 1
-x_position = 15.24
+x_position = 10 
 tdelay = 0
-side = a
+side = 'a'
 phase_offset = 0
 
-
 [usrp3a]
-usrp_hostname = 192.168.50.2
+usrp_hostname = usrp3
 driver_hostname = localhost
 mainarray = True
 array_idx = 2
-x_position = 30.48
+x_position = 20 
 tdelay = 0
-side = a
+side = 'a'
 phase_offset = 0
 
 [usrp4a]
-usrp_hostname = 192.168.51.2
+usrp_hostname = usrp4
 driver_hostname = localhost
 mainarray = True
 array_idx = 3
-x_position = 45.72
+x_position = 30 
 tdelay = 0
-side = a
+side = 'a'
 phase_offset = 0
 
-[usrp5a]
-usrp_hostname = 192.168.52.2
-driver_hostname = localhost
-mainarray = True
-array_idx = 4
-x_position = 60.96
-tdelay = 0
-side = a
-phase_offset = 0
-
-[usrp6a]
-usrp_hostname = 192.168.53.2
-driver_hostname = localhost
-mainarray = True
-array_idx = 5
-x_position = 76.2 
-tdelay = 0
-side = a
-phase_offset = 0
-
-
-[usrp7a]
-usrp_hostname = 192.168.54.2
-driver_hostname = localhost
-mainarray = True
-array_idx = 6
-x_position = 91.44
-tdelay = 0
-side = a
-phase_offset = 0
-
-[usrp8a]
-usrp_hostname = 192.168.55.2
-driver_hostname = localhost
-mainarray = True
-array_idx = 7
-x_position = 106.68
-tdelay = 0
-side = a
-phase_offset = 0

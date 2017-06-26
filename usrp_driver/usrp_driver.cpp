@@ -134,7 +134,7 @@ void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, siz
 
     if(INIT_SHM) {
        int32_t i = 0;
-       for(i = 0; i < 10; i++) {
+       for(i = 0; i < 100; i++) {
             *((char *)pshm + i)= i;
        }
     }
@@ -434,8 +434,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
 
-    std::vector<std::complex<int16_t>> tx_samples(MAX_PULSE_LENGTH,0);
-     
     DEBUG_PRINT("usrp_driver debug mode enabled\n");
 
     if (SUPRESS_UHD_PRINTS) {
@@ -473,22 +471,32 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
 
     std::vector<int> antennaVector(nSides);
+    std::vector<uint64_t> channel_numbers;
+
     if( nSides == 2 ) {
         DEBUG_PRINT("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
         antennaVector[0] = ai_ant_a->ival[0];
+        channel_numbers.push_back(0);
 
         DEBUG_PRINT("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
         antennaVector[1] = ai_ant_b->ival[0];
+        channel_numbers.push_back(1);
+
+//        std::vector<uint64_t> channel_numbers = {0,1};
 
         
     } else {
+    channel_numbers.resize(1);
      if (ai_ant_a->count == 1) {
         DEBUG_PRINT("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
         antennaVector[0] = ai_ant_a->ival[0];
+        channel_numbers[0] = 0;
+//        std::vector<uint64_t> channel_numbers = {0};
 
      } else {
         DEBUG_PRINT("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
         antennaVector[0] = ai_ant_b->ival[0];
+        channel_numbers[1] = 1;
         DEBUG_PRINT("Warning: For one side use DIO output is always on Side A!!!!!!!!!!!!!"); // TODO correct this
 
 
@@ -496,7 +504,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     }
 
-
+    DEBUG_PRINT("nSides: %d, ch(%d): %d %d\n", nSides, channel_numbers.size(), channel_numbers[0], channel_numbers[1]);
 
     // clean up to fix it later..
     std::vector<std::vector<void *>> shm_rx_vec(nSides, std::vector<void *>( nSwings));
@@ -504,6 +512,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 //    std::vector<void *> shm_rx_vec(nSwings);
 //    std::vector<void *> shm_tx_vec(nSwings);
 
+//    std::vector<std::complex<int16_t>> tx_samples(MAX_PULSE_LENGTH,0);
+    std::vector<std::vector<std::complex<int16_t>>> tx_samples(nSides, std::vector<std::complex<int16_t>>(MAX_PULSE_LENGTH,0));
+     
 
 
     std::string usrpargs(as_host->sval[0]);
@@ -520,11 +531,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 //    }else {
 //        stream_args.channels = channel_numbers;
 //    }
+    DEBUG_PRINT("usrp->get_rx_num_channels(): %d\n",   usrp->get_rx_num_channels());
+    DEBUG_PRINT("usrp->get_tx_num_channels(): %d\n",   usrp->get_tx_num_channels());
      
+    stream_args.channels = channel_numbers;
     
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
-    std::vector<uint64_t> channel_numbers = {0,1};
-    stream_args.channels = channel_numbers;
+    DEBUG_PRINT("defualt: rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
+
+    DEBUG_PRINT("after channel set: rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
+
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
     // TODO: retry uhd connection if fails..
 
@@ -548,6 +564,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             int shm_side = 0;
             shm_rx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], RXDIR, shm_side, iSwing, rxshm_size);
             shm_tx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], TXDIR, shm_side, iSwing, txshm_size);
+            DEBUG_PRINT("usrp_driver rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][iSwing]);
 
             if (antennaVector[iSide] < 19 ) { // semaphores only for antennas of first polarization TODO check if this is enough
                sem_rx_vec[iSwing] = open_sample_semaphore(antennaVector[iSide], iSwing, RXDIR);
@@ -655,8 +672,21 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(rx_data_buffer[0].size() != nSamples_rx) {
                        for(iSide = 0; iSide < nSides; iSide++) {
                            rx_data_buffer[iSide].resize(nSamples_rx);
+                           for (int iSample=0; iSample<200; iSample++) {
+                                rx_data_buffer[iSide][iSample] = iSample + iSide*10000;
+                           }
                        }
                     }
+                    // DEGUG
+                    for(iSide = 0; iSide < nSides; iSide++) {
+                        DEBUG_PRINT("rx_data_buffer after init:\n  side %d", iSide);
+                        for (int iSample=0; iSample<200; iSample++) {
+                             DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
+                        }
+                        DEBUG_PRINT("\n");
+                    }
+
+
                     for (iSide=0; iSide<nSides;iSide++) {
                         DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
                     }
@@ -742,10 +772,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
 
                         // TODO side loop
-                        iSide = 0;
-                        tx_samples.resize(nSamples_tx_pulse+2*spb);
-                        shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[0];
-                        memcpy(&tx_samples[spb], shm_pulseaddr, pulse_bytes);
+                        for (iSide = 0; iSide<nSides; iSide++) {
+                            tx_samples[iSide].resize(nSamples_tx_pulse+2*spb);                    
+                            shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[0];
+                            memcpy(&tx_samples[iSide][spb], shm_pulseaddr, pulse_bytes);
+                        }
 
                         if(SAVE_RAW_SAMPLES_DEBUG) {
                             FILE *raw_dump_fp;
@@ -753,7 +784,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             for (iSide =0; iSide < nSides; iSide++){
                                 sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
                                 raw_dump_fp = fopen(raw_dump_name, "wb");
-                                fwrite(&tx_samples[0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
+                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
                                 fclose(raw_dump_fp);
                             }
                         }
@@ -840,12 +871,27 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO move this in loop as soon as usrp_server receives both sides
                     sock_send_bool(driverconn, fault);     // FAULT status from conrol board
                 
+                    // DEGUG
+                    for(iSide = 0; iSide < nSides; iSide++) {
+                        DEBUG_PRINT("rx_data_buffer before copy:\n  side %d", iSide);
+                        for (int iSample=0; iSample<200; iSample++) {
+                             DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
+                        }
+                        DEBUG_PRINT("\n");
+                    }
 
  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     for (iSide = 0; iSide<nSides; iSide++) {
+                         DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing]);
                          memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[iSide][0], sizeof(std::complex<int16_t>) * nSamples_rx);
+
+                         DEBUG_PRINT("Print rx_data_buffer side %d :\n    ", iSide);
+                         for (int iSample=0; iSample<20; iSample++) DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
+                         DEBUG_PRINT("\n");
+
+                         DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing]);
                     }
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {

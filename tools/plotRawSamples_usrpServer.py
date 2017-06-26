@@ -22,7 +22,7 @@ from drivermsg_library import *
 
 def read_and_plot():
    with open(data_file, 'rb') as f:
-      main_data, back_data, parDictList = pickle.load(f)
+      main_data, back_data, parDictList, ant_idx_main, ant_idx_back= pickle.load(f)
 
 
    os.remove(data_file)
@@ -85,7 +85,7 @@ def read_and_plot():
           seqStartTimes = seqStartTimes - seqStartTimes[0]
           seqValueVec = [100000 for i in range(len(seqStartTimes))]
           #plt.plot( seqStartTimes, seqValueVec, 'o')
-          plt.ylabel("ant {} ".format(iAnt) )
+          plt.ylabel("ant {} ".format(ant_idx_main[iAnt]) )
           if iAnt == 0:
              plt.title("nSequences_per_period={}, tbeam={}, rfreq={}".format(parDict["nSequences_per_period"], parDict["tbeam"] , parDict["rfreq"]), ) 
           elif iAnt in [6,7]:

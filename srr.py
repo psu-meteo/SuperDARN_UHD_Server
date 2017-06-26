@@ -217,13 +217,14 @@ def get_usrp_driver_processes():
     usrpProcesses = []
     for line in processList:
         if 'usrp_driver' in line:
+            wordList = [word for word in line.split(" " ) if word != ""]
             try:
-               wordList = [word for word in line.split(" " ) if word != ""]
-               antenna = int(wordList[wordList.index("--antenna")+1])
+               antenna = int(wordList[wordList.index("--antennaA")+1])
                host = wordList[wordList.index("--host")+1]
                usrpProcesses.append(dict(pid=int(wordList[1]), host=host, antenna=antenna))
             except:
-               myPrint("  not a driver process: {}".format(line))
+               myPrint("Failed to extract host and antenna_idx: {}".format(line))
+               usrpProcesses.append(dict(pid=int(wordList[1]), host=None, antenna=None))
 
     return usrpProcesses
 
@@ -237,6 +238,9 @@ def stop_usrp_driver_soft():
     dtype = np.uint8
     
     for process in usrpProcesses:
+        if process['host'] == None:
+            continue
+
         myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], process['antenna'] + USRPDriverPort, process['pid']))
         usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         usrpsock.connect(('localhost', process['antenna'] + USRPDriverPort))
