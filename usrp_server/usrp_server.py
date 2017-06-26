@@ -77,13 +77,15 @@ class usrpSockManager():
             if usrpConfig['usrp_hostname'] in connected_usrp_list:
                self.logger.debug("Already connected to USRP {}".format(usrpConfig['usrp_hostname']))
             else:
+               port = int(usrpConfig['usrp_hostname'].split(".")[2]) + usrp_driver_base_port
                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-               connectPar = (usrpConfig['driver_hostname'], int(usrpConfig['array_idx']) + usrp_driver_base_port)
+               connectPar = (usrpConfig['driver_hostname'], port)
                usrpsock.connect(connectPar)
                self.socks.append(usrpsock)
                self.addressList_active.append(connectPar)
-               self.logger.debug('connected to usrp driver on port {}'.format(usrpConfig['array_idx']))
+               self.logger.debug('connected to usrp driver on port {}'.format(port))
                connected_usrp_list.append(usrpConfig['usrp_hostname'])
+
          except ConnectionRefusedError:
             self.logger.error('USRP server connection failed on port {}'.format(usrpConfig['array_idx']))
             self.addressList_inactive.append((usrpConfig['driver_hostname'], int(usrpConfig['array_idx']) + usrp_driver_base_port))

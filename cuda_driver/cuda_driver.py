@@ -1039,7 +1039,6 @@ def main():
     txshm_size = shm_settings.getint('txshm_size')
     
     # create shared memory buffers and semaphores for rx and tx
-    print(antennas)
     for ant in antennas:
         for iSwing in allSwings:
 #                print("Shm ant {}, iSwing {}".format(ant, iSwing))

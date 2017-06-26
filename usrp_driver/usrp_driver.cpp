@@ -1,9 +1,14 @@
 // usrp_driver
 // connect to a USRP using UHD
 // wait for connection from usrp_server
+// 
+// driver listens on port: base_port + x
+//   where base_port is defined in driver_config.ini and 
+//   x is 3rd part of usrp ip (192.168.x.2)
 //
 // look at boost property tree ini parser for usrp_config.ini..
 // 
+//
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -363,8 +368,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     bool mimic_active;
     float mimic_delay;
 
-    int nAntennas_per_polarization = 20;
-    int iSide, iSwing; // often used loop variables
+    unsigned int iSide, iSwing; // often used loop variables
 
     int32_t verbose = 1; 
     int32_t rx_worker_status = 0; // TODO: change to swing vector is we need this
@@ -379,7 +383,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     uint32_t npulses, nerrors;
     ssize_t cmd_status;
-    uint32_t usrp_driver_base_port;
+    uint32_t usrp_driver_base_port, ip_part;
 
     int32_t connect_retrys = MAX_SOCKET_RETRYS; 
     int32_t sockopt;
@@ -459,7 +463,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
    
     DEBUG_PRINT("ant_a input count: %d, ant: %d\n\n", ai_ant_a->count, ai_ant_a->ival[0]);
     DEBUG_PRINT("ant_b input count: %d, ant: %d\n\n", ai_ant_b->count, ai_ant_b->ival[0]);
-    int nSides =  ai_ant_a->count + ai_ant_b->count; 
+    unsigned int nSides =  ai_ant_a->count + ai_ant_b->count; 
     if( nSides == 0 ) {
         printf("No antenna index, exiting...");
         return 0;
@@ -504,49 +508,40 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     }
 
-    DEBUG_PRINT("nSides: %d, ch(%d): %d %d\n", nSides, channel_numbers.size(), channel_numbers[0], channel_numbers[1]);
-
-    // clean up to fix it later..
+    // pointers to shared memory
     std::vector<std::vector<void *>> shm_rx_vec(nSides, std::vector<void *>( nSwings));
     std::vector<std::vector<void *>> shm_tx_vec(nSides, std::vector<void *>( nSwings));
-//    std::vector<void *> shm_rx_vec(nSwings);
-//    std::vector<void *> shm_tx_vec(nSwings);
 
-//    std::vector<std::complex<int16_t>> tx_samples(MAX_PULSE_LENGTH,0);
+    // local buffers for tx and rx
     std::vector<std::vector<std::complex<int16_t>>> tx_samples(nSides, std::vector<std::complex<int16_t>>(MAX_PULSE_LENGTH,0));
+    std::vector<std::vector<std::complex<int16_t>>> rx_data_buffer(nSides, std::vector<std::complex<int16_t>>(0));
      
-
 
     std::string usrpargs(as_host->sval[0]);
     usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
-    
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
     uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
-//    std::vector<uint64_t> channel_numbers = {1};
-//    if (nSides ==2) {
-//        stream_args.channels =  boost::assign::list_of(0)(1);;
-//    }else {
-//        stream_args.channels = channel_numbers;
-//    }
-    DEBUG_PRINT("usrp->get_rx_num_channels(): %d\n",   usrp->get_rx_num_channels());
-    DEBUG_PRINT("usrp->get_tx_num_channels(): %d\n",   usrp->get_tx_num_channels());
-     
-    stream_args.channels = channel_numbers;
     
+    if (usrp->get_rx_num_channels() < nSides || usrp->get_tx_num_channels() < nSides) {  
+       DEBUG_PRINT("ERROR: Number of defined channels (%i) is smaller than avaialable channels:\n    usrp->get_rx_num_channels(): %lu \n    usrp->get_tx_num_channels(): %lu \n\n", nSides, usrp->get_rx_num_channels(),   usrp->get_tx_num_channels());
+       return -1;
+    }
+    stream_args.channels = channel_numbers;
     uhd::rx_streamer::sptr rx_stream = usrp->get_rx_stream(stream_args);
-    DEBUG_PRINT("defualt: rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
-
-    DEBUG_PRINT("after channel set: rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
-
     uhd::tx_streamer::sptr tx_stream = usrp->get_tx_stream(stream_args);
+
     // TODO: retry uhd connection if fails..
 
-    // TODO: this should be sized for a maximum reasonable sample request  
-//    std::vector<std::complex<int16_t>> rx_data_buffer;
-    std::vector <std::vector<std::complex<int16_t>>> rx_data_buffer(nSides, std::vector<std::complex<int16_t>>(0));
+    // Determine port from 3rd part of ip (192.168.x.2 => port = base_port + x ) 
+    int start_idx = usrpargs.find("."); 
+    start_idx = usrpargs.find(".", start_idx+1);
+    int end_idx = usrpargs.find(".", start_idx+1);
+    ip_part = atoi(usrpargs.substr(start_idx+1, end_idx-start_idx-1).c_str());
+
+
 
     // initialize rxfe gpio
     kodiak_init_rxfe(usrp, nSides);
@@ -564,7 +559,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             int shm_side = 0;
             shm_rx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], RXDIR, shm_side, iSwing, rxshm_size);
             shm_tx_vec[iSide][iSwing] = open_sample_shm(antennaVector[iSide], TXDIR, shm_side, iSwing, txshm_size);
-            DEBUG_PRINT("usrp_driver rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][iSwing]);
+            DEBUG_PRINT("usrp_driver rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][iSwing], iSide, iSwing);
 
             if (antennaVector[iSide] < 19 ) { // semaphores only for antennas of first polarization TODO check if this is enough
                sem_rx_vec[iSwing] = open_sample_semaphore(antennaVector[iSide], iSwing, RXDIR);
@@ -582,7 +577,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
    
         boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
 
-        // bind to socket for communication with usrp_server.py
+        // bind to socket for communication with usrp_server.py:
         driversock = socket(AF_INET, SOCK_STREAM, 0);
         if(driversock < 0){
             perror("opening stream socket\n");
@@ -596,8 +591,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         // TODO: maybe limit addr to interface connected to usrp_server
         sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + antennaVector[0]); // TODO maybe change this to base_port + ip of USRP (40...60)
-        sockaddr.sin_port = htons(usrp_driver_base_port + antennaVector[0]);
+        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + ip_part); 
+        sockaddr.sin_port = htons(usrp_driver_base_port + ip_part);
         
 
         if( bind(driversock, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) < 0){
@@ -677,15 +672,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                            }
                        }
                     }
-                    // DEGUG
+                /*    // DEGUG
                     for(iSide = 0; iSide < nSides; iSide++) {
                         DEBUG_PRINT("rx_data_buffer after init:\n  side %d", iSide);
                         for (int iSample=0; iSample<200; iSample++) {
-                             DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
+                             DEBUG_PRINT("%lu, ", rx_data_buffer[iSide][iSample]);
                         }
                         DEBUG_PRINT("\n");
                     }
-
+                 */
 
                     for (iSide=0; iSide<nSides;iSide++) {
                         DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
@@ -818,7 +813,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
                         DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        DEBUG_PRINT("TRIGGER_PULSE nSamples_rx: swing %d\n", nSamples_rx);
+                        DEBUG_PRINT("TRIGGER_PULSE nSamples_rx: swing %d\n",(int) nSamples_rx);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
@@ -871,7 +866,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO move this in loop as soon as usrp_server receives both sides
                     sock_send_bool(driverconn, fault);     // FAULT status from conrol board
                 
-                    // DEGUG
+                /*    // DEGUG
                     for(iSide = 0; iSide < nSides; iSide++) {
                         DEBUG_PRINT("rx_data_buffer before copy:\n  side %d", iSide);
                         for (int iSample=0; iSample<200; iSample++) {
@@ -879,19 +874,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
                         DEBUG_PRINT("\n");
                     }
-
- 
+                  */
+  
                    
                     DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
                     for (iSide = 0; iSide<nSides; iSide++) {
-                         DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing]);
+                        // DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing], iSide, iSwing);
                          memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[iSide][0], sizeof(std::complex<int16_t>) * nSamples_rx);
 
-                         DEBUG_PRINT("Print rx_data_buffer side %d :\n    ", iSide);
+                       /*  DEBUG_PRINT("Print rx_data_buffer side %i :\n    ", (int) iSide);
                          for (int iSample=0; iSample<20; iSample++) DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
                          DEBUG_PRINT("\n");
-
-                         DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing]);
+                       */
+                        // DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing], iSide, iSwing);
                     }
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
