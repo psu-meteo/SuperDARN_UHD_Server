@@ -476,7 +476,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     std::vector<int> antennaVector(nSides);
     std::vector<uint64_t> channel_numbers;
-
+    // both sides
     if( nSides == 2 ) {
         DEBUG_PRINT("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
         antennaVector[0] = ai_ant_a->ival[0];
@@ -485,22 +485,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         DEBUG_PRINT("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
         antennaVector[1] = ai_ant_b->ival[0];
         channel_numbers.push_back(1);
-
-//        std::vector<uint64_t> channel_numbers = {0,1};
-
-        
     } else {
-    channel_numbers.resize(1);
+     // side A
      if (ai_ant_a->count == 1) {
         DEBUG_PRINT("Setting side A: ant_idx %d\n",ai_ant_a->ival[0]);
         antennaVector[0] = ai_ant_a->ival[0];
-        channel_numbers[0] = 0;
-//        std::vector<uint64_t> channel_numbers = {0};
-
+        channel_numbers.push_back(0);
+     // side B
      } else {
         DEBUG_PRINT("Setting side B: ant_idx %d\n",ai_ant_b->ival[0]);
         antennaVector[0] = ai_ant_b->ival[0];
-        channel_numbers[1] = 1;
+        channel_numbers.push_back(1);
         DEBUG_PRINT("Warning: For one side use DIO output is always on Side A!!!!!!!!!!!!!"); // TODO correct this
 
 

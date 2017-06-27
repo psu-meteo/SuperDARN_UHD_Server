@@ -241,9 +241,9 @@ def stop_usrp_driver_soft():
         if process['host'] == None:
             continue
 
-        myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], process['antenna'] + USRPDriverPort, process['pid']))
+        myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], int(process['host'].split(".")[2]) + USRPDriverPort, process['pid']))
         usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect(('localhost', process['antenna'] + USRPDriverPort))
+        usrpsock.connect(('localhost', int(process['host'].split(".")[2]) + USRPDriverPort))
     
         usrpsock.sendall(dtype(UHD_EXIT).tobytes())
     

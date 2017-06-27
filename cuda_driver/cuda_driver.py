@@ -470,8 +470,7 @@ def create_shm(antenna, swing, side, shm_size, direction):
     name = shm_namer(antenna, swing, side, direction)
     memory = posix_ipc.SharedMemory(name, posix_ipc.O_CREAT, size=int(shm_size))
     mapfile = mmap.mmap(memory.fd, memory.size)
-#    pdb.set_trace()
-    print("create shm: {} ({:x}) ".format(name, ctypes.c_int.from_buffer(mapfile).value))
+#    print("create shm: {} ({:x}) ".format(name, ctypes.c_int.from_buffer(mapfile).value))
     memory.close_fd()
     shm_list.append(name)
     return mapfile
