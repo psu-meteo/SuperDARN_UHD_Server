@@ -98,7 +98,6 @@ void usrp_tx_worker(
             buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
         }
 
-//        size_t ntx_samples = tx_stream->send(&pulse_samples[sample_idx], nsamples_to_send, md, timeout);
         size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
 
         md.start_of_burst = false;

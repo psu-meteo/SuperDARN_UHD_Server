@@ -46,7 +46,6 @@ CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 nSwings = 2 
-nAntennas_per_polarization = 20 # TODO read from config file # antenna number above that are on side B of a USRP
 
 debug = True 
 
@@ -607,7 +606,9 @@ class RadarHardwareManager:
         array_config = configparser.ConfigParser()
         array_config.read('../array_config.ini')
         self.ini_rxfe_settings  = array_config['rxfe']
-        self.totalScalingFactor = float(array_config['gain_control']['total_scaling_factor'])
+        self.scaling_factor_tx_total = float(array_config['gain_control']['scaling_factor_tx_total'])
+        self.scaling_factor_rx_bb = float(array_config['gain_control']['scaling_factor_rx_bb'])
+        self.scaling_factor_rx_if = float(array_config['gain_control']['scaling_factor_rx_if'])
 
         self.ini_array_settings = array_config['array_info']
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
@@ -1079,9 +1080,9 @@ class RadarHardwareManager:
                      for item in channel.ctrlprm_struct.dataqueue:
                         if item.name == 'rbeam':
                            channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
-
                self.logger.debug('end rx beamforming')
-
+     
+               # save BB samples if usrp live view is active
                if os.path.isfile("./bufferLiveData.flag"):
                   self.logger.info("Buffering raw data to disk.")
                   chResExportList = [ ch.resultDict_list[-1] for ch in self.channels if ch.processing_state == CS_PROCESSING]
@@ -1090,10 +1091,13 @@ class RadarHardwareManager:
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
 
-               for iChannel, channel in enumerate(self.channels):
-                  if channel.processing_state == CS_PROCESSING and  os.path.isfile("/collect.if.{:c}".format(97+iChannel)):
+               # save IF raw data
+               for channel in self.channels:
+                  if channel.processing_state == CS_PROCESSING and  os.path.isfile("/collect.if.{:c}".format(97+channel.cnum)):
+                     channel.logger.warning("Channel {} saving raw IF samples.".format(channel.cnum))
                      channel.get_if_data()
                      channel.write_if_data()
+                     
            else:
               self.logger.debug('No processing channles available. Skipping CUDA_GET_DATA and rx beamforming')
 
@@ -1225,9 +1229,10 @@ class RadarHardwareManager:
 
     def gain_control_divide_by_nChannels(self, nChannelsWillBeAdded=0):
         nChannels = len(self.channels) + nChannelsWillBeAdded
-        self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.totalScalingFactor, nChannels))
+        self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.scaling_factor_tx_total, nChannels))
         for ch in self.channels + self.newChannelList:
-            ch.channelScalingFactor = 1 / nChannels * self.totalScalingFactor 
+            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
+ 
     # BEAMFORMING
     def calc_beamforming(RHM, main_samples, back_samples):
         RHM.logger.warning("TODO process back array! where to split from main array??")
@@ -1245,14 +1250,18 @@ class RadarHardwareManager:
                 
                 # MAIN ARRAY
                 phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in RHM.antenna_idx_list_main])  # calculate a complex number representing the phase shift for each antenna
-                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) 
+                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) * RHM.scaling_factor_rx_bb 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
                 maxInt16value = np.iinfo(np.int16).max # 32767
                 minInt16value = np.iinfo(np.int16).min # -32768
+                abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
+                RHM.logger.info("Abs max_value is {} (int16_max= {}, max_value / int16_max = {} ) ".format(abs_max_value, maxInt16value, abs_max_value / maxInt16value ))                
 
+                # check for clipping
                 if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
                    RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
+        
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
