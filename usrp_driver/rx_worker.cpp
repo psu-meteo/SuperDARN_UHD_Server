@@ -93,6 +93,8 @@ void usrp_rx_worker(
         //handle the error codes
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_LATE_COMMAND) break;
+        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) break;
+
         if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
             throw std::runtime_error(str(boost::format(
                 "Receiver error %s"
@@ -107,6 +109,8 @@ void usrp_rx_worker(
 
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
     if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+
+    int mute_received_samples = 0;
 
     if (num_acc_samps != num_requested_samps){
         *return_status=-1;
@@ -145,6 +149,17 @@ void usrp_rx_worker(
         std::cerr << "Packets out of order " << " encountered at " << rx_error_time.get_real_secs() << std::endl;
         *return_status=-1;
     }
+
+    if (mute_received_samples) {
+        std::cerr << "Muting received samples because error occurred. " << std::endl;
+        for (int iSide = 0; iSide < nSides; iSide++) { // TODO maybe smarter to mute sample while transfer to SHM (and just use special return_status)
+           for (int iSample=0; iSample<num_requested_samps; iSample++) {
+              (*rx_data_buffer)[iSide][iSample] = 0;
+           }
+        }
+    }
+
+
     DEBUG_PRINT("RX_WORKER finished\n");
     return;
 }
