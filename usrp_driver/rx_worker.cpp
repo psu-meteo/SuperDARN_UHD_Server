@@ -93,7 +93,15 @@ void usrp_rx_worker(
         //handle the error codes
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
         if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_LATE_COMMAND) break;
-        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) break;
+        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW) {
+           // same error code used for overflow and out of sequence
+           if (md.out_of_sequence) {
+               std::cerr << "ERROR_CODE_OVERFLOW: out of sequece." << std::endl;
+           } else {
+               std::cerr << "ERROR_CODE_OVERFLOW: overflow (not out of sequece)" << std::endl;
+           }
+           break;
+        }
 
         if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
             throw std::runtime_error(str(boost::format(
