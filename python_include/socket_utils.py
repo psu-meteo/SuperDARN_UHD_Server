@@ -48,7 +48,7 @@ def pickle_send(sock, data):
 def pickle_recv(sock):
     pickle_len = recv_dtype(sock, np.uint32)
     #print('expecting pickle with size: {} bytes'.format(pickle_len))
-    pickle_data = sock.recv(pickle_len)
+    pickle_data = sock.recv(pickle_len, socket.MSG_WAITALL)
     data = pickle.loads(pickle_data)
     return data
 

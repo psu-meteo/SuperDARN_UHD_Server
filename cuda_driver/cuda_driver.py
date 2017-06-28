@@ -211,8 +211,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
                 # apply phase shifting to pulse using phase_mask
                 psamp = np.copy(pulsesamps)
-                print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
-                print("phase mask size: {}".format(channel.phase_masks[iPulse]))
+             #   print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
+             #   print("phase mask size: {}".format(channel.phase_masks[iPulse]))
                 psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse])
                 # TODO: support non-1us resolution phase masks
         

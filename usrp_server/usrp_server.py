@@ -607,8 +607,8 @@ class RadarHardwareManager:
         array_config.read('../array_config.ini')
         self.ini_rxfe_settings  = array_config['rxfe']
         self.scaling_factor_tx_total = float(array_config['gain_control']['scaling_factor_tx_total'])
-        self.scaling_factor_rx_bb = float(array_config['gain_control']['scaling_factor_rx_bb'])
-        self.scaling_factor_rx_if = float(array_config['gain_control']['scaling_factor_rx_if'])
+        self.scaling_factor_rx_bb    = float(array_config['gain_control']['scaling_factor_rx_bb'])
+        self.scaling_factor_rx_if    = float(array_config['gain_control']['scaling_factor_rx_if'])
 
         self.ini_array_settings = array_config['array_info']
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
@@ -710,17 +710,17 @@ class RadarHardwareManager:
         cuda_driver_socks = []
 
         cuda_driver_port = int(self.ini_network_settings['CUDADriverPort'])
-        cuda_driver_hostnames = self.ini_network_settings['CUDADriverHostnames'].split(',')
+        cuda_driver_hostnames = [name.strip() for name in self.ini_network_settings['CUDADriverHostnames'].split(',')]
 
         try:
             for c in cuda_driver_hostnames:
-                self.logger.debug('connecting to cuda driver on {}'.format(c))
+                self.logger.debug('connecting to cuda driver on {}:{}'.format(c, cuda_driver_port))
                 cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 cudasock.connect((c, cuda_driver_port))
                 cuda_driver_socks.append(cudasock)
-        except ConnectionRefusedError:
-            self.logger.error("cuda server connection failed on {}".format(c))
-            sys.exit(1)
+            except ConnectionRefusedError:
+                self.logger.error("cuda server connection failed on {}".format(c))
+                sys.exit(1)
 
         self.cudasocks = cuda_driver_socks
     
@@ -1690,7 +1690,7 @@ class RadarChannelHandler:
           transmit_dtype(cudasock, -1, np.int32) # to end transfer process
                    
           cmd.client_return()
-          channel.oversample_export_data['data'] = if_samples
+          channel.oversample_export_data['data'] = if_samples * RHM.scaling_factor_rx_if
           channel.oversample_export_data['nAntennas'] = nAntennas
           channel.oversample_export_data['nSamples'] = nSamples_if
           channel.logger.debug('end CUDA_GET_IF_DATA')
