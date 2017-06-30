@@ -242,10 +242,13 @@ def stop_usrp_driver_soft():
             continue
 
         myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], int(process['host'].split(".")[2]) + USRPDriverPort, process['pid']))
-        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect(('localhost', int(process['host'].split(".")[2]) + USRPDriverPort))
+        try:
+           usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+           usrpsock.connect(('localhost', int(process['host'].split(".")[2]) + USRPDriverPort))
     
-        usrpsock.sendall(dtype(UHD_EXIT).tobytes())
+           usrpsock.sendall(dtype(UHD_EXIT).tobytes())
+        except:
+           myPrint("  connection to {}:{} (pid {}) failed".format(process['host'], int(process['host'].split(".")[2]) + USRPDriverPort, process['pid']))
     
        # dstr = usrpsock.recv(dtype().nbytes )
        # myPrint('  => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes , dstr  ))
@@ -265,7 +268,10 @@ def stop_usrp_driver_hard():
 
 def stop_usrp_driver():
     myPrint(" Stopping usrp_driver...")
-    stop_usrp_driver_soft()
+    try:
+        stop_usrp_driver_soft()
+    except:
+        myPrint("Soft USRP stop failed...")
     stop_usrp_driver_hard()
 
 def get_cuda_driver_processes():
@@ -433,8 +439,8 @@ def start_usrps_from_config(usrp_sleep = False):
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
-    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
-#    baseStartArg = ['./usrp_driver',  '--host' ]
+###    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
+    baseStartArg = ['./usrp_driver',  '--host' ]
     
     for start_arg in start_arg_list:
        all_start_arg = baseStartArg + start_arg 

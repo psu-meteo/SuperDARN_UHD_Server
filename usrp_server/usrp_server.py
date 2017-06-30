@@ -718,7 +718,7 @@ class RadarHardwareManager:
                 cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 cudasock.connect((c, cuda_driver_port))
                 cuda_driver_socks.append(cudasock)
-            except ConnectionRefusedError:
+        except ConnectionRefusedError:
                 self.logger.error("cuda server connection failed on {}".format(c))
                 sys.exit(1)
 
