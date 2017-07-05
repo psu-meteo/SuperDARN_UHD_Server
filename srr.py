@@ -319,10 +319,14 @@ def stop_cuda_driver():
     cudaProcesses = get_process_ids("cuda")
     if len(cudaProcesses):
        for process in cudaProcesses:
-            myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost',CUDADriverPort))
-            sock.sendall(np.uint8(CUDA_EXIT).tobytes())
+            try:
+               myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+               sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+               sock.connect(('localhost',CUDADriverPort))
+               sock.sendall(np.uint8(CUDA_EXIT).tobytes())
+            except:
+                myPrint(" soft extit failed: localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+                
         
        time.sleep(1)
        # terminate processes if they still exis

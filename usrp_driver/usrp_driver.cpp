@@ -184,7 +184,7 @@ void unlock_semaphore(sem_t sem)
 double sock_get_float64(int32_t sock)
 {
    double d = 0;
-   ssize_t status = recv(sock, &d, sizeof(double), 0);
+   ssize_t status = recv(sock, &d, sizeof(double), MSG_WAITALL);
    if(status != sizeof(double)) {
         fprintf(stderr, "error receiving float64\n");
    }
@@ -194,7 +194,7 @@ double sock_get_float64(int32_t sock)
 uint32_t sock_get_uint32(int32_t sock)
 {
    uint32_t d = 0;
-   ssize_t status = recv(sock, &d, sizeof(uint32_t), 0);
+   ssize_t status = recv(sock, &d, sizeof(uint32_t), MSG_WAITALL);
    if(status != sizeof(uint32_t)) {
         fprintf(stderr, "error receiving uint32_t\n");
    }
@@ -204,7 +204,7 @@ uint32_t sock_get_uint32(int32_t sock)
 int32_t sock_get_int32(int32_t sock)
 {
    int32_t d = 0;
-   ssize_t status = recv(sock, &d, sizeof(int32_t), 0);
+   ssize_t status = recv(sock, &d, sizeof(int32_t), MSG_WAITALL);
    if(status != sizeof(int32_t)) {
         fprintf(stderr, "error receiving int32_t\n");
    }
@@ -214,7 +214,7 @@ int32_t sock_get_int32(int32_t sock)
 int16_t sock_get_int16(int32_t sock)
 {
    int16_t d = 0;
-   ssize_t status = recv(sock, &d, sizeof(int16_t), 0);
+   ssize_t status = recv(sock, &d, sizeof(int16_t), MSG_WAITALL);
    if(status != sizeof(int16_t)) {
         fprintf(stderr, "error receiving int16_t\n");
    }
@@ -311,7 +311,7 @@ ssize_t sock_send_complex_int16(int32_t sock, std::complex<int16_t> d)
 uint64_t sock_get_uint64(int32_t sock)
 {
    uint64_t d = 0;
-   ssize_t status = recv(sock, &d, sizeof(uint64_t), 0);
+   ssize_t status = recv(sock, &d, sizeof(uint64_t), MSG_WAITALL);
    if(status != sizeof(uint64_t)) {
         fprintf(stderr, "error receiving uint64_t\n");
    }
