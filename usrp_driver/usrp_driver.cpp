@@ -47,7 +47,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 1 
+#define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
