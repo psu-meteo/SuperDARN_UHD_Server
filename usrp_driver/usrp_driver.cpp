@@ -513,7 +513,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
      
 
     std::string usrpargs(as_host->sval[0]);
-    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
+//    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6,recv_frame_size=8000";
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
     usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));

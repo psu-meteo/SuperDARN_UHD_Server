@@ -86,8 +86,8 @@ class usrpSockManager():
                connected_usrp_list.append(usrpConfig['usrp_hostname'])
 
          except ConnectionRefusedError:
-            self.logger.error('USRP server connection failed on port {}'.format(usrpConfig['array_idx']))
-            self.addressList_inactive.append((usrpConfig['driver_hostname'], int(usrpConfig['array_idx']) + usrp_driver_base_port))
+            self.logger.error('USRP server connection failed: {}:{}'.format(usrpConfig['driver_hostname'], port))
+            self.addressList_inactive.append((usrpConfig['driver_hostname'], port ))
 
 
    def eval_client_return(self, cmd, fcn=None):
@@ -560,14 +560,14 @@ class RadarHardwareManager:
         self.channels = []
         usrp_server_logger = logging.getLogger('usrp_server')
 
-        ct = threading.Thread(target=radar_main_control_loop)
+        ct = threading.Thread(target=radar_main_control_loop, daemon=False)
         ct.start()
         while True:
             usrp_server_logger.info('waiting for control program')
             client_conn, addr = self.client_sock.accept()
 
             usrp_server_logger.info('connection from control program, spawning channel handler thread')
-            ct = threading.Thread(target=spawn_channel, args=(client_conn,))
+            ct = threading.Thread(target=spawn_channel, args=(client_conn,), daemon=False)
             client_threads.append(ct)
             ct.start()
        
@@ -712,15 +712,17 @@ class RadarHardwareManager:
         cuda_driver_port = int(self.ini_network_settings['CUDADriverPort'])
         cuda_driver_hostnames = [name.strip() for name in self.ini_network_settings['CUDADriverHostnames'].split(',')]
 
-        try:
-            for c in cuda_driver_hostnames:
+        for c in cuda_driver_hostnames:
+           try:
                 self.logger.debug('connecting to cuda driver on {}:{}'.format(c, cuda_driver_port))
                 cudasock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 cudasock.connect((c, cuda_driver_port))
                 cuda_driver_socks.append(cudasock)
-        except ConnectionRefusedError:
+           except ConnectionRefusedError:
                 self.logger.error("cuda server connection failed on {}".format(c))
-                sys.exit(1)
+        if len(cuda_driver_socks) == 0:
+           self.logger.error("No cuda connection available. Exiting usrp_server")
+           sys.exit(1)
 
         self.cudasocks = cuda_driver_socks
     
@@ -1050,10 +1052,12 @@ class RadarHardwareManager:
                                if antIdx in self.antenna_idx_list_main:
                                    iAntenna = self.antenna_idx_list_main.index(antIdx)
                                    main_samples[iChannel][iAntenna] = samples[:]
-
-                               else:
+                               elif antIdx in self.antenna_idx_list_back:
                                    iAntenna = self.antenna_idx_list_back.index(antIdx)
                                    back_samples[iChannel][iAntenna] = samples[:]
+                               else:
+                                   self.logger.error("Cuda tranmitted antenna ({}) that is not in main array list ({}) and back array list ({}). (Maybe differnt antenna definietions in usrp_config.ini on both computers?)".format(antIdx, self.antenna_idx_list_main, self.antenna_idx_list_back))
+                                   sys.exit(1)
                                            
              
                    transmit_dtype(cudasock, -1, np.int32) # to end transfer process

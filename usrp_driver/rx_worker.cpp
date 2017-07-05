@@ -144,13 +144,14 @@ void usrp_rx_worker(
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
 
-        size_t num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
-        std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
+  //      size_t num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
+  //    std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
 
-        while (num_rx_samps != 0 && !md.end_of_burst ) {
+/*        while (num_rx_samps != 0 && !md.end_of_burst ) {
             num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
             std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
         }
+*/
         std::cerr << "Overflow cleanup: finished."   <<  std::endl;
 
         mute_received_samples = 1;
