@@ -108,7 +108,7 @@ def initialize(inputArg):
    # remove old files
    myPrint(" Removing old config files")
    for targetFile in [usrp_config_target_file, driver_config_target_file]:
-      if os.path.isfile(targetFile):
+      if os.path.isfile(targetFile) or os.path.islink(targetFile):
          if os.path.islink(targetFile): # is a link
              myPrint("  removing link for {}".format(targetFile))
              os.unlink(targetFile)
