@@ -4,7 +4,12 @@
 #
 #  Usage:
 #     srr.py [status]              : shows all software radio processes 
-#     srr.py init [auto|main|aux]  : create symlink to usrp_config file (default is auto)
+#     srr.py init                  : create symlink to usrp_config and drivern_config.ini
+#                                    all arguments are optional, order doesn't matter:
+#                 [main|aux]            : computer name, default is auto detect of hostname
+#                 [single|master|slave] : network mode, default is master for main and slave for aux
+#                 [singlePol|dualPol]   : polarization, default is single
+#            
 #     srr.py start   PROCESS       : start a process or process group (see below for processes) 
 #     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
 #     srr.py restart PROCESS       : restart a process or process group with needed wait times
@@ -95,38 +100,76 @@ def waitFor(nSeconds):
 ######################
 ## init
 def initialize(inputArg):
-   configPath = basePath # might change later...
+   configPath = basePath + "/config" 
 
-   usrp_config_source_file = dict(main=configPath + "/usrp_config__kod-main.ini", aux=configPath + "/usrp_config__kod-aux.ini")
-   usrp_config_target_file = configPath + "/usrp_config.ini"
+   usrp_config_target_file   = basePath + "/usrp_config.ini"
+   driver_config_target_file = basePath + "/driver_config.ini"
 
-   if len(inputArg) == 1 or inputArg[1].lower() == "auto":
-      hostName = os.uname()[1].lower()
-      myPrint(" Auto detect of hostname: {}".format(hostName))
+   # remove old files
+   myPrint(" Removing old config files")
+   for targetFile in [usrp_config_target_file, driver_config_target_file]:
+      if os.path.isfile(targetFile):
+         if os.path.islink(targetFile): # is a link
+             myPrint("  removing link for {}".format(targetFile))
+             os.unlink(targetFile)
+         else: # is a file
+             myPrint("  removing file {}".format(targetFile))
+             os.remove(targetFile)
+
+   # default paramter values 
+   hostName     = os.uname()[1].lower().split("-")[-1]
+   polarization = 'singlePol'
+   netConfig    = 'auto' # master, slave, or single
+   myPrint(" Starting with default: host:{}, netConfig={}, polarization={}".format(hostName, netConfig, polarization))
+
+   # parse input arguments
+   del inputArg[0] 
+   for arg in inputArg:
+      if arg.lower() in ['main', 'aux']:
+         hostName =  arg.lower()
+      elif arg in ['singlePol', 'dualPol']:
+         polarization = arg
+      elif arg.lower() in ['single', 'master', 'slave']:
+         netConfig = arg.lower()
+      else:
+         myPrint("Unknown argument for init: {} ".format(arg))
+         return
+
+   if netConfig == 'auto':
+      if hostName == "aux":
+         netConfig = "slave"
+      elif hostName == "main":
+         netconfig = "master"
+      else:
+         myPrint("Unknown host ({}), unable to set auto netconfig.".format(hostName))
+         return 
+   myPrint(" Initializing with: host={}, netConfig={}, polarization={}".format(hostName, netConfig, polarization))
+
+   # DETERMINE CONFIG FILE NAMES      
+   # for usrp_config single and slave is the same
+   if netConfig == 'slave':
+      usrp_net_config_name = 'single'
    else:
-      hostName = inputArg[1].lower()
+      usrp_net_config_name = netConfig
 
-   if hostName in ['main', 'kod-main', 'kodiak-main']:
-      computer = "main"
-   elif hostName in ['aux', 'kod-aux', 'kodiak-aux']: 
-      computer = "aux"
+   usrp_config_source_file    = configPath + "/usrp_config__" + hostName + "_" + usrp_net_config_name + "_" + polarization + ".ini"
+
+   # for netmode single the host name doesn't matter
+   if netConfig == 'single':
+      driver_host_name = ""
    else:
-      myPrint(" Error. Unkown copmuter name. Use MAIN or AUX")
-      return
+      driver_host_name = hostName + "_" 
+ 
+   driver_config_source_file = configPath + "/driver_config__" + driver_host_name + netConfig  + ".ini"
 
-   myPrint(" Initializing for computer: {}".format(computer))
+   # linking new files   
+   myPrint("Creating symlink {}".format(usrp_config_target_file))  
+   myPrint("   -> {}".format( usrp_config_source_file))  
+   os.symlink(usrp_config_source_file, usrp_config_target_file)
 
-   if os.path.isfile(usrp_config_target_file):
-      if os.path.islink(usrp_config_target_file): # is a link
-          myPrint("  removing link for {}".format(usrp_config_target_file))
-          os.unlink(usrp_config_target_file)
-      else: # is a file
-          myPrint("  removing file {}".format(usrp_config_target_file))
-          os.remove(usrp_config_target_file)
-       
-   
-   os.symlink(usrp_config_source_file[computer], usrp_config_target_file)
-   myPrint("Creating symlink {} -> {}".format(usrp_config_target_file, usrp_config_source_file[computer]))
+   myPrint("Creating symlink {} ".format(driver_config_target_file))  
+   myPrint("   -> {}".format( driver_config_source_file))  
+   os.symlink(driver_config_source_file, driver_config_target_file)
 
 def show_help():
    thisFile = open( os.path.realpath(__file__), 'r')
