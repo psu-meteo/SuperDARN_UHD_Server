@@ -47,7 +47,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 0 
+#define SAVE_RAW_SAMPLES_DEBUG 1 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
@@ -772,10 +772,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         if(SAVE_RAW_SAMPLES_DEBUG) {
                             FILE *raw_dump_fp;
                             char raw_dump_name[80];
+                            int nExportSamples =  nSamples_tx_pulse+2*spb;
+                            DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", nExportSamples, nSamples_tx_pulse, spb);
                             for (iSide =0; iSide < nSides; iSide++){
                                 sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
                                 raw_dump_fp = fopen(raw_dump_name, "wb");
-                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>), pulse_bytes+2*spb, raw_dump_fp);
+                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),nExportSamples , raw_dump_fp);
                                 fclose(raw_dump_fp);
                             }
                         }
@@ -797,7 +799,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
 
                         DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets[0].get_real_secs());
-                        DEBUG_PRINT("last TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets[-1].get_real_secs());
+                        DEBUG_PRINT("last TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets.back().get_real_secs());
                         
                         rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
