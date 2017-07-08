@@ -38,9 +38,12 @@ from profiling_tools import *
 import logging_usrp
 
 MAX_CHANNELS = 10
-RMSG_FAILURE = -1
 CLRFREQ_RES_HZ = 1000
+USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
+
 RMSG_SUCCESS = 0
+RMSG_FAILURE = -1
+
 RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
@@ -131,8 +134,8 @@ class usrpMixingFreqManager():
         at a time can call add_new_freq_band().  """
   
     def __init__(self, cFreq, bandWidth):
-       self.current_mixing_freq = cFreq
-       self.usrp_bandwidth      = bandWidth
+       self.current_mixing_freq = cFreq       # in kHz (to be compatible with control program)
+       self.usrp_bandwidth      = bandWidth - USRP_BANDWIDTH_RESTRICTION*2/1000   # in kHz (to be compatible with control program)
        self.semaphore = posix_ipc.Semaphore('usrp_mixing_freq', posix_ipc.O_CREAT)
        self.semaphore.release()
        self.channelRangeList    = []
@@ -144,7 +147,11 @@ class usrpMixingFreqManager():
            allows to add the new channel, the new mixing frequency will be output argument.
        """
 
+       RHM = channel.parent_RadarHardwareManager
        newLower, newUpper = self.get_range_of_channel(channel)
+       if newLower <  RHM.hardwareLimit_freqRange[0] or newUpper > RHM.hardwareLimit_freqRange[1]:
+          channel.logger.error("Channel bandwidth ({} MHz- {} MHz) is not covered by radar hardware limits ({} MHz - {} MHz)".format(newLower/1000, newUpper/1000, RHM.hardwareLimit_freqRange[0]/1000, RHM.hardwareLimit_freqRange[1]/1000))
+          return False
 
        channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager")
        self.semaphore.acquire()
@@ -165,14 +172,13 @@ class usrpMixingFreqManager():
              allCh_upper = max(allCh_upper, otherChRange[1])
 
 
-          if (allCh_upper - allCh_lower) > self.usrp_bandwith:
+          if (allCh_upper - allCh_lower) > self.usrp_bandwidth:
              channel.logger.error("new channel can not be added. USPR bandwidth too small")
              result =  False
           else:
              newMixingFreq = (allCh_upper - allCh_lower)/2 + allCh_lower
              channel.logger.info("calculated new usrp mixing frequency: {} kHz (old was {} kHz)".format(newMixingFreq, self.current_mixing_freq))
              # adjust mixing freq that everything is in overall bandwidth
-             RHM = channel.parent_RadarHardwareManager
              newMixingFreq = max(newMixingFreq, RHM.hardwareLimit_freqRange[0]+self.usrp_bandwidth/2)
              newMixingFreq = min(newMixingFreq, RHM.hardwareLimit_freqRange[1]-self.usrp_bandwidth/2)
              self.current_mixing_freq = newMixingFreq
@@ -184,12 +190,16 @@ class usrpMixingFreqManager():
        return result
 
     def get_range_of_channel(self, channel):
-       rangeList = channel.scanManager.clear_freq_range_list
-       lower = rangeList[0][0] 
-       upper = rangeList[0][1]
-       for periodRange in rangeList[1:]:
-          lower = min(lower, periodRange[0])
-          upper = max(lower, periodRange[1])
+       if channel.scanManager.fixFreq in [ None, -1, 0]: 
+          rangeList = channel.scanManager.clear_freq_range_list
+          lower = rangeList[0][0] 
+          upper = rangeList[0][1]
+          for periodRange in rangeList[1:]:
+             lower = min(lower, periodRange[0])
+             upper = max(lower, periodRange[1])
+       else:
+          lower = channel.scanManager.fixFreq
+          upper = channel.scanManager.fixFreq
        return lower, upper
 
 
@@ -482,6 +492,7 @@ class RadarHardwareManager:
         self.set_par_semaphore.release()
         self.lastSwingInvalid = False
         self.trigger_next_function_running = False
+        self.commonChannelParameter = {}
 
 
     def run(self):
@@ -1774,7 +1785,7 @@ class RadarChannelHandler:
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
 
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
-              return RSMG_FAILURE
+              return RMSG_FAILURE
 
            if self not in self.parent_RadarHardwareManager.newChannelList:
               self.parent_RadarHardwareManager.newChannelList.append(self)
@@ -1840,10 +1851,11 @@ class RadarChannelHandler:
             #    resp=15km => 10 kHz     (used in pcodescan_15km)
             #    resp=6km  => 25 kHz     (used in pcodescan)
             # TODO add 10M
-            goodDownsampleRates = [[20, 75], # 5M => 3.333k
-                                   [20, 25], # 5M => 10k 
-                                   [10 ,20], # 5M => 25k 
-                                   [10 ,75], # 2.5M => 3.333k 
+            goodDownsampleRates = [[20, 75],  # 5M => 3.333k
+                                   [20, 25],  # 5M => 10k 
+                                   [10 ,20],  # 5M => 25k 
+                                   [10 ,75],  # 2.5M => 3.333k 
+                                   [30 ,100], # 10M => 3.333k 
             ]
          
             total_downsample_rate = hardwareManager.usrp_rf_rx_rate / hardwareManager.commonChannelParameter['baseband_samplerate']
@@ -2114,12 +2126,12 @@ class RadarChannelHandler:
             self.swingManager.reset()
             self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
             return RMSG_SUCCESS
-        elif addFreqResuult == False:
+        elif addFreqResult == False:
             self.logger.error("Freq range of new channel (cnum {}) is not in USRP bandwidth. (freq_range_list[0][0] = {} ".format(self.cnum, freq_range_list[0][0]))
             self.scanManager.clear_freq_range_list = None 
             self.scan_beam_list = None
             self.fixFreq = None
-            return RSMG_FAILURE
+            return RMSG_FAILURE
         else: # new mixing freq
             self.parent_RadarHardwareManager.send_cuda_setup_command()
             self.swingManager.reset()
