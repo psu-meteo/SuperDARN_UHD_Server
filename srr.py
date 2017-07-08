@@ -654,7 +654,8 @@ else:
          waitFor(nSecs_restart_pause)
          start_cuda_driver()
          start_usrp_driver()
-#         start_usrp_server()
+         waitFor(10)
+         start_usrp_server()
 
       elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
          stop_usrp_driver()

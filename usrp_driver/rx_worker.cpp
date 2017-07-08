@@ -44,9 +44,9 @@ void usrp_rx_worker(
 ){
 
     DEBUG_PRINT("entering RX_WORKER\n");
-    fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
+ //   fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
     int nSides = (*rx_data_buffer).size();
-    fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
+ //   fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
 
 
     //setup streaming
@@ -75,15 +75,14 @@ void usrp_rx_worker(
           DEBUG_PRINT("%i, ", (*rx_data_buffer)[iSide][iSample]);
     }
  */
-    DEBUG_PRINT("rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
 
     DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
         size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
         for (int iSide = 0; iSide < nSides; iSide++) {
             buff_ptrs[iSide] = &((*rx_data_buffer)[iSide][num_acc_samps]);
-            if (num_acc_samps == 0)
-               DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
+          //  if (num_acc_samps == 0)
+          //     DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
         }
 
         size_t num_rx_samps = rx_stream->recv(buff_ptrs , samp_request, md, timeout);
