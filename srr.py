@@ -86,10 +86,6 @@ def myPrint(msg):
    print("||>  {}".format(msg))
 basePrintLine = "||>==============================================================="
 
-print(basePrintLine)
-myPrint("Software Radio Radar")
-myPrint(" ")
-
 def waitFor(nSeconds):
    print("||> Waiting for {} second(s): ".format(nSeconds), end="", flush=True)
    for i in range(nSeconds):
@@ -583,157 +579,165 @@ def start_liveRawView_tool():
     os.chdir(os.path.join(basePath, "tools") )   
     subprocess.Popen(['./plotRawSamples_usrpServer.py' ])
 
+###############
+def restart_all():
+   myPrint("Restarting all processes")
+   stop_usrp_server()
+   waitFor(2)
+   stop_usrp_driver()
+   stop_cuda_driver()
+   myPrint("waiting for {} sec".format(nSecs_restart_pause))
+   waitFor(nSecs_restart_pause)
+   start_cuda_driver()
+   start_usrp_driver()
+   waitFor(10)
+   start_usrp_server()
 
 
 
 #########################
 ## MAIN PART:
+def main():
+   print(basePrintLine)
+   myPrint("Software Radio Radar")
+   myPrint(" ")
 
-inputArg = sys.argv[1:]
-nArguments = len(inputArg)
-
-if nArguments == 0:   # DEFAULT option
-   print_status()
-else:
-   firstArg = inputArg[0].lower()
+   inputArg = sys.argv[1:]
+   nArguments = len(inputArg)
    
-   if firstArg == "status":
-       print_status()
-   elif firstArg == "init":
-       initialize(inputArg)
-   elif firstArg.lower() in ["liverawview", "rawview"]:
-        start_liveRawView_tool()  
-   elif firstArg.lower() in ["network", "networktool"]:
-        start_network_tool()  
-   elif firstArg == "start":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Starting all...")
-         start_cuda_driver()
-         start_usrp_driver()
-         waitFor(10)
-         start_usrp_server()
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         start_cuda_driver()
-      elif inputArg[1].lower() == "driver":
-         start_cuda_driver()
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         start_usrp_server()
-      elif inputArg[1].lower() in ["uaf_fix_onesec", "uafscan_fix_onesec"]:
-         start_uafscan_fixfreq_onesec(inputArg)
-      elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
-         start_uafscan_fixfreq(inputArg)
-      elif inputArg[1].lower() in ["normalscan"]:
-         start_normalscan()
-      elif inputArg[1].lower() in ["2normalscans"]:
-         start_2normalscans()
-      elif inputArg[1].lower() in ["rtserver"]:
-         start_rtserver()
-      elif inputArg[1].lower() in ["errorlog", "errlog"]:
-         start_errorlog()
-      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
-         start_fitacf_write()
-      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
-         start_rawacf_write()
-      else:
-         myPrint("ERROR: Unknown process to start")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-
-   elif firstArg == "restart":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Restarting all...")
-         stop_usrp_server()
-         waitFor(2)
-         stop_usrp_driver()
-         stop_cuda_driver()
-         myPrint("waiting for {} sec".format(nSecs_restart_pause))
-         waitFor(nSecs_restart_pause)
-         start_cuda_driver()
-         start_usrp_driver()
-         waitFor(10)
-         start_usrp_server()
-
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         stop_usrp_driver()
-         myPrint("waiting for {} sec".format(nSecs_restart_pause))
-         time.sleep(nSecs_restart_pause)
-         start_usrp_driver()
-
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         stop_cuda_driver()
-         start_cuda_driver()
-
-      elif inputArg[1].lower() == "driver":
-         stop_usrp_server() # this does not work....
-         waitFor(2)
-         stop_usrp_driver()
-         stop_cuda_driver()
-         waitFor(nSecs_restart_pause)
-         start_cuda_driver()
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         stop_usrp_server()
-         start_usrp_server()
-
-      else:
-         myPrint("ERROR: Unknown process to restart")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-
-
-   elif firstArg == "stop":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Stopping all...")
-         stop_usrp_server()
-         time.sleep(1)
-         stop_cuda_driver()
-         time.sleep(2)
-         stop_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         stop_usrp_driver()
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         stop_cuda_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         stop_usrp_server()
-      elif inputArg[1].lower() in ["rtserver"]:
-         stop_rtserver()
-      elif inputArg[1].lower() == "driver":
-         stop_usrp_driver()
-         stop_cuda_driver()
-      elif inputArg[1].lower() in ["errorlog", "errlog"]:
-         stop_errorlog()
-      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
-         stop_fitacf_write()
-      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
-         stop_rawacf_write()
-      elif inputArg[1].lower() in ["scans", "allscans"]:
-         stop_allscans()
-      else:
-         myPrint("ERROR: Unknown process to stop")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-   elif firstArg == "help":
-      show_help()
-   
+   if nArguments == 0:   # DEFAULT option
+      print_status()
    else:
-      myPrint("ERROR: UNKNWON COMMAND")
-      myPrint("See srr help for usage:")
-      myPrint("")
-      show_help()
+      firstArg = inputArg[0].lower()
+      
+      if firstArg == "status":
+          print_status()
+      elif firstArg == "init":
+          initialize(inputArg)
+      elif firstArg.lower() in ["liverawview", "rawview"]:
+           start_liveRawView_tool()  
+      elif firstArg.lower() in ["network", "networktool"]:
+           start_network_tool()  
+      elif firstArg == "start":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            myPrint("Starting all...")
+            start_cuda_driver()
+            start_usrp_driver()
+            waitFor(10)
+            start_usrp_server()
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            start_usrp_driver()
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            start_cuda_driver()
+         elif inputArg[1].lower() == "driver":
+            start_cuda_driver()
+            start_usrp_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            start_usrp_server()
+         elif inputArg[1].lower() in ["uaf_fix_onesec", "uafscan_fix_onesec"]:
+            start_uafscan_fixfreq_onesec(inputArg)
+         elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
+            start_uafscan_fixfreq(inputArg)
+         elif inputArg[1].lower() in ["normalscan"]:
+            start_normalscan()
+         elif inputArg[1].lower() in ["2normalscans"]:
+            start_2normalscans()
+         elif inputArg[1].lower() in ["rtserver"]:
+            start_rtserver()
+         elif inputArg[1].lower() in ["errorlog", "errlog"]:
+            start_errorlog()
+         elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+            start_fitacf_write()
+         elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+            start_rawacf_write()
+         else:
+            myPrint("ERROR: Unknown process to start")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
    
-myPrint(" ")
-print(basePrintLine)
-print(basePrintLine)
+      elif firstArg == "restart":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            restart_all()
+
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            stop_usrp_driver()
+            myPrint("waiting for {} sec".format(nSecs_restart_pause))
+            time.sleep(nSecs_restart_pause)
+            start_usrp_driver()
+   
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            stop_cuda_driver()
+            start_cuda_driver()
+   
+         elif inputArg[1].lower() == "driver":
+            stop_usrp_server() # this does not work....
+            waitFor(2)
+            stop_usrp_driver()
+            stop_cuda_driver()
+            waitFor(nSecs_restart_pause)
+            start_cuda_driver()
+            start_usrp_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            stop_usrp_server()
+            start_usrp_server()
+   
+         else:
+            myPrint("ERROR: Unknown process to restart")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
+   
+   
+      elif firstArg == "stop":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            myPrint("Stopping all...")
+            stop_usrp_server()
+            time.sleep(1)
+            stop_cuda_driver()
+            time.sleep(2)
+            stop_usrp_driver()
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            stop_usrp_driver()
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            stop_cuda_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            stop_usrp_server()
+         elif inputArg[1].lower() in ["rtserver"]:
+            stop_rtserver()
+         elif inputArg[1].lower() == "driver":
+            stop_usrp_driver()
+            stop_cuda_driver()
+         elif inputArg[1].lower() in ["errorlog", "errlog"]:
+            stop_errorlog()
+         elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+            stop_fitacf_write()
+         elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+            stop_rawacf_write()
+         elif inputArg[1].lower() in ["scans", "allscans"]:
+            stop_allscans()
+         else:
+            myPrint("ERROR: Unknown process to stop")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
+      elif firstArg == "help":
+         show_help()
+      
+      else:
+         myPrint("ERROR: UNKNWON COMMAND")
+         myPrint("See srr help for usage:")
+         myPrint("")
+         show_help()
+      
+   myPrint(" ")
+   print(basePrintLine)
+   print(basePrintLine)
    
    
    
-   
+if __name__ == '__main__':
+   main()
    
    
    

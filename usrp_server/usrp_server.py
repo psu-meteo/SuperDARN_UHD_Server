@@ -60,6 +60,28 @@ CS_PROCESSING    = 'CS_PROCESSING'
 CS_SAMPLES_READY = 'CS_SAMPLES_READY'
 CS_LAST_SWING    = 'CS_LAST_SWING'
 
+
+class statusUpdater():
+   " Class to a file every x minutes to allow checking uspr_status from outside"
+
+   def __init__(self):
+      self.fileName = '../log/usrp_server_status.txt'
+      self.nSeconds_update_period = 30
+      self.last_write = datetime.datetime.now()
+
+   def update(self):
+      nSeconds_since_last_write = (datetime.datetime.now() - self.last_write).total_seconds()
+      if self.nSeconds_update_period < nSeconds_since_last_write:
+         self.last_write = datetime.datetime.now()
+#         if not os.path.isfile(self.fileName):
+         with open(self.fileName, "w") as f:
+            f.write("")            # create empty file
+#    disadvantage this time is not the default time shown by ls
+#         else:
+#            print("updating time ")
+#            os.utime(self.fileName, None) # update the time
+       
+
 class usrpSockManager():
    def __init__(self, RHM):
       self.addressList_active     = [] # tuple of IP and port
@@ -71,6 +93,8 @@ class usrpSockManager():
       
       self.nUSRPs = len(RHM.ini_usrp_configs) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
+      self.errors_in_a_row = 0
+      self.error_limit = 5
       
       # open each
       connected_usrp_list = [] 
@@ -108,7 +132,24 @@ class usrpSockManager():
                del self.addressList_active[iSock-offset]
                del self.socks[iSock-offset]
                offset += 1 
+
+      if len(self.socks) == 0:
+         self.logger.error("No working USRPs left. Shutting down usrs_server...")
+         self.RHM.exit()
+
+
       return client_return
+
+   def watchdog(self, all_usrps_report_failure):
+      if all_usrps_report_failure:
+         self.errors_in_a_row += 1
+         self.logger.info("USRP watchdog: {} error in a row.".format(self.errors_in_a_row))
+         if self.errors_in_a_row >= self.error_limit:
+            self.logger.error("All USRPs reported error for GET_DATA ")
+      else:
+         if self.errors_in_a_row:
+            self.logger.info("USRP watchdog: Reset errors_in_a_row to 0.")
+            self.errors_in_a_row = 0
 
    def restore_lost_connections(self):
       addressList = self.addressList_inactive
@@ -507,14 +548,28 @@ class RadarHardwareManager:
                 self.unregister_channel_from_HardwareManager(channel)
             self.nControlPrograms -= 1
 
+        # not working, unused...
+        def radar_main_control_loop_environment():
+            "Run main_contol loop and catch errors"
+            # TODO shut down everything and ALSO print the error!
+           # try:
+           #    radar_control_loop()
+           # except:
+           #    e = sys.exc_info()[0]
+           #    self.logger.error(e.__str__())
+           #    self.logger.error("Error in mail contol loop. Shutting down usrp_server...")
+           #    self.exit()
+
         # TODO: add lock support
         def radar_main_control_loop():
             controlLoop_logger = logging.getLogger('Control Loop')
             controlLoop_logger.info('Starting RHM.radar_main_control_loop() ')
-          
+            statusFile = statusUpdater()
             sleepTime = 0.01 # used if control loop waits for one channel
            
             while True:
+
+                statusFile.update()
 
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time() # TODO change this to refence clock and scan times
@@ -571,7 +626,7 @@ class RadarHardwareManager:
         self.channels = []
         usrp_server_logger = logging.getLogger('usrp_server')
 
-        ct = threading.Thread(target=radar_main_control_loop, daemon=False)
+        ct = threading.Thread(target=radar_main_control_loop)
         ct.start()
         while True:
             usrp_server_logger.info('waiting for control program')
@@ -950,7 +1005,12 @@ class RadarHardwareManager:
            for tmpChannel in self.channels:
               if (tmpChannel is not None): 
                  tmpChannel.scanManager.wait_for_next_trigger()
-
+ 
+           # check if there is a USRP
+           if len(self.usrpManager.socks) == 0:
+              self.logger.error("Connections to all USRPs lost. Shutting down usrp_server...")
+              self.exit()
+ 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
            cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
@@ -1184,7 +1244,8 @@ class RadarHardwareManager:
            self.logger.debug('start receiving all USRP status')
            payloadList = self.usrpManager.eval_client_return(cmd, fcn=cmd.receive_all_metadata)
            self.logger.debug('end receiving all USRP status')
-
+       
+           all_usrps_report_failure = True
            for iUSRP, ready_return in enumerate(payloadList):
                if ready_return == CONNECTION_ERROR:
                   self.usrpManager.fault_status[iUSRP] = True
@@ -1193,13 +1254,17 @@ class RadarHardwareManager:
                   rx_status                = ready_return['status']
                   if rx_status == -1:
                      self.logger.error("Error occurred in rx_worker. TODO: delete data oder mute USRP? ") # TODO
+                  else:
+                     all_usrps_report_failure = False
+
                   self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
                   self.logger.debug('GET_DATA rx status {}'.format(rx_status))
                   if rx_status != 2:
                       self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
                       #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
-   
+           self.usrpManager.watchdog(all_usrps_report_failure)
+              
            self.logger.debug('start waiting for USRP_DATA return')
            self.usrpManager.eval_client_return(cmd)
            self.logger.debug('end waiting for USRP_DATA return')
@@ -1809,7 +1874,7 @@ class RadarChannelHandler:
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
-           self.logger.error("Active state is {}. Dont know what to do...".format(self.active_state))
+           self.logger.error("ROS:SetParameter: Active state is {}. Dont know what to do...".format(self.active_state))
            pdb.set_trace()
 
         
