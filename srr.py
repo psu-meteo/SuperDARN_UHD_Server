@@ -8,14 +8,15 @@
 #                                    all arguments are optional, order doesn't matter:
 #                 [main|aux]            : computer name, default is auto detect of hostname
 #                 [single|master|slave] : network mode, default is master for main and slave for aux
-#                 [singlePol|dualPol]   : polarization, default is single
+#                 [singlePol|dualPol]   : polarization, default is singlePol
 #            
-#     srr.py start   PROCESS       : start a process or process group (see below for processes) 
-#     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
-#     srr.py restart PROCESS       : restart a process or process group with needed wait times
 #     srr.py networkTool           : calls networkTool.py 
 #     srr.py rawView               : plot raw rx bb samples of all antennas
 #     srr.py help                  : show this help
+#
+#     srr.py start   PROCESS       : start a process or process group (see below for processes) 
+#     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
+#     srr.py restart PROCESS       : restart a process or process group with needed wait times
 #
 #  Available PROCESSES:
 #     cuda (or cuda_driver)        : cuda driver
@@ -79,8 +80,9 @@ USRP_SERVER_PORT = 45000
 USRP_SERVER_QUIT  = '.'
 
 
-
-nSecs_restart_pause = 10
+# time to wait for usrps
+# UHD 3.9 10s, UHD 3.10 0
+nSecs_restart_pause = 0
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -662,8 +664,8 @@ def main():
 
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             stop_usrp_driver()
-            myPrint("waiting for {} sec".format(nSecs_restart_pause))
-            time.sleep(nSecs_restart_pause)
+            myPrint("waiting for {} sec".format(nSecs_restart_pause+2))
+            time.sleep(nSecs_restart_pause+2)
             start_usrp_driver()
    
          elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
