@@ -25,7 +25,9 @@ import datetime
 import configparser
 import copy
 import posix_ipc
+import mmap
 import pickle
+
 sys.path.insert(0, '../python_include')
 
 from phasing_utils import *
@@ -86,6 +88,8 @@ class usrpSockManager():
    def __init__(self, RHM):
       self.addressList_active     = [] # tuple of IP and port
       self.addressList_inactive   = []
+      self.antennaList_active     = []
+      self.hostnameList_active    = []
       self.socks = []
       usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
       self.RHM = RHM
@@ -97,11 +101,14 @@ class usrpSockManager():
       self.error_limit = 5
       
       # open each
-      connected_usrp_list = [] 
+      self.hostnameList_active = [] 
       for usrpConfig in RHM.ini_usrp_configs:
          try:
-            if usrpConfig['usrp_hostname'] in connected_usrp_list:
+            if usrpConfig['usrp_hostname'] in self.hostnameList_active:
                self.logger.debug("Already connected to USRP {}".format(usrpConfig['usrp_hostname']))
+               idx_usrp = self.hostnameList_active.index(usrpConfig['usrp_hostname'])
+               self.antennaList_active[idx_usrp].append(usrpConfig['array_idx'])
+               
             else:
                port = int(usrpConfig['usrp_hostname'].split(".")[2]) + usrp_driver_base_port
                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -109,8 +116,9 @@ class usrpSockManager():
                usrpsock.connect(connectPar)
                self.socks.append(usrpsock)
                self.addressList_active.append(connectPar)
+               self.antennaList_active.append([usrpConfig['array_idx']])
                self.logger.debug('connected to usrp driver on port {}'.format(port))
-               connected_usrp_list.append(usrpConfig['usrp_hostname'])
+               self.hostnameList_active.append(usrpConfig['usrp_hostname'])
 
          except ConnectionRefusedError:
             self.logger.error('USRP server connection failed: {}:{}'.format(usrpConfig['driver_hostname'], port))
@@ -130,6 +138,11 @@ class usrpSockManager():
                self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
                self.addressList_inactive.append(self.addressList_active[iSock-offset] )
                del self.addressList_active[iSock-offset]
+               lost_antennas = self.antennaList_active[iSock-offset]
+               for iSwing in range(nSwings):
+                  self.fill_shm_with_zeros(lost_antennas, iSwing)
+               del self.antennaList_active[iSock-offset]
+               del self.hostnameList_active[iSock-offset]
                del self.socks[iSock-offset]
                offset += 1 
 
@@ -140,12 +153,41 @@ class usrpSockManager():
 
       return client_return
 
+#   def cleanup_usrp(self):
+#      for usrpConfig in RHM.ini_usrp_configs:
+#         try:
+#            if usrpConfig['usrp_hostname'] in self.hostnameList_active:
+
+   def fill_shm_with_zeros(self, antenna_list, swing):
+      side = 0
+      direction_list = ['rx', 'tx']
+      nInts_shm = int(self.RHM.ini_shm_settings['rxshm_size']) / 2 # two bytes per int
+      nZeros_per_block = 10000   #write zeros in blocks
+      zeros_block = np.zeros(nZeros_per_block, dtype=np.int16).tobytes()
+      nFullBlocks = int(nInts_shm / nZeros_per_block)
+      nInts_rem   = nInts_shm % nZeros_per_block
+      for antenna in antenna_list:
+        for direction in direction_list:
+           name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+           self.logger.debug("Filling SHM with zeros: {}".format(name))
+           memory = posix_ipc.SharedMemory(name)
+           mapfile = mmap.mmap(memory.fd, memory.size)
+           mapfile.seek(0)
+           for iBlock in  range(nFullBlocks): # TODO speed up by wrining more that one byte at a time?
+              mapfile.write(zeros_block)
+           mapfile.write(zeros_block[0:int(2*nInts_rem)])
+          
+           memory.close_fd()
+
+
+
    def watchdog(self, all_usrps_report_failure):
       if all_usrps_report_failure:
          self.errors_in_a_row += 1
          self.logger.info("USRP watchdog: {} error in a row.".format(self.errors_in_a_row))
          if self.errors_in_a_row >= self.error_limit:
-            self.logger.error("All USRPs reported error for GET_DATA ")
+            self.logger.error("All USRPs reported error for GET_DATA {} times in a row. Shutting down usrp_server".format(self.errors_in_a_row))
+            self.RHM.exit()
       else:
          if self.errors_in_a_row:
             self.logger.info("USRP watchdog: Reset errors_in_a_row to 0.")
@@ -165,6 +207,7 @@ class usrpSockManager():
             # TODO : initialize shm with zeros
             self.socks.append(usrpsock)
             self.addressList_active.append(usrp)
+            # TODO keep teck of antennaList and hostnameList
             self.logger.info('reconnection to usrp driver on port {} successful'.format(usrp[1]))
          except ConnectionRefusedError:
             self.logger.error('usrp reconnection failed on port {}'.format(usrp[1]))
@@ -1252,8 +1295,12 @@ class RadarHardwareManager:
                   self.logger.error('connection to USRP broke in GET_DATA')
                else: 
                   rx_status                = ready_return['status']
-                  if rx_status == -1:
-                     self.logger.error("Error occurred in rx_worker. TODO: delete data oder mute USRP? ") # TODO
+                  if rx_status < 0:
+
+                     self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
+                     self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing)
+
+                     self.logger.error("Error ({}) occurred in rx_worker. TODO: delete data oder mute USRP? ".format(rx_status)) # TODO
                   else:
                      all_usrps_report_failure = False
 
@@ -1474,6 +1521,7 @@ class RadarChannelHandler:
                 self.logger.error(command)
                 self.logger.error('unrecognized command! {}'.format(rmsg.payload))
                 pdb.set_trace()
+
 
             if command in rmsg_handlers:
                 status = rmsg_handlers[command](rmsg)
@@ -1875,7 +1923,9 @@ class RadarChannelHandler:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
            self.logger.error("ROS:SetParameter: Active state is {}. Dont know what to do...".format(self.active_state))
-           pdb.set_trace()
+           self.logger.error("ROS:SetParameter: Exit usrp_server...")
+           return RMSG_FAILURE
+           self.parent_RadarHardwareManager.exit()
 
         
         if (self.rnum < 0 or self.cnum < 0):
