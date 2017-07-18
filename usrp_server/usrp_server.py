@@ -143,7 +143,7 @@ class usrpSockManager():
                del self.addressList_active[iSock-offset]
                lost_antennas = self.antennaList_active[iSock-offset]
                for iSwing in range(nSwings):
-                  self.fill_shm_with_zeros(lost_antennas, iSwing)
+                  self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
                del self.antennaList_active[iSock-offset]
                del self.hostnameList_active[iSock-offset]
                del self.socks[iSock-offset]
@@ -161,9 +161,9 @@ class usrpSockManager():
 #         try:
 #            if usrpConfig['usrp_hostname'] in self.hostnameList_active:
 
-   def fill_shm_with_zeros(self, antenna_list, swing):
+   def fill_shm_with_zeros(self, antenna_list, swing, direction_list):
       side = 0
-      direction_list = ['rx', 'tx']
+      # direction_list = ['rx', 'tx']
       nInts_shm = int(self.RHM.ini_shm_settings['rxshm_size']) / 2 # two bytes per int
       nZeros_per_block = 10000   #write zeros in blocks
       zeros_block = np.zeros(nZeros_per_block, dtype=np.int16).tobytes()
@@ -1302,9 +1302,7 @@ class RadarHardwareManager:
                   if rx_status < 0:
 
                      self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
-                     self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing)
-
-                     self.logger.error("Error ({}) occurred in rx_worker. TODO: delete data oder mute USRP? ".format(rx_status)) # TODO
+                     self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing, ["rx"])
                   else:
                      all_usrps_report_failure = False
 
@@ -1552,7 +1550,7 @@ class RadarChannelHandler:
         RHM.unregister_channel_from_HardwareManager(self)
         cnum = self.cnum
         del self # TODO close thread ?!?
-        hardwareManager.logger.info('Deleted channel {}.'.format(cnum))
+        RHM.logger.info('Deleted channel {}.'.format(cnum))
 
 
     # busy wait until state enters desired state

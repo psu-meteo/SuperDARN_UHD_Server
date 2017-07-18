@@ -82,7 +82,7 @@ USRP_SERVER_QUIT  = '.'
 
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
-nSecs_restart_pause = 0
+nSecs_restart_pause = 10
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -618,7 +618,7 @@ def main():
           initialize(inputArg)
       elif firstArg.lower() in ["liverawview", "rawview"]:
            start_liveRawView_tool()  
-      elif firstArg.lower() in ["network", "networktool"]:
+      elif firstArg.lower() in ["network", "networktool", "net"]:
            start_network_tool()  
       elif firstArg == "start":
          if nArguments == 1 or inputArg[1].lower == "all":
