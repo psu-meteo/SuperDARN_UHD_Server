@@ -42,6 +42,7 @@ import logging_usrp
 MAX_CHANNELS = 10
 CLRFREQ_RES_HZ = 1000
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
+USRP_SOCK_TIMEOUT = 7 # sec
 
 RMSG_SUCCESS = 0
 RMSG_FAILURE = -1
@@ -114,6 +115,8 @@ class usrpSockManager():
                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                connectPar = (usrpConfig['driver_hostname'], port)
                usrpsock.connect(connectPar)
+               if USRP_SOCK_TIMEOUT != None:
+                  usrpsock.settimeout(USRP_SOCK_TIMEOUT)
                self.socks.append(usrpsock)
                self.addressList_active.append(connectPar)
                self.antennaList_active.append([usrpConfig['array_idx']])
@@ -767,9 +770,10 @@ class RadarHardwareManager:
                 print('USRPs synchronized, approximate times: ' + str(usrptimes))
             else:
                 # TODO: why does USRP synchronization fail?
+                self.logger.info("USRP times: {}".format(usrptimes))
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again ({}) ...'.format(iResync))
                 iResync += 1 
-                time.sleep(1)
+                time.sleep(0.2)
 
     #@timeit
     def rxfe_init(self):
@@ -1520,13 +1524,18 @@ class RadarChannelHandler:
             except KeyError:
                 self.logger.error(command)
                 self.logger.error('unrecognized command! {}'.format(rmsg.payload))
-                pdb.set_trace()
+                self.close()
+                break
 
-
-            if command in rmsg_handlers:
-                status = rmsg_handlers[command](rmsg)
-            else:
-                status = self.DefaultHandler(rmsg)
+            try:
+               if command in rmsg_handlers:
+                   status = rmsg_handlers[command](rmsg)
+               else:
+                   status = self.DefaultHandler(rmsg)
+            except:
+                self.logger.debug('ch {}: Error while command {} ({}). Removing this channel'.format(self.cnum,  RMSG_COMMAND_NAMES[command], command))
+                self.close()
+                break
 
             if status == 'exit': # output of QuitHandler
                 break
@@ -1537,9 +1546,13 @@ class RadarChannelHandler:
 
 
     def close(self):
-        self.logger.error('todo: write close function...')
-        pdb.set_trace()
-        # TODO write this..
+        self.conn.close()
+        self.logger.debug('Deleting channel {}'.format(self.cnum))
+        RHM = self.parent_RadarHardwareManager
+        RHM.unregister_channel_from_HardwareManager(self)
+        cnum = self.cnum
+        del self # TODO close thread ?!?
+        hardwareManager.logger.info('Deleted channel {}.'.format(cnum))
 
 
     # busy wait until state enters desired state
@@ -1558,7 +1571,7 @@ class RadarChannelHandler:
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT for channel {}'.format(self.cnum))
-                pdb.set_trace()
+                self.close()
                 break
     
     def update_ctrlprm_class(self, period):
@@ -1604,14 +1617,7 @@ class RadarChannelHandler:
         #rmsg.set_data('status', RMSG_FAILURE)
         #rmsg.set_data('type', rmsg.payload['type'])
         #rmsg.transmit()
-        self.conn.close()
-        self.logger.debug('Deleting channel {}'.format(self.cnum))
-        hardwareManager = self.parent_RadarHardwareManager
-        hardwareManager.unregister_channel_from_HardwareManager(self)
-        cnum = self.cnum
-        del self # TODO close thread ?!?
-        # sys.exit() # TODO: set return value
-        hardwareManager.logger.info('Deleted channel {}.'.format(cnum))
+        self.close()
         return 'exit'
 
     def PingHandler(self, rmsg):
