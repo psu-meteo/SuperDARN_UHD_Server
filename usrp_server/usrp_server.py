@@ -127,6 +127,22 @@ class usrpSockManager():
             self.logger.error('USRP server connection failed: {}:{}'.format(usrpConfig['driver_hostname'], port))
             self.addressList_inactive.append((usrpConfig['driver_hostname'], port ))
 
+      if len(self.socks) ==0:
+         self.logger.error("No connection to USRPs. Exit...")
+         # RHM.exit() # dosen't work sinc RHM has no usrpManager jet...
+         sys.exit(0)
+   def remove_sock(self, sock_to_remove):
+       iSock = self.socks.index(sock_to_remove)
+       self.logger.error("Removing usrp {} ({}:{}). ".format(self.hostnameList_active[iSock], self.addressList_active[iSock][0], self.addressList_active[iSock][1])) 
+       self.addressList_inactive.append(self.addressList_active[iSock] )
+       del self.addressList_active[iSock]
+       lost_antennas = self.antennaList_active[iSock]
+       for iSwing in range(nSwings):
+          self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
+       del self.antennaList_active[iSock]
+       del self.hostnameList_active[iSock]
+       del self.socks[iSock]
+
 
    def eval_client_return(self, cmd, fcn=None):
       if fcn is None: # default receive function
@@ -139,14 +155,15 @@ class usrpSockManager():
          for iSock, singleReturn in enumerate(client_return):
             if singleReturn == CONNECTION_ERROR:
                self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
-               self.addressList_inactive.append(self.addressList_active[iSock-offset] )
-               del self.addressList_active[iSock-offset]
-               lost_antennas = self.antennaList_active[iSock-offset]
-               for iSwing in range(nSwings):
-                  self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
-               del self.antennaList_active[iSock-offset]
-               del self.hostnameList_active[iSock-offset]
-               del self.socks[iSock-offset]
+               self.remove_sock(self.socks[iSock-offset])
+            #   self.addressList_inactive.append(self.addressList_active[iSock-offset] )
+            #   del self.addressList_active[iSock-offset]
+            #   lost_antennas = self.antennaList_active[iSock-offset]
+            #   for iSwing in range(nSwings):
+            #      self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
+            #   del self.antennaList_active[iSock-offset]
+            #   del self.hostnameList_active[iSock-offset]
+            #   del self.socks[iSock-offset]
                offset += 1 
 
       if len(self.socks) == 0:
@@ -760,7 +777,11 @@ class RadarHardwareManager:
 
             usrptimes = []
             for iUSRP, usrpsock in enumerate(self.usrpManager.socks):
-                usrptimes.append(cmd.recv_time(usrpsock))
+                try:
+                    usrptimes.append(cmd.recv_time(usrpsock))
+                except:
+                    self.logger.error("Error in sync USRPs for {}. Removing it...".format(self.usrpManager.hostnameList_active[iUSRP]))
+                    self.usrpManager.remove_sock(usrpsock)
            
             cmd.client_return()
      
@@ -1300,9 +1321,25 @@ class RadarHardwareManager:
                else: 
                   rx_status                = ready_return['status']
                   if rx_status < 0:
+                     rx_error_codes = dict(ERROR_CODE_NONE = 0x0 , ERROR_CODE_TIMEOUT = 0x1, ERROR_CODE_LATE_COMMAND = 0x2, ERROR_CODE_BROKEN_CHAIN = 0x4, ERROR_CODE_OVERFLOW = 0x8, ERROR_CODE_ALIGNMENT = 0xc, ERROR_CODE_BAD_PACKET = 0xf, WRONG_NUMBER_OF_SAMPLES = 100)
+                     
+                     error_code = - rx_status
+                     print_name = 'unknown'
+                     if error_code in rx_error_codes.values():
+                         for err_name, err_value in rx_error_codes.items():
+                             if err_value == error_code % 1000:
+                                 print_name == "UHD::" + err_name
+                                 break
+                     if error_code >= 1000: 
+                         print_name += " and ut_of_sequence=1"
+                     self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP]))
 
-                     self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
-                     self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing, ["rx"])
+    
+
+
+                    # this is now down in usrp_driver (faster) 
+                    # self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
+                    # self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing, ["rx"])
                   else:
                      all_usrps_report_failure = False
 
@@ -1531,7 +1568,10 @@ class RadarChannelHandler:
                else:
                    status = self.DefaultHandler(rmsg)
             except:
-                self.logger.debug('ch {}: Error while command {} ({}). Removing this channel'.format(self.cnum,  RMSG_COMMAND_NAMES[command], command))
+                self.logger.error('ch {}: Error while command {} ({}). Removing this channel'.format(self.cnum,  RMSG_COMMAND_NAMES[command], command))
+                self.logger.error("Error: {}".format(sys.exc_info()[0]))
+                print(sys.exc_info()[0])
+                raise
                 self.close()
                 break
 
@@ -1887,7 +1927,9 @@ class RadarChannelHandler:
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
            return RMSG_SUCCESS
-           
+       
+        # wait if RHM.trigger_next_swing() is slower... 
+        self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
 
 
         # period not jet triggered
