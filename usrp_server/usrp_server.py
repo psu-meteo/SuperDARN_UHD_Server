@@ -1325,13 +1325,14 @@ class RadarHardwareManager:
                      
                      error_code = - rx_status
                      print_name = 'unknown'
-                     if error_code in rx_error_codes.values():
+                     if error_code % 1000 in rx_error_codes.values():
                          for err_name, err_value in rx_error_codes.items():
-                             if err_value == error_code % 1000:
+                             if err_value == (error_code % 1000):
                                  print_name == "UHD::" + err_name
                                  break
-                     if error_code >= 1000: 
-                         print_name += " and ut_of_sequence=1"
+                     # out of sequence flag adds (-) 1000 to error code
+                     if error_code >= 1000:  
+                         print_name += " and out_of_sequence=1"
                      self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP]))
 
     
