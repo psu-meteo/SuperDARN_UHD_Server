@@ -1327,7 +1327,7 @@ class RadarHardwareManager:
                      if error_code % 1000 in rx_error_codes.values():
                          for err_name, err_value in rx_error_codes.items():
                              if err_value == (error_code % 1000):
-                                 print_name == "UHD::" + err_name
+                                 print_name = "UHD::" + err_name
                                  break
                      # out of sequence flag adds (-) 1000 to error code
                      if error_code >= 1000:  
