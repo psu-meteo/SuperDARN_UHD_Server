@@ -99,7 +99,7 @@ class usrpSockManager():
       self.nUSRPs = len(RHM.ini_usrp_configs) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
       self.errors_in_a_row = 0
-      self.error_limit = 5
+      self.error_limit = 15
       
       # open each
       self.hostnameList_active = [] 
@@ -810,7 +810,7 @@ class RadarHardwareManager:
            self.logger.warning('attenuation ({}) for rxfe in array.ini is > 31.5 dB. using maximum atenuation of 31.5 dB'.format(att))
            att = 31.5
 
-        self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
+        self.logger.info("Setting RXFE: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
         cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
         self.usrpManager.eval_client_return(cmd)
@@ -1010,7 +1010,6 @@ class RadarHardwareManager:
         for iSequence in range(nSequences_per_period):
             for iPulse in range(nPulses_per_sequence):
                 integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
-
         self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
      
         if True:

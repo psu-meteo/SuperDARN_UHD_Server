@@ -379,13 +379,16 @@ def stop_usrp_server():
     myPrint(" Stopping usrp_server...")
     serverProcesses = get_process_ids("usrp_server")
     if len(serverProcesses):
-       for process in serverProcesses:
-            myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost',USRP_SERVER_PORT))
-            sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
-        
-       time.sleep(1)
+       try:
+          for process in serverProcesses:
+               myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
+               sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+               sock.connect(('localhost',USRP_SERVER_PORT))
+               sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
+           
+          time.sleep(1)
+       except:
+          myPrint("Error while connecting to server. Killing PID...")
        # terminate processes if they still exis
        terminate_all(serverProcesses)
     else:
