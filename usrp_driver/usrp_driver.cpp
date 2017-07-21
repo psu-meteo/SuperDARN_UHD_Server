@@ -604,6 +604,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     }
 
 
+    if(al_intclk->count > 0) {
+        usrp->set_clock_source("internal");
+        usrp->set_time_source("internal");
+    }
+    else {
+    // sync clock with external 10 MHz and PPS
+        DEBUG_PRINT("Set clock: external\n");
+        usrp->set_clock_source("external", 0);
+        DEBUG_PRINT("Set time: external\n");
+        usrp->set_time_source("external", 0);
+        DEBUG_PRINT("Done setting time and clock\n");
+     }
+
     while(true) {
         if(driversock) {
             close(driverconn);
@@ -838,20 +851,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             //DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
 
-                        DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets[0].get_real_secs());
-                        DEBUG_PRINT("last TRIGGER_PULSE time is %2.5f\n", pulse_time_offsets.back().get_real_secs());
-                        
+                        DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f and last is %2.5f\n", pulse_time_offsets[0].get_real_secs(), pulse_time_offsets.back().get_real_secs());
+
                         rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
-                            
+
+       
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = nSamples_tx_pulse / txrate;
                         
                         // float debugt = usrp->get_time_now().get_real_secs();
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
-                        DEBUG_PRINT("TRIGGER_PULSE creating recv and tx worker threads on swing %d\n", swing);
-                        DEBUG_PRINT("TRIGGER_PULSE nSamples_rx: %d\n",(int) nSamples_rx);
+                        DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d\n", swing,(int) nSamples_rx);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
@@ -969,15 +981,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("entering UHD_SYNC command\n");
                     // if --intclk flag passed to usrp_driver, set clock source as internal and do not sync time
                     if(al_intclk->count > 0) {
-                        usrp->set_clock_source("internal");
-                        usrp->set_time_source("internal");
                         usrp->set_time_now(uhd::time_spec_t(0.0));
                     }
 
                     else {
-                    // sync clock with external 10 MHz and PPS
-                        usrp->set_clock_source("external", 0);
-                        usrp->set_time_source("external", 0);
 
                  /*       const uhd::time_spec_t last_pps_time = usrp->get_time_last_pps();
                         while (last_pps_time == usrp->get_time_last_pps()) {
@@ -986,7 +993,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         usrp->set_time_next_pps(uhd::time_spec_t(0.0));
                         boost::this_thread::sleep(boost::posix_time::milliseconds(1100));
                  */
+                        DEBUG_PRINT("Start setting unknown pps\n");
                         usrp->set_time_unknown_pps(uhd::time_spec_t(11.0));
+                        DEBUG_PRINT("end setting unknown pps\n");
                      }
 
                     sock_send_uint8(driverconn, UHD_SYNC);
