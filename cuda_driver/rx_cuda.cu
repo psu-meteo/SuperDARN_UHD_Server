@@ -51,27 +51,35 @@ __global__ void multiply_and_add(float *samples, float *odata, float *filter)
 
     uint32_t decimationRate_if2bb = decimationRates[1];
 
-    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
-    uint32_t nSamples_if = decimationRate_if2bb * (nSamplesBB -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
-    uint32_t iSample_if = iSampleBB * decimationRate_if2bb + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
-    uint32_t idxSample_if = iSample_if * 2 + iChannel * nSamples_if *2 + iAntenna * nChannels * nSamples_if *2; // index in memory (account for  I/Q, iChannel, iAntenna)
+    // offset to aline center of filter and center of pulse
+    int32_t offset = nFilterSamplesDivBy2 - decimationRate_if2bb / 2;
 
-    float i0 =  samples[idxSample_if  ];
-    float q0 =  samples[idxSample_if+1];
-    float i1 =  samples[idxSample_if+2];
-    float q1 =  samples[idxSample_if+3];
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);  // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_if = decimationRate_if2bb * (nSamplesBB -1) + nFilterSamplesDivBy2 * 2;  // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_if = iSampleBB * decimationRate_if2bb + iFilterSampleTimes2 * 2 ;         // number of (complex) sample in rf signal
 
-    // get filter values from global memory
-    float p0re = filter[idxSample_filter  ];
-    float p0im = filter[idxSample_filter+1];
-    float p1re = filter[idxSample_filter+2];
-    float p1im = filter[idxSample_filter+3];
+    if (iSample_if >= offset) {
+        uint32_t idxSample_if = (iSample_if - offset) * 2 + iChannel * nSamples_if *2 + iAntenna * nChannels * nSamples_if *2; // index in memory (account for  I/Q, iChannel, iAntenna)
+        float i0 =  samples[idxSample_if  ];
+        float q0 =  samples[idxSample_if+1];
+        float i1 =  samples[idxSample_if+2];
+        float q1 =  samples[idxSample_if+3];
 
-   
-    // multiply filter
-    itemp[iThread_lin] = p0re * i0 - p0im * q0 + p1re * i1 - p1im * q1;
-    qtemp[iThread_lin] = p0re * q0 + p0im * i0 + p1re * q1 + p1im * i1;
+        // get filter values from global memory
+        float p0re = filter[idxSample_filter  ];
+        float p0im = filter[idxSample_filter+1];
+        float p1re = filter[idxSample_filter+2];
+        float p1im = filter[idxSample_filter+3];
 
+       
+        // multiply filter
+        itemp[iThread_lin] = p0re * i0 - p0im * q0 + p1re * i1 - p1im * q1;
+        qtemp[iThread_lin] = p0re * q0 + p0im * i0 + p1re * q1 + p1im * i1;
+    }
+    else { // zero padding the first part of the filter for output sample 0
+        itemp[iThread_lin] = 0;
+        qtemp[iThread_lin] = 0;
+    }
      __syncthreads();
 
 
@@ -145,21 +153,31 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
     
     uint32_t decimationRate_rf2if = decimationRates[0];  
 
-    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2); // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
-    uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2; // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
-    uint32_t iSample_rf = iSampleIF * decimationRate_rf2if + iFilterSampleTimes2 * 2;         // number of (complex) sample in rf signal
-    uint32_t idxSample_rf = iSample_rf * 2 + iAntenna *  nSamples_rf *2;                      // index in memory (account for  I/Q, iAntenna)
+    // offset to aline center of filter and center of pulse
+    int32_t offset = nFilterSamplesDivBy2 - decimationRate_rf2if / 2;
 
-    itemp[iThread_lin] =
-        filter[idxSample_filter  ] * samples[idxSample_rf  ] -
-        filter[idxSample_filter+1] * samples[idxSample_rf+1] +
-        filter[idxSample_filter+2] * samples[idxSample_rf+2] -
-        filter[idxSample_filter+3] * samples[idxSample_rf+3];
-    qtemp[iThread_lin] =
-        filter[idxSample_filter  ] * samples[idxSample_rf+1] +
-        filter[idxSample_filter+1] * samples[idxSample_rf  ] +
-        filter[idxSample_filter+2] * samples[idxSample_rf+3] +
-        filter[idxSample_filter+3] * samples[idxSample_rf+2];
+    uint32_t idxSample_filter = 4 * (iFilterSampleTimes2  + iChannel * nFilterSamplesDivBy2);   // 2 samples/thread (unrolled) * 2 components/ sample (I /Q) = 4
+    uint32_t nSamples_rf = decimationRate_rf2if * (nSamplesIF -1) + nFilterSamplesDivBy2 * 2;   // nSamples_in=decimationRate*(nSamples_out-1)+nSamples_filter
+    uint32_t iSample_rf = iSampleIF * decimationRate_rf2if + iFilterSampleTimes2 * 2;           // number of (complex) sample in rf signal
+
+    if (iSample_rf >= offset) {
+        uint32_t idxSample_rf = (iSample_rf - offset) * 2 + iAntenna *  nSamples_rf *2;         // index in memory (account for  I/Q, iAntenna)
+
+        itemp[iThread_lin] =
+            filter[idxSample_filter  ] * samples[idxSample_rf  ] -
+            filter[idxSample_filter+1] * samples[idxSample_rf+1] +
+            filter[idxSample_filter+2] * samples[idxSample_rf+2] -
+            filter[idxSample_filter+3] * samples[idxSample_rf+3];
+        qtemp[iThread_lin] =
+            filter[idxSample_filter  ] * samples[idxSample_rf+1] +
+            filter[idxSample_filter+1] * samples[idxSample_rf  ] +
+            filter[idxSample_filter+2] * samples[idxSample_rf+3] +
+            filter[idxSample_filter+3] * samples[idxSample_rf+2];
+    } else {
+        itemp[iThread_lin] = 0;
+        qtemp[iThread_lin] = 0;
+    }
+      
 
      
      __syncthreads();
