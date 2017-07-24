@@ -1068,15 +1068,11 @@ class RadarHardwareManager:
            self.logger.debug("end USRP_SETUP")
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
 
-           # wait is periods should be time synchronized  
+           # wait if periods should be time synchronized  
            for tmpChannel in self.channels:
               if (tmpChannel is not None): 
                  tmpChannel.scanManager.wait_for_next_trigger()
  
-           # check if there is a USRP
-           if len(self.usrpManager.socks) == 0:
-              self.logger.error("Connections to all USRPs lost. Shutting down usrp_server...")
-              self.exit()
  
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
@@ -1142,7 +1138,7 @@ class RadarHardwareManager:
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
         if self.lastSwingInvalid: # TODO check if this works (in control program or data files)
-           self.logger.warning("Last swin has been invalid. Preparing 0 sequences to transmit")
+           self.logger.warning("Last swing has been invalid. Preparing 0 sequences to transmit")
            for iChannel, channel in enumerate(self.channels):
               if channel.processing_state is CS_PROCESSING:
                  channel.update_ctrlprm_class("current")
@@ -1933,12 +1929,12 @@ class RadarChannelHandler:
 
 
         # period not jet triggered
-        if self.active_state == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
+        if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
            RHM.set_par_semaphore.acquire()
 
-           if self.active_state == CS_READY:
+           if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
-              self.active_state = CS_INACTIVE
+              self.state[self.swingManager.nextSwingToTrigger] = CS_INACTIVE
 
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
@@ -1954,7 +1950,7 @@ class RadarChannelHandler:
            RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        elif self.active_state == CS_READY or self.active_state == CS_LAST_SWING: 
+        elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
          # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
@@ -1968,7 +1964,7 @@ class RadarChannelHandler:
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
-           self.logger.error("ROS:SetParameter: Active state is {}. Dont know what to do...".format(self.active_state))
+           self.logger.error("ROS:SetParameter: Active state is {} (nextSwingToTrigger={}, activeSwing={} ). Dont know what to do...".format(self.state[self.swingManager.nextSwingToTrigger], self.swingManager.activeSwing,  self.active_state))
            self.logger.error("ROS:SetParameter: Exit usrp_server...")
            return RMSG_FAILURE
            self.parent_RadarHardwareManager.exit()
