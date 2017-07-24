@@ -25,7 +25,9 @@ import datetime
 import configparser
 import copy
 import posix_ipc
+import mmap
 import pickle
+
 sys.path.insert(0, '../python_include')
 
 from phasing_utils import *
@@ -38,9 +40,13 @@ from profiling_tools import *
 import logging_usrp
 
 MAX_CHANNELS = 10
-RMSG_FAILURE = -1
 CLRFREQ_RES_HZ = 1000
+USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
+USRP_SOCK_TIMEOUT = 7 # sec
+
 RMSG_SUCCESS = 0
+RMSG_FAILURE = -1
+
 RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
@@ -57,10 +63,34 @@ CS_PROCESSING    = 'CS_PROCESSING'
 CS_SAMPLES_READY = 'CS_SAMPLES_READY'
 CS_LAST_SWING    = 'CS_LAST_SWING'
 
+
+class statusUpdater():
+   " Class to a file every x minutes to allow checking uspr_status from outside"
+
+   def __init__(self):
+      self.fileName = '../log/usrp_server_status.txt'
+      self.nSeconds_update_period = 30
+      self.last_write = datetime.datetime.now()
+
+   def update(self):
+      nSeconds_since_last_write = (datetime.datetime.now() - self.last_write).total_seconds()
+      if self.nSeconds_update_period < nSeconds_since_last_write:
+         self.last_write = datetime.datetime.now()
+#         if not os.path.isfile(self.fileName):
+         with open(self.fileName, "w") as f:
+            f.write("")            # create empty file
+#    disadvantage this time is not the default time shown by ls
+#         else:
+#            print("updating time ")
+#            os.utime(self.fileName, None) # update the time
+       
+
 class usrpSockManager():
    def __init__(self, RHM):
       self.addressList_active     = [] # tuple of IP and port
       self.addressList_inactive   = []
+      self.antennaList_active     = []
+      self.hostnameList_active    = []
       self.socks = []
       usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
       self.RHM = RHM
@@ -68,26 +98,50 @@ class usrpSockManager():
       
       self.nUSRPs = len(RHM.ini_usrp_configs) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
+      self.errors_in_a_row = 0
+      self.error_limit = 15
       
       # open each
-      connected_usrp_list = [] 
+      self.hostnameList_active = [] 
       for usrpConfig in RHM.ini_usrp_configs:
          try:
-            if usrpConfig['usrp_hostname'] in connected_usrp_list:
+            if usrpConfig['usrp_hostname'] in self.hostnameList_active:
                self.logger.debug("Already connected to USRP {}".format(usrpConfig['usrp_hostname']))
+               idx_usrp = self.hostnameList_active.index(usrpConfig['usrp_hostname'])
+               self.antennaList_active[idx_usrp].append(usrpConfig['array_idx'])
+               
             else:
                port = int(usrpConfig['usrp_hostname'].split(".")[2]) + usrp_driver_base_port
                usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                connectPar = (usrpConfig['driver_hostname'], port)
                usrpsock.connect(connectPar)
+               if USRP_SOCK_TIMEOUT != None:
+                  usrpsock.settimeout(USRP_SOCK_TIMEOUT)
                self.socks.append(usrpsock)
                self.addressList_active.append(connectPar)
+               self.antennaList_active.append([usrpConfig['array_idx']])
                self.logger.debug('connected to usrp driver on port {}'.format(port))
-               connected_usrp_list.append(usrpConfig['usrp_hostname'])
+               self.hostnameList_active.append(usrpConfig['usrp_hostname'])
 
          except ConnectionRefusedError:
             self.logger.error('USRP server connection failed: {}:{}'.format(usrpConfig['driver_hostname'], port))
             self.addressList_inactive.append((usrpConfig['driver_hostname'], port ))
+
+      if len(self.socks) ==0:
+         self.logger.error("No connection to USRPs. Exit...")
+         # RHM.exit() # dosen't work sinc RHM has no usrpManager jet...
+         sys.exit(0)
+   def remove_sock(self, sock_to_remove):
+       iSock = self.socks.index(sock_to_remove)
+       self.logger.error("Removing usrp {} ({}:{}). ".format(self.hostnameList_active[iSock], self.addressList_active[iSock][0], self.addressList_active[iSock][1])) 
+       self.addressList_inactive.append(self.addressList_active[iSock] )
+       del self.addressList_active[iSock]
+       lost_antennas = self.antennaList_active[iSock]
+       for iSwing in range(nSwings):
+          self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
+       del self.antennaList_active[iSock]
+       del self.hostnameList_active[iSock]
+       del self.socks[iSock]
 
 
    def eval_client_return(self, cmd, fcn=None):
@@ -101,11 +155,63 @@ class usrpSockManager():
          for iSock, singleReturn in enumerate(client_return):
             if singleReturn == CONNECTION_ERROR:
                self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
-               self.addressList_inactive.append(self.addressList_active[iSock-offset] )
-               del self.addressList_active[iSock-offset]
-               del self.socks[iSock-offset]
+               self.remove_sock(self.socks[iSock-offset])
+            #   self.addressList_inactive.append(self.addressList_active[iSock-offset] )
+            #   del self.addressList_active[iSock-offset]
+            #   lost_antennas = self.antennaList_active[iSock-offset]
+            #   for iSwing in range(nSwings):
+            #      self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
+            #   del self.antennaList_active[iSock-offset]
+            #   del self.hostnameList_active[iSock-offset]
+            #   del self.socks[iSock-offset]
                offset += 1 
+
+      if len(self.socks) == 0:
+         self.logger.error("No working USRPs left. Shutting down usrs_server...")
+         self.RHM.exit()
+
+
       return client_return
+
+#   def cleanup_usrp(self):
+#      for usrpConfig in RHM.ini_usrp_configs:
+#         try:
+#            if usrpConfig['usrp_hostname'] in self.hostnameList_active:
+
+   def fill_shm_with_zeros(self, antenna_list, swing, direction_list):
+      side = 0
+      # direction_list = ['rx', 'tx']
+      nInts_shm = int(self.RHM.ini_shm_settings['rxshm_size']) / 2 # two bytes per int
+      nZeros_per_block = 10000   #write zeros in blocks
+      zeros_block = np.zeros(nZeros_per_block, dtype=np.int16).tobytes()
+      nFullBlocks = int(nInts_shm / nZeros_per_block)
+      nInts_rem   = nInts_shm % nZeros_per_block
+      for antenna in antenna_list:
+        for direction in direction_list:
+           name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+           self.logger.debug("Filling SHM with zeros: {}".format(name))
+           memory = posix_ipc.SharedMemory(name)
+           mapfile = mmap.mmap(memory.fd, memory.size)
+           mapfile.seek(0)
+           for iBlock in  range(nFullBlocks): # TODO speed up by wrining more that one byte at a time?
+              mapfile.write(zeros_block)
+           mapfile.write(zeros_block[0:int(2*nInts_rem)])
+          
+           memory.close_fd()
+
+
+
+   def watchdog(self, all_usrps_report_failure):
+      if all_usrps_report_failure:
+         self.errors_in_a_row += 1
+         self.logger.info("USRP watchdog: {} error in a row.".format(self.errors_in_a_row))
+         if self.errors_in_a_row >= self.error_limit:
+            self.logger.error("All USRPs reported error for GET_DATA {} times in a row. Shutting down usrp_server".format(self.errors_in_a_row))
+            self.RHM.exit()
+      else:
+         if self.errors_in_a_row:
+            self.logger.info("USRP watchdog: Reset errors_in_a_row to 0.")
+            self.errors_in_a_row = 0
 
    def restore_lost_connections(self):
       addressList = self.addressList_inactive
@@ -121,6 +227,7 @@ class usrpSockManager():
             # TODO : initialize shm with zeros
             self.socks.append(usrpsock)
             self.addressList_active.append(usrp)
+            # TODO keep teck of antennaList and hostnameList
             self.logger.info('reconnection to usrp driver on port {} successful'.format(usrp[1]))
          except ConnectionRefusedError:
             self.logger.error('usrp reconnection failed on port {}'.format(usrp[1]))
@@ -131,8 +238,8 @@ class usrpMixingFreqManager():
         at a time can call add_new_freq_band().  """
   
     def __init__(self, cFreq, bandWidth):
-       self.current_mixing_freq = cFreq
-       self.usrp_bandwidth      = bandWidth
+       self.current_mixing_freq = cFreq       # in kHz (to be compatible with control program)
+       self.usrp_bandwidth      = bandWidth - USRP_BANDWIDTH_RESTRICTION*2/1000   # in kHz (to be compatible with control program)
        self.semaphore = posix_ipc.Semaphore('usrp_mixing_freq', posix_ipc.O_CREAT)
        self.semaphore.release()
        self.channelRangeList    = []
@@ -144,7 +251,11 @@ class usrpMixingFreqManager():
            allows to add the new channel, the new mixing frequency will be output argument.
        """
 
+       RHM = channel.parent_RadarHardwareManager
        newLower, newUpper = self.get_range_of_channel(channel)
+       if newLower <  RHM.hardwareLimit_freqRange[0] or newUpper > RHM.hardwareLimit_freqRange[1]:
+          channel.logger.error("Channel bandwidth ({} MHz- {} MHz) is not covered by radar hardware limits ({} MHz - {} MHz)".format(newLower/1000, newUpper/1000, RHM.hardwareLimit_freqRange[0]/1000, RHM.hardwareLimit_freqRange[1]/1000))
+          return False
 
        channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager")
        self.semaphore.acquire()
@@ -165,14 +276,13 @@ class usrpMixingFreqManager():
              allCh_upper = max(allCh_upper, otherChRange[1])
 
 
-          if (allCh_upper - allCh_lower) > self.usrp_bandwith:
+          if (allCh_upper - allCh_lower) > self.usrp_bandwidth:
              channel.logger.error("new channel can not be added. USPR bandwidth too small")
              result =  False
           else:
              newMixingFreq = (allCh_upper - allCh_lower)/2 + allCh_lower
              channel.logger.info("calculated new usrp mixing frequency: {} kHz (old was {} kHz)".format(newMixingFreq, self.current_mixing_freq))
              # adjust mixing freq that everything is in overall bandwidth
-             RHM = channel.parent_RadarHardwareManager
              newMixingFreq = max(newMixingFreq, RHM.hardwareLimit_freqRange[0]+self.usrp_bandwidth/2)
              newMixingFreq = min(newMixingFreq, RHM.hardwareLimit_freqRange[1]-self.usrp_bandwidth/2)
              self.current_mixing_freq = newMixingFreq
@@ -184,12 +294,16 @@ class usrpMixingFreqManager():
        return result
 
     def get_range_of_channel(self, channel):
-       rangeList = channel.scanManager.clear_freq_range_list
-       lower = rangeList[0][0] 
-       upper = rangeList[0][1]
-       for periodRange in rangeList[1:]:
-          lower = min(lower, periodRange[0])
-          upper = max(lower, periodRange[1])
+       if channel.scanManager.fixFreq in [ None, -1, 0]: 
+          rangeList = channel.scanManager.clear_freq_range_list
+          lower = rangeList[0][0] 
+          upper = rangeList[0][1]
+          for periodRange in rangeList[1:]:
+             lower = min(lower, periodRange[0])
+             upper = max(lower, periodRange[1])
+       else:
+          lower = channel.scanManager.fixFreq
+          upper = channel.scanManager.fixFreq
        return lower, upper
 
 
@@ -482,6 +596,7 @@ class RadarHardwareManager:
         self.set_par_semaphore.release()
         self.lastSwingInvalid = False
         self.trigger_next_function_running = False
+        self.commonChannelParameter = {}
 
 
     def run(self):
@@ -496,14 +611,28 @@ class RadarHardwareManager:
                 self.unregister_channel_from_HardwareManager(channel)
             self.nControlPrograms -= 1
 
+        # not working, unused...
+        def radar_main_control_loop_environment():
+            "Run main_contol loop and catch errors"
+            # TODO shut down everything and ALSO print the error!
+           # try:
+           #    radar_control_loop()
+           # except:
+           #    e = sys.exc_info()[0]
+           #    self.logger.error(e.__str__())
+           #    self.logger.error("Error in mail contol loop. Shutting down usrp_server...")
+           #    self.exit()
+
         # TODO: add lock support
         def radar_main_control_loop():
             controlLoop_logger = logging.getLogger('Control Loop')
             controlLoop_logger.info('Starting RHM.radar_main_control_loop() ')
-          
+            statusFile = statusUpdater()
             sleepTime = 0.01 # used if control loop waits for one channel
            
             while True:
+
+                statusFile.update()
 
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time() # TODO change this to refence clock and scan times
@@ -560,7 +689,7 @@ class RadarHardwareManager:
         self.channels = []
         usrp_server_logger = logging.getLogger('usrp_server')
 
-        ct = threading.Thread(target=radar_main_control_loop, daemon=False)
+        ct = threading.Thread(target=radar_main_control_loop)
         ct.start()
         while True:
             usrp_server_logger.info('waiting for control program')
@@ -648,7 +777,11 @@ class RadarHardwareManager:
 
             usrptimes = []
             for iUSRP, usrpsock in enumerate(self.usrpManager.socks):
-                usrptimes.append(cmd.recv_time(usrpsock))
+                try:
+                    usrptimes.append(cmd.recv_time(usrpsock))
+                except:
+                    self.logger.error("Error in sync USRPs for {}. Removing it...".format(self.usrpManager.hostnameList_active[iUSRP]))
+                    self.usrpManager.remove_sock(usrpsock)
            
             cmd.client_return()
      
@@ -658,9 +791,10 @@ class RadarHardwareManager:
                 print('USRPs synchronized, approximate times: ' + str(usrptimes))
             else:
                 # TODO: why does USRP synchronization fail?
+                self.logger.info("USRP times: {}".format(usrptimes))
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again ({}) ...'.format(iResync))
                 iResync += 1 
-                time.sleep(1)
+                time.sleep(0.2)
 
     #@timeit
     def rxfe_init(self):
@@ -676,7 +810,7 @@ class RadarHardwareManager:
            self.logger.warning('attenuation ({}) for rxfe in array.ini is > 31.5 dB. using maximum atenuation of 31.5 dB'.format(att))
            att = 31.5
 
-        self.logger.info("Setting RXFR: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
+        self.logger.info("Setting RXFE: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
         cmd = usrp_rxfe_setup_command(self.usrpManager.socks, amp1, amp2, att*2) # *2 since LSB is 0.5 dB 
         cmd.transmit()
         self.usrpManager.eval_client_return(cmd)
@@ -876,7 +1010,6 @@ class RadarHardwareManager:
         for iSequence in range(nSequences_per_period):
             for iPulse in range(nPulses_per_sequence):
                 integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
-
         self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
      
         if True:
@@ -935,11 +1068,12 @@ class RadarHardwareManager:
            self.logger.debug("end USRP_SETUP")
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
 
-           # wait is periods should be time synchronized  
+           # wait if periods should be time synchronized  
            for tmpChannel in self.channels:
               if (tmpChannel is not None): 
                  tmpChannel.scanManager.wait_for_next_trigger()
-
+ 
+ 
            # USRP_TRIGGER
            self.logger.debug("start USRP_GET_TIME")
            cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
@@ -1004,7 +1138,7 @@ class RadarHardwareManager:
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
         if self.lastSwingInvalid: # TODO check if this works (in control program or data files)
-           self.logger.warning("Last swin has been invalid. Preparing 0 sequences to transmit")
+           self.logger.warning("Last swing has been invalid. Preparing 0 sequences to transmit")
            for iChannel, channel in enumerate(self.channels):
               if channel.processing_state is CS_PROCESSING:
                  channel.update_ctrlprm_class("current")
@@ -1173,22 +1307,46 @@ class RadarHardwareManager:
            self.logger.debug('start receiving all USRP status')
            payloadList = self.usrpManager.eval_client_return(cmd, fcn=cmd.receive_all_metadata)
            self.logger.debug('end receiving all USRP status')
-
+       
+           all_usrps_report_failure = True
            for iUSRP, ready_return in enumerate(payloadList):
                if ready_return == CONNECTION_ERROR:
                   self.usrpManager.fault_status[iUSRP] = True
                   self.logger.error('connection to USRP broke in GET_DATA')
                else: 
                   rx_status                = ready_return['status']
-                  if rx_status == -1:
-                     self.logger.error("Error occurred in rx_worker. TODO: delete data oder mute USRP? ") # TODO
+                  if rx_status < 0:
+                     rx_error_codes = dict(ERROR_CODE_NONE = 0x0 , ERROR_CODE_TIMEOUT = 0x1, ERROR_CODE_LATE_COMMAND = 0x2, ERROR_CODE_BROKEN_CHAIN = 0x4, ERROR_CODE_OVERFLOW = 0x8, ERROR_CODE_ALIGNMENT = 0xc, ERROR_CODE_BAD_PACKET = 0xf, WRONG_NUMBER_OF_SAMPLES = 100)
+                     
+                     error_code = - rx_status
+                     print_name = 'unknown'
+                     if error_code % 1000 in rx_error_codes.values():
+                         for err_name, err_value in rx_error_codes.items():
+                             if err_value == (error_code % 1000):
+                                 print_name = "UHD::" + err_name
+                                 break
+                     # out of sequence flag adds (-) 1000 to error code
+                     if error_code >= 1000:  
+                         print_name += " and out_of_sequence=1"
+                     self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP]))
+
+    
+
+
+                    # this is now down in usrp_driver (faster) 
+                    # self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
+                    # self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing, ["rx"])
+                  else:
+                     all_usrps_report_failure = False
+
                   self.usrpManager.fault_status[iUSRP] = ready_return["fault"]
    
                   self.logger.debug('GET_DATA rx status {}'.format(rx_status))
                   if rx_status != 2:
                       self.logger.error('USRP driver status {} in GET_DATA'.format(rx_status))
                       #status = USRP_DRIVER_ERROR # TODO: understand what is an error here..
-   
+           self.usrpManager.watchdog(all_usrps_report_failure)
+              
            self.logger.debug('start waiting for USRP_DATA return')
            self.usrpManager.eval_client_return(cmd)
            self.logger.debug('end waiting for USRP_DATA return')
@@ -1397,12 +1555,21 @@ class RadarChannelHandler:
             except KeyError:
                 self.logger.error(command)
                 self.logger.error('unrecognized command! {}'.format(rmsg.payload))
-                pdb.set_trace()
+                self.close()
+                break
 
-            if command in rmsg_handlers:
-                status = rmsg_handlers[command](rmsg)
-            else:
-                status = self.DefaultHandler(rmsg)
+            try:
+               if command in rmsg_handlers:
+                   status = rmsg_handlers[command](rmsg)
+               else:
+                   status = self.DefaultHandler(rmsg)
+            except:
+                self.logger.error('ch {}: Error while command {} ({}). Removing this channel'.format(self.cnum,  RMSG_COMMAND_NAMES[command], command))
+                self.logger.error("Error: {}".format(sys.exc_info()[0]))
+                print(sys.exc_info()[0])
+                raise
+                self.close()
+                break
 
             if status == 'exit': # output of QuitHandler
                 break
@@ -1413,9 +1580,13 @@ class RadarChannelHandler:
 
 
     def close(self):
-        self.logger.error('todo: write close function...')
-        pdb.set_trace()
-        # TODO write this..
+        self.conn.close()
+        self.logger.debug('Deleting channel {}'.format(self.cnum))
+        RHM = self.parent_RadarHardwareManager
+        RHM.unregister_channel_from_HardwareManager(self)
+        cnum = self.cnum
+        del self # TODO close thread ?!?
+        RHM.logger.info('Deleted channel {}.'.format(cnum))
 
 
     # busy wait until state enters desired state
@@ -1434,7 +1605,7 @@ class RadarChannelHandler:
             time.sleep(RADAR_STATE_TIME)
             if time.time() - wait_start > CHANNEL_STATE_TIMEOUT:
                 self.logger.error('CHANNEL STATE TIMEOUT for channel {}'.format(self.cnum))
-                pdb.set_trace()
+                self.close()
                 break
     
     def update_ctrlprm_class(self, period):
@@ -1480,14 +1651,7 @@ class RadarChannelHandler:
         #rmsg.set_data('status', RMSG_FAILURE)
         #rmsg.set_data('type', rmsg.payload['type'])
         #rmsg.transmit()
-        self.conn.close()
-        self.logger.debug('Deleting channel {}'.format(self.cnum))
-        hardwareManager = self.parent_RadarHardwareManager
-        hardwareManager.unregister_channel_from_HardwareManager(self)
-        cnum = self.cnum
-        del self # TODO close thread ?!?
-        # sys.exit() # TODO: set return value
-        hardwareManager.logger.info('Deleted channel {}.'.format(cnum))
+        self.close()
         return 'exit'
 
     def PingHandler(self, rmsg):
@@ -1759,22 +1923,24 @@ class RadarChannelHandler:
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
            return RMSG_SUCCESS
-           
+       
+        # wait if RHM.trigger_next_swing() is slower... 
+        self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
 
 
         # period not jet triggered
-        if self.active_state == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
+        if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
            RHM.set_par_semaphore.acquire()
 
-           if self.active_state == CS_READY:
+           if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
-              self.active_state = CS_INACTIVE
+              self.state[self.swingManager.nextSwingToTrigger] = CS_INACTIVE
 
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
 
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
-              return RSMG_FAILURE
+              return RMSG_FAILURE
 
            if self not in self.parent_RadarHardwareManager.newChannelList:
               self.parent_RadarHardwareManager.newChannelList.append(self)
@@ -1784,7 +1950,7 @@ class RadarChannelHandler:
            RHM.set_par_semaphore.release()
  
         # in middle of scan, period already triggerd. only compare with prediction
-        elif self.active_state == CS_READY or self.active_state == CS_LAST_SWING: 
+        elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
          # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
@@ -1798,8 +1964,10 @@ class RadarChannelHandler:
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
-           self.logger.error("Active state is {}. Dont know what to do...".format(self.active_state))
-           pdb.set_trace()
+           self.logger.error("ROS:SetParameter: Active state is {} (nextSwingToTrigger={}, activeSwing={} ). Dont know what to do...".format(self.state[self.swingManager.nextSwingToTrigger], self.swingManager.activeSwing,  self.active_state))
+           self.logger.error("ROS:SetParameter: Exit usrp_server...")
+           return RMSG_FAILURE
+           self.parent_RadarHardwareManager.exit()
 
         
         if (self.rnum < 0 or self.cnum < 0):
@@ -1840,10 +2008,11 @@ class RadarChannelHandler:
             #    resp=15km => 10 kHz     (used in pcodescan_15km)
             #    resp=6km  => 25 kHz     (used in pcodescan)
             # TODO add 10M
-            goodDownsampleRates = [[20, 75], # 5M => 3.333k
-                                   [20, 25], # 5M => 10k 
-                                   [10 ,20], # 5M => 25k 
-                                   [10 ,75], # 2.5M => 3.333k 
+            goodDownsampleRates = [[20, 75],  # 5M => 3.333k
+                                   [20, 25],  # 5M => 10k 
+                                   [10 ,20],  # 5M => 25k 
+                                   [10 ,75],  # 2.5M => 3.333k 
+                                   [30 ,100], # 10M => 3.333k 
             ]
          
             total_downsample_rate = hardwareManager.usrp_rf_rx_rate / hardwareManager.commonChannelParameter['baseband_samplerate']
@@ -2114,12 +2283,12 @@ class RadarChannelHandler:
             self.swingManager.reset()
             self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
             return RMSG_SUCCESS
-        elif addFreqResuult == False:
+        elif addFreqResult == False:
             self.logger.error("Freq range of new channel (cnum {}) is not in USRP bandwidth. (freq_range_list[0][0] = {} ".format(self.cnum, freq_range_list[0][0]))
             self.scanManager.clear_freq_range_list = None 
             self.scan_beam_list = None
             self.fixFreq = None
-            return RSMG_FAILURE
+            return RMSG_FAILURE
         else: # new mixing freq
             self.parent_RadarHardwareManager.send_cuda_setup_command()
             self.swingManager.reset()

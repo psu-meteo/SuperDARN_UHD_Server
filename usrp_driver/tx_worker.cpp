@@ -70,14 +70,14 @@ void usrp_tx_worker(
 
     md.start_of_burst = false;
     md.has_time_spec = false;
-          
+    int32_t nsamples_to_send, samples_to_pulse;
+
     while(nacc_samples < tx_burst_length_samples) {
         // calculate the number of samples to send in the packet
-        int32_t nsamples_to_send = std::min(tx_burst_length_samples - nacc_samples, spb);
+        nsamples_to_send = std::min(tx_burst_length_samples - nacc_samples, spb);
         
         // calculate the number of samples until the next transmit pulse
-        int32_t samples_to_pulse = pulse_sample_idx_offsets[pulse_idx] - nacc_samples;
-        
+        samples_to_pulse = pulse_sample_idx_offsets[pulse_idx] - nacc_samples;
         
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {

@@ -44,9 +44,9 @@ void usrp_rx_worker(
 ){
 
     DEBUG_PRINT("entering RX_WORKER\n");
-    fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
+ //   fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
     int nSides = (*rx_data_buffer).size();
-    fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
+ //   fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
 
 
     //setup streaming
@@ -75,19 +75,25 @@ void usrp_rx_worker(
           DEBUG_PRINT("%i, ", (*rx_data_buffer)[iSide][iSample]);
     }
  */
-    DEBUG_PRINT("rx_stream->get_num_channels(): %d\n", rx_stream->get_num_channels());
 
     DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
+
         size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
         for (int iSide = 0; iSide < nSides; iSide++) {
             buff_ptrs[iSide] = &((*rx_data_buffer)[iSide][num_acc_samps]);
-            if (num_acc_samps == 0)
-               DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
+          //  if (num_acc_samps == 0)
+          //     DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
         }
 
         size_t num_rx_samps = rx_stream->recv(buff_ptrs , samp_request, md, timeout);
-        
+     /*   // DEBUG print
+        if (num_rx_samps == 1996) {
+           DEBUG_PRINT("|");
+        } else {
+           DEBUG_PRINT("(rxed %d) ", num_rx_samps);
+        }
+     */
         timeout = 0.1;
 
         //handle the error codes
@@ -100,6 +106,11 @@ void usrp_rx_worker(
            } else {
                std::cerr << "ERROR_CODE_OVERFLOW: overflow (not out of sequece)" << std::endl;
            }
+   /*        std::cerr << "stop stream because of OVERFLOW" << std::endl;
+           stream_cmd.stream_mode = uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS;
+           stream_cmd.time_spec = uhd::time_spec_t();
+           rx_stream->issue_stream_cmd(stream_cmd);
+   */
            break;
         }
 
@@ -121,7 +132,7 @@ void usrp_rx_worker(
     int mute_received_samples = 0;
 
     if (num_acc_samps != num_requested_samps){
-        *return_status=-1;
+        *return_status=-100;
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "Error in receiving samples..(" << rx_error_time.get_real_secs() << ")\t";
 
@@ -132,44 +143,44 @@ void usrp_rx_worker(
 
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_LATE_COMMAND) {
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
-        std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
-        *return_status=-1;
+        std::cerr << "rx_worker: LATE_COMMAND encountered at " << rx_error_time.get_real_secs() << std::endl;
+        *return_status=md.error_code * -1;
     }
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
-        std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
-        *return_status=-1;
+        std::cerr << "rx_worker: Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
+        *return_status=md.error_code * -1;
     }
     if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW){
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
-        std::cerr << "Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
+        std::cerr << "rx_worker: Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
 
-  //      size_t num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
-  //    std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
+   /*     size_t num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
+        std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
 
-/*        while (num_rx_samps != 0 && !md.end_of_burst ) {
+        while (num_rx_samps != 0 && !md.end_of_burst ) {
             num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
             std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
         }
-*/
-        std::cerr << "Overflow cleanup: finished."   <<  std::endl;
 
+        std::cerr << "Overflow cleanup: finished."   <<  std::endl;
+   */
         mute_received_samples = 1;
-        *return_status=-1;
+        *return_status=md.error_code * -1;
     }
     if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "start time: " << start_time.get_real_secs() << std::endl;
-        std::cerr << "Unexpected error code " << md.error_code << " encountered at " << rx_error_time.get_real_secs() << std::endl;
-        *return_status=-1;
+        std::cerr << "rx_worker: Unexpected error code " << md.error_code << " encountered at " << rx_error_time.get_real_secs() << std::endl;
+        *return_status=md.error_code * -1;
     }
     if (md.out_of_sequence){
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "start time: " << start_time.get_real_secs() << std::endl;
-        std::cerr << "Packets out of order " << " encountered at " << rx_error_time.get_real_secs() << std::endl;
-        *return_status=-1;
+        std::cerr << "rx_worker: Packets out of order " << " encountered at " << rx_error_time.get_real_secs() << std::endl;
+        *return_status=*return_status - 1000;
     }
-
+/* this is now done in main progam
     if (mute_received_samples) {
         std::cerr << "Muting received samples because error occurred. " << std::endl;
         for (int iSide = 0; iSide < nSides; iSide++) { // TODO maybe smarter to mute sample while transfer to SHM (and just use special return_status)
@@ -178,7 +189,7 @@ void usrp_rx_worker(
            }
         }
     }
-
+*/
 
     DEBUG_PRINT("RX_WORKER finished\n");
     return;

@@ -600,7 +600,7 @@ class ProcessingGPU(object):
                         # create interleaved real/complex bb vector
                         bb_vec_interleaved = np.zeros(tx_bb_nSamples_per_pulse * 2)
                         try:
-                            self.logger.debug('synth_tx_rf_pulses: copying baseband signals from channel: {}, antenna: {}, pulse: {}'.format(iChannel, iAntenna, iPulse))
+                            self.logger.debug('synth_tx_rf_pulses: copying baseband signals ch:{}, ant:{}, pulse:{}'.format(iChannel, iAntenna, iPulse))
                             bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
                             bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
                             self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
@@ -864,33 +864,49 @@ class ProcessingGPU(object):
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
 
             # PLOT all three frequency bands
-            ax = plt.subplot(311)
-            mpt.plot_freq(self.rx_rf_samples[0][:int(self.rx_rf_samplingRate*0.1/2)*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
-            ax.set_ylim([50, 200])
-            plt.ylabel('RF')
+          ##  ax = plt.subplot(311)
+          ##  mpt.plot_freq(self.rx_rf_samples[0][:int(self.rx_rf_samplingRate*0.1/2)*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+          ##  ax.set_ylim([50, 200])
+          ##  plt.ylabel('RF')
 
-            ax = plt.subplot(312)
-            mpt.plot_freq(self.rx_if_samples[0][0][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-            mpt.plot_freq(self.rx_if_samples[0][1][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-            ax.set_ylim([50, 200])
-            plt.ylabel('IF')
+          ##  ax = plt.subplot(312)
+          ##  mpt.plot_freq(self.rx_if_samples[0][0][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+          ##  mpt.plot_freq(self.rx_if_samples[0][1][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+          ##  ax.set_ylim([50, 200])
+          ##  plt.ylabel('IF')
 
-            ax =plt.subplot(313)
-            mpt.plot_freq(self.rx_bb_samples[0][0][:int(self.rx_bb_samplingRate*0.1/2)*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
-            ax.set_ylim([50, 200])
-            plt.ylabel('BB')
+          ##  ax =plt.subplot(313)
+          ##  mpt.plot_freq(self.rx_bb_samples[0][0][:int(self.rx_bb_samplingRate*0.1/2)*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+          ##  ax.set_ylim([50, 200])
+          ##  plt.ylabel('BB')
+            plot_only_rf_and_bb = False
+            if plot_only_rf_and_bb:
+               plt.figure()
+               ax = plt.subplot(211) 
+               mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               plt.title("RF")
 
-            plt.figure()
-            ax = plt.subplot(211) 
-            mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
-            plt.title("RF")
+               ax = plt.subplot(212) 
+               mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_bb_samples[0][1], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               plt.title("BB")
 
-            ax = plt.subplot(212) 
-            mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
-            mpt.plot_time(self.rx_bb_samples[0][1], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
-            plt.title("BB")
+               plt.show()
+            else:
+               plt.figure()
+               ax = plt.subplot(311) 
+               mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               plt.title("RF")
 
-            plt.show()
+               ax = plt.subplot(312) 
+               mpt.plot_time(self.rx_if_samples[0][0], self.rx_rf_samplingRate /  self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+               plt.title("IF")
+
+               ax = plt.subplot(313) 
+               mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               plt.title("BB")
+
+               plt.show()
 
         #    mpt.plot_time_freq(self.rx_rf_samples[0][0][400000:440000], self.rx_rf_samplingRate, iqInterleaved=True)
         #    plt.title("Second pulse separate")
