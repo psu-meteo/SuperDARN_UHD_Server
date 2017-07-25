@@ -415,6 +415,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     int32_t rx_worker_status = 0; 
     int32_t mute_output = 0; // used if rx_worker error happends
 
+    int32_t rx_stream_reset_count = 0;
+
     std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
@@ -557,7 +559,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
   //  usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
   //  usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
-    uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
+    uhd::stream_args_t stream_args("sc16", "sc16");
     
     if (usrp->get_rx_num_channels() < nSides || usrp->get_tx_num_channels() < nSides) {  
        DEBUG_PRINT("ERROR: Number of defined channels (%i) is smaller than avaialable channels:\n    usrp->get_rx_num_channels(): %lu \n    usrp->get_tx_num_channels(): %lu \n\n", nSides, usrp->get_rx_num_channels(),   usrp->get_tx_num_channels());
@@ -900,6 +902,15 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                       state_vec[swing] = rx_worker_status;
                       rx_worker_status = 0;
                       mute_output = 1;                  
+                       
+                        
+                      if(rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) {
+                          // recreate rx_stream unless the error was from sending the stream command too late
+                          rx_stream_reset_count++;
+                          fprintf(stderr, "READY_DATA: recreating rx_stream (%dth time)!\n", rx_stream_reset_count);
+                          rx_stream.reset();
+                          rx_stream = usrp->get_rx_stream(stream_args);
+                      }
                     }
     
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
