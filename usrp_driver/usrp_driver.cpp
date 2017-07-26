@@ -434,6 +434,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     struct sockaddr_in sockaddr;
     struct sockaddr_storage client_addr;
     socklen_t addr_size;
+    uint32_t exit_driver = 0;
 
     uhd::time_spec_t start_time, rx_start_time;
     
@@ -553,8 +554,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
      
 
     std::string usrpargs(as_host->sval[0]);
-//    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
-    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6,recv_frame_size=8000";
+    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6";
+//    usrpargs = "addr0=" + usrpargs + ",master_clock_rate=200.0e6,recv_frame_size=50000000";
     uhd::usrp::multi_usrp::sptr usrp = uhd::usrp::multi_usrp::make(usrpargs);
   //  usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
   //  usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
@@ -894,6 +895,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
                   
+                   // rx_worker_status =1; //DEBUG
                     
                     if(rx_worker_status){
                       fprintf(stderr, "Error in rx_worker. Setting state to %d.\n", rx_worker_status);
@@ -903,9 +905,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                        
                       if (rx_stream_reset_count >= 120) {
                           fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
-                          // TODO or send remaining par, mute SHM and then close connection?
-                          close(driverconn);
-                          exit(1);
+                          // send all data to server, clean up and exit after that
+                          exit_driver = 1;
                       }
 
                       if(rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) {
@@ -1131,21 +1132,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                 case EXIT: {
                     DEBUG_PRINT("entering EXIT command\n");
-                    close(driverconn);
 
-                    for(iSide = 0; iSide < nSides; iSide++) {
-                        for(iSwing = 0; iSwing < nSwings; iSwing++) {
-                            munmap(shm_rx_vec[iSide][iSwing], rxshm_size);
-                            munmap(shm_tx_vec[iSide][iSwing], txshm_size);
-                            sem_close(&sem_rx_vec[iSwing]);
-                            sem_close(&sem_tx_vec[iSwing]);
-                        }
-                    }
-
-                    // TODO: close usrp streams?
-//                    sock_send_uint8(driverconn, EXIT);
-                    exit(1);
-                    
+                    exit_driver = 1;
                     break;
                     }
 
@@ -1156,6 +1144,30 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     break;
                 }
             }
+
+            // clean exit
+            if (exit_driver) {
+                DEBUG_PRINT("Shutting down driver\n");
+                close(driverconn);
+
+                for(iSide = 0; iSide < nSides; iSide++) {
+                    for(iSwing = 0; iSwing < nSwings; iSwing++) {
+                        // fill SHM with zeros
+                        memset(shm_rx_vec[iSide][iSwing], 0, rxshm_size);
+                        memset(shm_tx_vec[iSide][iSwing], 0, txshm_size);
+
+                        munmap(shm_rx_vec[iSide][iSwing], rxshm_size);
+                        munmap(shm_tx_vec[iSide][iSwing], txshm_size);
+                        sem_close(&sem_rx_vec[iSwing]);
+                        sem_close(&sem_tx_vec[iSwing]);
+                    }
+                }
+            
+            // TODO: close usrp streams?
+//            sock_send_uint8(driverconn, EXIT);
+            exit(1);
+          }
+
         }
     }
     
