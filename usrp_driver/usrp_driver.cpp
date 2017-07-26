@@ -894,20 +894,24 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
                   
-                   // TODO: delete this
-                   // uint32_t channel_index;
-                   // channel_index = sock_get_int32(driverconn);
+                    
                     if(rx_worker_status){
                       fprintf(stderr, "Error in rx_worker. Setting state to %d.\n", rx_worker_status);
                       state_vec[swing] = rx_worker_status;
                       rx_worker_status = 0;
                       mute_output = 1;                  
                        
-                        
+                      if (rx_stream_reset_count >= 120) {
+                          fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
+                          // TODO or send remaining par, mute SHM and then close connection?
+                          close(driverconn);
+                          exit(1);
+                      }
+
                       if(rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) {
                           // recreate rx_stream unless the error was from sending the stream command too late
                           rx_stream_reset_count++;
-                          fprintf(stderr, "READY_DATA: recreating rx_stream (%dth time)!\n", rx_stream_reset_count);
+                          fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
                           rx_stream.reset();
                           rx_stream = usrp->get_rx_stream(stream_args);
                       }
