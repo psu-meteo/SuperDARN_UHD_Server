@@ -57,17 +57,17 @@ def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
 
 
 def raisedCosine_filter(nTaps, nChannels, normalize = True):
-    # TODO: I changed this to be a complex filter. check if this makes sense for real radar signals! (mgu)
+
     alpha = 0.22
     filterData = np.zeros((nChannels, nTaps, 2), dtype=np.float32)
     for iTap in range(nTaps-1):
         t = 2 * iTap - (nTaps-1)
         if t == 0:
-           filterData[:,iTap,:] = 1
+           filterData[:,iTap,0] = 1
         elif np.absolute(t) ==  (nTaps-1)/(2*alpha):
-           filterData[:,iTap,:] = np.sin(np.pi/(2*alpha)) / (np.pi/(2*alpha)) * np.pi/4
+           filterData[:,iTap,0] = np.sin(np.pi/(2*alpha)) / (np.pi/(2*alpha)) * np.pi/4
         else:
-           filterData[:,iTap,:] = np.sin(np.pi*t/(nTaps-1)) / (np.pi*t/(nTaps-1)) * np.cos(alpha*np.pi*t / (nTaps-1)) / (1-2*(alpha*t/(nTaps-1))**2)
+           filterData[:,iTap,0] = np.sin(np.pi*t/(nTaps-1)) / (np.pi*t/(nTaps-1)) * np.cos(alpha*np.pi*t / (nTaps-1)) / (1-2*(alpha*t/(nTaps-1))**2)
         
     if normalize:
         filterData /= np.sum(filterData[0]) / np.sqrt(2)

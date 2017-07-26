@@ -94,7 +94,7 @@ class usrpSockManager():
       self.socks = []
       usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
       self.RHM = RHM
-      self.logger = logging.getLogger("usrpSockManager")      
+      self.logger = logging.getLogger("usrpManager")      
       
       self.nUSRPs = len(RHM.ini_usrp_configs) # TODO should this be all USRPs or only active?
       self.fault_status = np.ones(self.nUSRPs)
@@ -1918,11 +1918,11 @@ class RadarChannelHandler:
 
         RHM = self.parent_RadarHardwareManager
 
-        if self.scanManager.isInitSetParameter:
-           self.scanManager.isInitSetParameter = False
-           self.ctrlprm_struct.receive(self.conn)
-           self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-           return RMSG_SUCCESS
+   ##     if self.scanManager.isInitSetParameter:
+   ##        self.scanManager.isInitSetParameter = False
+   ##        self.ctrlprm_struct.receive(self.conn)
+   ##        self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+   ##        return RMSG_SUCCESS
        
         # wait if RHM.trigger_next_swing() is slower... 
         self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
