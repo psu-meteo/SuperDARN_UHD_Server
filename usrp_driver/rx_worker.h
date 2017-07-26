@@ -1,3 +1,5 @@
+#define RX_WORKER_STREAM_TIME_ERROR -10
+
 void usrp_rx_worker(
     uhd::usrp::multi_usrp::sptr usrp,
     uhd::rx_streamer::sptr rx_stream,

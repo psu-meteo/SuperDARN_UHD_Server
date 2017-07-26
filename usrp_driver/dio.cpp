@@ -50,6 +50,8 @@
 #include <uhd/utils/static.hpp>
 #include <uhd/exception.hpp>
 #include <boost/thread.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/date_time/gregorian/gregorian.hpp>
 #include <thread>
 #include <math.h>
 
@@ -265,7 +267,7 @@ void send_timing_for_sequence(
            // lower SYNC pin
            c.value = 0;
            c.cmd_time = offset_time_spec(pulse_times[iPulse], SYNC_OFFSET_END);
-           cmdq.push(c);	  
+           cmdq.push(c);
         }
       */
 
@@ -291,7 +293,7 @@ void send_timing_for_sequence(
         }
 
         if (mimic_active) {
-           // DEBUG_PRINT("DIO.cp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
+           // DEBUG_PRINT("DIO.cpp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
             // set mimic TX high, mimic RX low   
             c.port     = "TXA";
             c.mask     = MIMIC_PINS;
@@ -310,6 +312,12 @@ void send_timing_for_sequence(
 
 
     float debugt = usrp->get_time_now().get_real_secs();
+
+
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::universal_time();
+    std::cout << "GPIO command issue start time is: "<< to_iso_extended_string(now)<< std::endl;
+
+
     DEBUG_PRINT("DIO: pushed gpio commands at usrp_time %2.4f\n", debugt);
     // issue gpio commands in time sorted order 
     // set_command_time must be sent in temporal order, they are sent into a fifo queue on the usrp and will block until executed
@@ -319,12 +327,18 @@ void send_timing_for_sequence(
         usrp->set_command_time(c.cmd_time);
         usrp->set_gpio_attr(c.port,c.gpiocmd,c.value,c.mask);
 
-      //  debugt = usrp->get_time_now().get_real_secs();
-      //  DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.6u at usrp_time %2.6f (%2.4f) \n", c.value, c.mask,  c.cmd_time.get_real_secs(), debugt);
+        //debugt = usrp->get_time_now().get_real_secs();
+        //DEBUG_PRINT("DIO: sending queue: val:%2.6u mask: %2.6u at usrp_time %2.6f (%2.4f) \n", c.value, c.mask,  c.cmd_time.get_real_secs(), debugt);
 
         cmdq.pop();
     }
-    DEBUG_PRINT("All DIO commands send!\n");
+
+
+    now = boost::posix_time::microsec_clock::universal_time();
+    std::cout << "GPIO command issue end time is: "<< to_iso_extended_string(now)<< std::endl;
+
+    DEBUG_PRINT("All DIO commands sent! clock time\n");
+
     usrp->clear_command_time();
 
 

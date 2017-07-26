@@ -25,6 +25,8 @@
 #include "usrp_utils.h"
 #include "dio.h"
 
+#define RX_STREAM_EXEC_TIME .005
+
 #define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
@@ -59,6 +61,13 @@ void usrp_rx_worker(
     stream_cmd.num_samps = num_requested_samps;
     stream_cmd.stream_now = false;
     stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
+    
+    uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
+    if(stream_cmd.time_spec.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs() < RX_STREAM_EXEC_TIME) {
+        DEBUG_PRINT("not enough time before start of stream, skipping this integration period..");
+        *return_status= RX_WORKER_STREAM_TIME_ERROR;
+        return;
+    }
 
     DEBUG_PRINT("rx_worker start issue stream\n");   
     usrp->issue_stream_cmd(stream_cmd);

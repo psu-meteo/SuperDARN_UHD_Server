@@ -415,6 +415,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     int32_t rx_worker_status = 0; 
     int32_t mute_output = 0; // used if rx_worker error happends
 
+    int32_t rx_stream_reset_count = 0;
+
     std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
@@ -557,7 +559,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
   //  usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
   //  usrp->set_tx_subdev_spec(uhd::usrp::subdev_spec_t("A:A B:A"));
     boost::this_thread::sleep(boost::posix_time::seconds(SETUP_WAIT));
-    uhd::stream_args_t stream_args("sc16", "sc16"); // TODO: expand for dual polarization
+    uhd::stream_args_t stream_args("sc16", "sc16");
     
     if (usrp->get_rx_num_channels() < nSides || usrp->get_tx_num_channels() < nSides) {  
        DEBUG_PRINT("ERROR: Number of defined channels (%i) is smaller than avaialable channels:\n    usrp->get_rx_num_channels(): %lu \n    usrp->get_tx_num_channels(): %lu \n\n", nSides, usrp->get_rx_num_channels(),   usrp->get_tx_num_channels());
@@ -848,7 +850,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         for(uint32_t p_i = 0; p_i < pulse_time_offsets.size(); p_i++) {
                             double offset_time = pulse_sample_idx_offsets[p_i] / txrate;
                             pulse_time_offsets[p_i] = offset_time_spec(start_time, offset_time);
-                            //DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
+                            DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
 
                         DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f and last is %2.5f\n", pulse_time_offsets[0].get_real_secs(), pulse_time_offsets.back().get_real_secs());
@@ -892,14 +894,27 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("READY_DATA usrp worker threads joined, semaphore unlocked, sending metadata\n");
                     // TODO: handle multiple channels of data.., use channel index to pick correct swath of memory to copy into shm
                   
-                   // TODO: delete this
-                   // uint32_t channel_index;
-                   // channel_index = sock_get_int32(driverconn);
+                    
                     if(rx_worker_status){
                       fprintf(stderr, "Error in rx_worker. Setting state to %d.\n", rx_worker_status);
                       state_vec[swing] = rx_worker_status;
                       rx_worker_status = 0;
                       mute_output = 1;                  
+                       
+                      if (rx_stream_reset_count >= 120) {
+                          fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
+                          // TODO or send remaining par, mute SHM and then close connection?
+                          close(driverconn);
+                          exit(1);
+                      }
+
+                      if(rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) {
+                          // recreate rx_stream unless the error was from sending the stream command too late
+                          rx_stream_reset_count++;
+                          fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
+                          rx_stream.reset();
+                          rx_stream = usrp->get_rx_stream(stream_args);
+                      }
                     }
     
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
