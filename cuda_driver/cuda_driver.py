@@ -863,22 +863,29 @@ class ProcessingGPU(object):
             cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
 
+
+            start_time = 5e-3
+            stop_time =  30e-3
+
+
             # PLOT all three frequency bands
-          ##  ax = plt.subplot(311)
-          ##  mpt.plot_freq(self.rx_rf_samples[0][:int(self.rx_rf_samplingRate*0.1/2)*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
-          ##  ax.set_ylim([50, 200])
-          ##  plt.ylabel('RF')
+            ax = plt.subplot(311)
+            mpt.plot_time(self.rx_rf_samples[0][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+          #  ax.set_ylim([50, 200])
+            plt.ylabel('RF')
 
-          ##  ax = plt.subplot(312)
-          ##  mpt.plot_freq(self.rx_if_samples[0][0][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-          ##  mpt.plot_freq(self.rx_if_samples[0][1][:int(self.rx_rf_samplingRate*0.1 / self.rx_rf2if_downsamplingRate/2)*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-          ##  ax.set_ylim([50, 200])
-          ##  plt.ylabel('IF')
+            ax = plt.subplot(312)
+            mpt.plot_freq(self.rx_if_samples[0][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+         ##   mpt.plot_freq(self.rx_if_samples[0][1][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+          #  ax.set_ylim([50, 200])
+            plt.ylabel('IF')
 
-          ##  ax =plt.subplot(313)
-          ##  mpt.plot_freq(self.rx_bb_samples[0][0][:int(self.rx_bb_samplingRate*0.1/2)*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
-          ##  ax.set_ylim([50, 200])
-          ##  plt.ylabel('BB')
+            ax =plt.subplot(313)
+            mpt.plot_freq(self.rx_bb_samples[0][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+          #  ax.set_ylim([50, 200])
+            plt.ylabel('BB')
+
+
             plot_only_rf_and_bb = False
             if plot_only_rf_and_bb:
                plt.figure()
@@ -893,17 +900,22 @@ class ProcessingGPU(object):
 
                plt.show()
             else:
+               xlim = [20.8e-3, 21.5e-3]
+               xlim = [0, 0.5]
                plt.figure()
                ax = plt.subplot(311) 
                mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               ax.set_xlim(xlim)
                plt.title("RF")
 
                ax = plt.subplot(312) 
                mpt.plot_time(self.rx_if_samples[0][0], self.rx_rf_samplingRate /  self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+               ax.set_xlim(xlim)
                plt.title("IF")
 
                ax = plt.subplot(313) 
                mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               ax.set_xlim(xlim)
                plt.title("BB")
 
                plt.show()
@@ -944,7 +956,7 @@ class ProcessingGPU(object):
     def _set_tx_mixerfreq(self, swing):
         for channel in range(self.nChannels):
             if self.sequences[swing][channel] is not None:
-               fc = self.sequences[swing][channel].ctrlprm['tfreq'] * 1000
+               fc = self.sequences[swing][channel].ctrlprm['tfreq'] * 1000 
                self.tx_mixer_freqs[channel] = np.float64(2 * np.pi * ( fc - self.usrp_mixing_freq[swing] ) / self.tx_rf_samplingRate)
                self.logger.debug('setting tx mixer freq for ch {}: {} MHz (usrp BB {} MHz) swing {}'.format(channel, fc/1e6, (fc - self.usrp_mixing_freq[swing])/1e6, swing)  )
                cuda.memcpy_htod(self.cu_tx_mixer_freq_rads, self.tx_mixer_freqs)
