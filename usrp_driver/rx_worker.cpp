@@ -47,34 +47,81 @@ void usrp_rx_worker(
 
     DEBUG_PRINT("entering RX_WORKER\n");
  //   fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
-    int nSides = (*rx_data_buffer).size();
  //   fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
 
+    int nSides = (*rx_data_buffer).size();
+    const size_t max_samples_per_packet = rx_stream->get_max_num_samps();
 
-    //setup streaming
-    uhd::rx_metadata_t md;
-    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
-
-    double timeout = 5.0;
-    
-    uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
-    stream_cmd.num_samps = num_requested_samps;
-    stream_cmd.stream_now = false;
-    stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
-    
     uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
-    if(stream_cmd.time_spec.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs() < RX_STREAM_EXEC_TIME) {
+    if(offset_time_spec(start_time, RX_OFFSET) - rx_usrp_pre_stream_time.get_real_secs() < RX_STREAM_EXEC_TIME) {
         DEBUG_PRINT("not enough time before start of stream, skipping this integration period..");
         *return_status= RX_WORKER_STREAM_TIME_ERROR;
         return;
     }
 
-    DEBUG_PRINT("rx_worker start issue stream\n");   
-    usrp->issue_stream_cmd(stream_cmd);
-    DEBUG_PRINT("rx_worker end issue strem\n");
+
+
+    // max number of samples per stream command is limited by UHD
+    // to 0x0fffffff samples at the full sampling rate of the ADC (200 MSPS)
+    // we request samples after downconversion, so the maximum number of samples that we can request is 0x0fffffff / (200e6 / output_rate)
+    // to make things a bit easier, just hardcode a conservative max number of samples
+    // also make math easier by chunking at a multiple of the max number of samples per packet..
+
+    // then, issue multiple stream commands to gather the full amount of samples
+
+ 
+    //setup streaming
+    uhd::rx_metadata_t md;
+    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
+
+    size_t samples_remaining_to_stream = num_requested_samps;
+
+    // calculate the maximum number of samples per stream command that is a multiple of the maximum samples per packet
+    // assumes 200 MHz adc clock and 10 MSPS sampling rate
+    size_t max_samples_per_stream = 0x0fffffff / (200e6 / 10e6);
+    max_samples_per_stream = max_samples_per_stream - (max_samples_per_stream % max_samples_per_packet);
+    double timeout = 5.0;
+
+
+    if(samples_remaining_to_stream > max_samples_per_stream) {
+        // each stream command should request the around the maximum number of samples possible that is a multiple of the recv stream packet size
+        // so, issue NUM_SAMPS_AND_MORE commands until there are fewer than max_samples_per_packet remaining 
+        uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_MORE;
+        stream_cmd.num_samps = max_samples_per_stream;
+        stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
+       
+        // issue the first stream command to be timed at the start of the integration period
+        stream_cmd.stream_now = false;
+        usrp->issue_stream_cmd(stream_cmd); 
+
+        samples_remaining_to_stream -= max_samples_per_stream;
+
+        // stream commands after the first should execute immediately
+        // keep sending NUM_SAMPS_AND_MORE until there are fewer than max_samples_per_stream samples 
+        stream_cmd.stream_now = true;
+        while(samples_remaining_to_stream > max_samples_per_stream) {
+            usrp->issue_stream_cmd(stream_cmd); 
+            samples_remaining_to_stream -= max_samples_per_stream;
+        }
+        
+        // finally, issue a NUM_SAMPS_AND_DONE command for the last command
+        stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
+        stream_cmd.stream_now = true;
+        stream_cmd.num_samps = samples_remaining_to_stream;
+        usrp->issue_stream_cmd(stream_cmd); 
+    }
     
+    else {
+        // if we want fewer than max_samples_per_stream samples, just request them all at once
+        uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
+        stream_cmd.stream_now = false;
+        stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
+        stream_cmd.num_samps = samples_remaining_to_stream;
+        usrp->issue_stream_cmd(stream_cmd); 
+    }
+
+
     size_t num_acc_samps = 0;
-    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
     std::vector<std::complex<int16_t>*> buff_ptrs(nSides);
  /*   for (int iSide=0;iSide<nSides;iSide++) {
       DEBUG_PRINT("side %d \n  ", iSide);
@@ -88,7 +135,7 @@ void usrp_rx_worker(
     DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
 
-        size_t samp_request = std::min(num_max_request_samps, num_requested_samps - num_acc_samps);
+        size_t samp_request = std::min(max_samples_per_packet, num_requested_samps - num_acc_samps);
         for (int iSide = 0; iSide < nSides; iSide++) {
             buff_ptrs[iSide] = &((*rx_data_buffer)[iSide][num_acc_samps]);
           //  if (num_acc_samps == 0)
@@ -164,11 +211,11 @@ void usrp_rx_worker(
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
         std::cerr << "rx_worker: Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
 
-   /*     size_t num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
+   /*     size_t num_rx_samps = rx_stream->recv(buff_ptrs , max_samples_per_packet, md, timeout);
         std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
 
         while (num_rx_samps != 0 && !md.end_of_burst ) {
-            num_rx_samps = rx_stream->recv(buff_ptrs , num_max_request_samps, md, timeout);
+            num_rx_samps = rx_stream->recv(buff_ptrs , max_samples_per_packet, md, timeout);
             std::cerr << "Overflow cleanup: received  " << num_rx_samps << "  , end _of _burst: " << md.end_of_burst <<  std::endl;
         }
 
