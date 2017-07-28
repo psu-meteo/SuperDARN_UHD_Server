@@ -1918,11 +1918,11 @@ class RadarChannelHandler:
 
         RHM = self.parent_RadarHardwareManager
 
-   ##     if self.scanManager.isInitSetParameter:
-   ##        self.scanManager.isInitSetParameter = False
-   ##        self.ctrlprm_struct.receive(self.conn)
-   ##        self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-   ##        return RMSG_SUCCESS
+        if self.scanManager.isInitSetParameter:
+           self.scanManager.isInitSetParameter = False
+           self.ctrlprm_struct.receive(self.conn)
+           self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+           return RMSG_SUCCESS
        
         # wait if RHM.trigger_next_swing() is slower... 
         self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
