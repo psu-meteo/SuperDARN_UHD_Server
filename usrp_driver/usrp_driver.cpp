@@ -416,6 +416,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     int32_t mute_output = 0; // used if rx_worker error happends
 
     int32_t rx_stream_reset_count = 0;
+    int32_t rx_stream_error_count = 0;
 
     std::vector<sem_t>  sem_rx_vec(nSwings), sem_tx_vec(nSwings);
 
@@ -901,7 +902,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                       fprintf(stderr, "Error in rx_worker. Setting state to %d.\n", rx_worker_status);
                       state_vec[swing] = rx_worker_status;
                       rx_worker_status = 0;
-                      mute_output = 1;                  
+                      mute_output = 1;
+                      rx_stream_error_count++;
                        
                       if (rx_stream_reset_count >= 120) {
                           fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
@@ -909,13 +911,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                           exit_driver = 1;
                       }
 
-                      if(rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) {
+                      if((rx_worker_status != RX_WORKER_STREAM_TIME_ERROR) && (rx_stream_error_count > 4)) {
                           // recreate rx_stream unless the error was from sending the stream command too late
                           rx_stream_reset_count++;
                           fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
                           rx_stream.reset();
                           rx_stream = usrp->get_rx_stream(stream_args);
                       }
+                    }
+
+                    else {
+                        rx_stream_error_count = 0;
                     }
     
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
