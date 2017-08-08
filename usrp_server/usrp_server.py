@@ -638,8 +638,9 @@ class RadarHardwareManager:
         self.client_sock.bind(('localhost', port))
         self.logger = logging.getLogger('HwManager')
         self.logger.info('listening on port ' + str(port) + ' for control programs')
-        self.mixingFreqManager       = None
-        self.usrpManager = None
+
+    #    self.mixingFreqManager       = None
+    #    self.usrpManager = None
  
         self.ini_file_init()
         self.usrp_init()
@@ -1011,24 +1012,32 @@ class RadarHardwareManager:
         
 
     def exit(self):
-        self.logger.waring("Entering RadarHardwareManager.exit() ")
+        self.logger.warning("Entering RadarHardwareManager.exit() for clean exit")
         # clean up and exit
         self.client_sock.close()
 
-        if self.usrpManager != None:
+        if hasattr(self, 'usrpManager'):
            cmd = usrp_exit_command(self.usrpManager.socks)
            cmd.transmit()
            for sock in self.usrpManager.socks:
                sock.close()
 
-        cmd = cuda_exit_command(self.cudasocks)
-        cmd.transmit()
+        if hasattr(self, 'cudasocks'): 
+            cmd = cuda_exit_command(self.cudasocks)
+            cmd.transmit()
 
-        for sock in self.cudasocks:
-            sock.close()
-
-        self.logger.info('received exit command, cleaning up..')
-
+            for sock in self.cudasocks:
+                sock.close()
+        
+        # clean up server semaphores
+        if hasattr(self, 'set_par_semaphore'):
+           self.set_par_semaphore.release()
+           self.set_par_semaphore.unlink()
+        if hasattr(self, 'mixingFreqManager'):
+           self.mixingFreqManager.semaphore.release()
+           self.mixingFreqManager.semaphore.unlink()
+        
+     
         sys.exit(0)
 
     def _calc_period_details(self, newChannels=[]):
