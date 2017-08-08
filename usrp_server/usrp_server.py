@@ -67,12 +67,34 @@ CS_LAST_SWING    = 'CS_LAST_SWING'
 class statusUpdater():
    " Class to a file every x minutes to allow checking uspr_status from outside"
 
-   def __init__(self):
+   def __init__(self, RHM ):
       self.fileName = '../log/usrp_server_status.txt'
-      self.nSeconds_update_period = 30
+      self.RHM = RHM
+      self.nSeconds_update_period = 5
       self.last_write = datetime.datetime.now()
+      self.str_start = self.last_write.strftime("Start time: %Y-%m-%d %H:%M:%S\n")
+
+   def create_status_information(self):
+      status = self.str_start
+      status += "USRPs: {} active, {} inactive\n".format(len(self.RHM.usrpManager.addressList_active), len(self.RHM.usrpManager.addressList_inactive))
+      status += "Number of channels: {}\n".format(self.RHM.nRegisteredChannels)
+      return status
+      
+      
+
+   def update_advanced(self):
+      """ Writes some information in the file"""
+
+      nSeconds_since_last_write = (datetime.datetime.now() - self.last_write).total_seconds()
+      if self.nSeconds_update_period < nSeconds_since_last_write:
+         self.last_write = datetime.datetime.now()
+#         if not os.path.isfile(self.fileName):
+         with open(self.fileName, "w") as f:
+            f.write(self.create_status_information())    
+
 
    def update(self):
+      """ just updates the empty file """
       nSeconds_since_last_write = (datetime.datetime.now() - self.last_write).total_seconds()
       if self.nSeconds_update_period < nSeconds_since_last_write:
          self.last_write = datetime.datetime.now()
@@ -88,9 +110,12 @@ class statusUpdater():
 class usrpSockManager():
    def __init__(self, RHM):
       self.addressList_active     = [] # tuple of IP and port
-      self.addressList_inactive   = []
       self.antennaList_active     = []
       self.hostnameList_active    = []
+      self.addressList_inactive   = []
+      self.antennaList_inactive   = []
+      self.hostnameList_inactive  = []
+
       self.socks = []
       usrp_driver_base_port = int(RHM.ini_network_settings['USRPDriverPort'])
       self.RHM = RHM
@@ -100,6 +125,8 @@ class usrpSockManager():
       self.fault_status = np.ones(self.nUSRPs)
       self.errors_in_a_row = 0
       self.error_limit = 15
+      self.nSeconds_retry_reconnect = 60
+      self.last_reconnection = datetime.datetime.now()
       
       # open each
       self.hostnameList_active = [] 
@@ -109,6 +136,11 @@ class usrpSockManager():
                self.logger.debug("Already connected to USRP {}".format(usrpConfig['usrp_hostname']))
                idx_usrp = self.hostnameList_active.index(usrpConfig['usrp_hostname'])
                self.antennaList_active[idx_usrp].append(usrpConfig['array_idx'])
+               
+            elif usrpConfig['usrp_hostname'] in self.hostnameList_inactive:
+               self.logger.debug("Already failed to connected to USRP {}".format(usrpConfig['usrp_hostname']))
+               idx_usrp = self.hostnameList_inactive.index(usrpConfig['usrp_hostname'])
+               self.antennaList_inactive[idx_usrp].append(usrpConfig['array_idx'])
                
             else:
                port = int(usrpConfig['usrp_hostname'].split(".")[2]) + usrp_driver_base_port
@@ -120,27 +152,40 @@ class usrpSockManager():
                self.socks.append(usrpsock)
                self.addressList_active.append(connectPar)
                self.antennaList_active.append([usrpConfig['array_idx']])
-               self.logger.debug('connected to usrp driver on port {}'.format(port))
                self.hostnameList_active.append(usrpConfig['usrp_hostname'])
+               self.logger.debug('connected to usrp driver on port {}'.format(port))
 
          except ConnectionRefusedError:
             self.logger.error('USRP server connection failed: {}:{}'.format(usrpConfig['driver_hostname'], port))
-            self.addressList_inactive.append((usrpConfig['driver_hostname'], port ))
+
+            if usrpConfig['usrp_hostname'] in self.hostnameList_inactive: 
+               idx_usrp = self.hostnameList_inactive.index(usrpConfig['usrp_hostname'])
+               self.antennaList_inactive[idx_usrp].append(usrpConfig['array_idx'])
+            else:   
+               self.addressList_inactive.append((usrpConfig['driver_hostname'], port ))
+               self.antennaList_inactive.append([usrpConfig['array_idx']])
+               self.hostnameList_inactive.append(usrpConfig['usrp_hostname'])
 
       if len(self.socks) ==0:
-         self.logger.error("No connection to USRPs. Exit...")
-         # RHM.exit() # dosen't work sinc RHM has no usrpManager jet...
-         sys.exit(0)
+         self.logger.error("No connection to USRPs. Exit usrp_server.")
+         RHM.exit() 
+
+
    def remove_sock(self, sock_to_remove):
        iSock = self.socks.index(sock_to_remove)
        self.logger.error("Removing usrp {} ({}:{}). ".format(self.hostnameList_active[iSock], self.addressList_active[iSock][0], self.addressList_active[iSock][1])) 
        self.addressList_inactive.append(self.addressList_active[iSock] )
        del self.addressList_active[iSock]
+
        lost_antennas = self.antennaList_active[iSock]
+       self.antennaList_inactive.append(lost_antennas)
        for iSwing in range(nSwings):
           self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
        del self.antennaList_active[iSock]
+
+       self.hostnameList_inactive.append(self.hostnameList_active[iSock])
        del self.hostnameList_active[iSock]
+
        del self.socks[iSock]
 
 
@@ -156,14 +201,6 @@ class usrpSockManager():
             if singleReturn == CONNECTION_ERROR:
                self.logger.error("Connection lost to usrp {}:{}. Removing it from sock list. ".format(self.addressList_active[iSock-offset][0], self.addressList_active[iSock-offset][1])) 
                self.remove_sock(self.socks[iSock-offset])
-            #   self.addressList_inactive.append(self.addressList_active[iSock-offset] )
-            #   del self.addressList_active[iSock-offset]
-            #   lost_antennas = self.antennaList_active[iSock-offset]
-            #   for iSwing in range(nSwings):
-            #      self.fill_shm_with_zeros(lost_antennas, iSwing, ['rx', 'tx'])
-            #   del self.antennaList_active[iSock-offset]
-            #   del self.hostnameList_active[iSock-offset]
-            #   del self.socks[iSock-offset]
                offset += 1 
 
       if len(self.socks) == 0:
@@ -214,24 +251,53 @@ class usrpSockManager():
             self.errors_in_a_row = 0
 
    def restore_lost_connections(self):
-      addressList = self.addressList_inactive
-      self.addressList_inactive = [] 
-      for usrp in addressList:
-         self.logger.error("Skipping reconnecting usrps because resync causes problems. TODO fix it!")
+       
+      nSeconds_since_last_try = (datetime.datetime.now() - self.last_reconnection).total_seconds()
+      if self.nSeconds_retry_reconnect > nSeconds_since_last_try:
          return
+
+  
+
+      self.logger.info("Try to reconnect to USRPs")
+      self.last_reconnection = datetime.datetime.now()
+
+      tmp_address_list = self.addressList_inactive
+      tmp_antenna_list = self.antennaList_inactive
+      tmp_hostname_list = self.hostnameList_inactive
+      self.addressList_inactive = [] 
+      self.antennaList_inactive = [] 
+      self.hostnameList_inactive = [] 
+      do_resync = False
+      for iUSRP,usrp in enumerate(tmp_address_list):
+
+         if usrp[0] in self.hostnameList_active:
+            self.logger.error(" Already connected to USRP {}, something went wrong!".format(usrp[0]))
+            #idx_usrp = self.hostnameList_active.index(usrp[0])
+            #self.antennaList_active[idx_usrp].append(usrpConfig['array_idx'])
+            
          try: 
             usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             usrpsock.connect(usrp)
-            # TODO : sync to other usrps
-            self.RHM._resync_usrps
-            # TODO : initialize shm with zeros
+
             self.socks.append(usrpsock)
             self.addressList_active.append(usrp)
-            # TODO keep teck of antennaList and hostnameList
-            self.logger.info('reconnection to usrp driver on port {} successful'.format(usrp[1]))
+            self.antennaList_active.append(tmp_antenna_list[iUSRP])
+            self.hostnameList_active.append(tmp_hostname_list[iUSRP])
+            self.logger.info('reconnection to usrp  {} successful'.format(tmp_hostname_list[iUSRP]))
+            do_resync = True
+
          except ConnectionRefusedError:
-            self.logger.error('usrp reconnection failed on port {}'.format(usrp[1]))
+            self.logger.warning('reconnection to usrp {} failed'.format(tmp_hostname_list[iUSRP]))
             self.addressList_inactive.append(usrp)
+            self.antennaList_inactive.append(tmp_antenna_list[iUSRP]) 
+            self.hostnameList_inactive.append(tmp_hostname_list[iUSRP])
+
+
+      # sync to other usrps
+      if do_resync:
+         self.RHM._resync_usrps()
+         self.RHM.rxfe_init() # TODO speed up by just calling init for new usrps?
+
 
 class usrpMixingFreqManager():
     """ Manages usrp mixing frequency based on channels. Ensures that only one channel
@@ -573,7 +639,8 @@ class RadarHardwareManager:
         self.logger = logging.getLogger('HwManager')
         self.logger.info('listening on port ' + str(port) + ' for control programs')
         self.mixingFreqManager       = None
-        
+        self.usrpManager = None
+ 
         self.ini_file_init()
         self.usrp_init()
         self.rxfe_init()
@@ -584,7 +651,7 @@ class RadarHardwareManager:
         self.nControlPrograms    = 0  # number of control programs, also include unregistered channels
 
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
-        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks)
+        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
         self.logger.warning("RadarHardwareManager: hardcoded clear frequency search frequency!, modify code to use adaptive center freq")
         self.clearFreqRawDataManager.set_clrfreq_search_span(12.5e6, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
@@ -627,21 +694,20 @@ class RadarHardwareManager:
         def radar_main_control_loop():
             controlLoop_logger = logging.getLogger('Control Loop')
             controlLoop_logger.info('Starting RHM.radar_main_control_loop() ')
-            statusFile = statusUpdater()
+            statusFile = statusUpdater(self)
             sleepTime = 0.01 # used if control loop waits for one channel
            
             while True:
 
-                statusFile.update()
+               # statusFile.update()
+                statusFile.update_advanced()
 
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time() # TODO change this to refence clock and scan times
 
                 # check if there are any disconnected URSPs
                 if len(self.usrpManager.addressList_inactive):
-
-                   controlLoop_logger.info('restoring lost connections')
-                   self.usrpManager.restore_lost_connections()
+                    self.usrpManager.restore_lost_connections()
 
                 # CLEAR FREQ SEARCH: recoring when ever requested (independent of swing, state or channel)
                 if self.clearFreqRawDataManager.outstanding_request:
@@ -752,6 +818,8 @@ class RadarHardwareManager:
       self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
 
       self._resync_usrps()
+
+
     def send_cuda_setup_command(self):
       if self.commonChannelParameter == {}:
          self.logger.debug("Skipping call of cuda_setup because up/down samplingRates are unknown.")
@@ -943,16 +1011,19 @@ class RadarHardwareManager:
         
 
     def exit(self):
+        self.logger.waring("Entering RadarHardwareManager.exit() ")
         # clean up and exit
         self.client_sock.close()
-        cmd = usrp_exit_command(self.usrpManager.socks)
-        cmd.transmit()
+
+        if self.usrpManager != None:
+           cmd = usrp_exit_command(self.usrpManager.socks)
+           cmd.transmit()
+           for sock in self.usrpManager.socks:
+               sock.close()
 
         cmd = cuda_exit_command(self.cudasocks)
         cmd.transmit()
 
-        for sock in self.usrpManager.socks:
-            sock.close()
         for sock in self.cudasocks:
             sock.close()
 
@@ -979,6 +1050,9 @@ class RadarHardwareManager:
         transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME
         if transmitting_time_left < 0:
             self.logger.error("no time is left in integration period for sampling!, {} seconds remain".format(transmitting_time_left))
+            transmitting_time_left = 0.3
+            self.logger.error("Setting it to {} seconds, until solution available".format(transmitting_time_left))
+
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
         nSequences_per_period = int(transmitting_time_left / pulse_sequence_period)
@@ -1252,6 +1326,7 @@ class RadarHardwareManager:
                  channel.next_processing_state = CS_INACTIVE
                  channel.active_state          = CS_INACTIVE
                  channel.next_active_state     = CS_INACTIVE
+                 self.nRegisteredChannels -= 1 
                  channel.logger.debug('last period finished, setting active and next processing state to CS_INACTIVE')
               elif channel.scanManager.isLastPeriod:
                  channel.next_processing_state = CS_LAST_SWING
