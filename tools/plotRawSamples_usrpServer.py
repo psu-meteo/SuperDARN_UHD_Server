@@ -97,6 +97,8 @@ def read_and_plot():
        if iChannel == 0:
           plt.cla()
        plt.plot([i /xAxis_scaling for i in range(len(beamformedPlotData))], 20*np.log10(np.abs(beamformedPlotData)/np.iinfo(np.int16).max/np.sqrt(2)))
+       pulse_times = np.array(parDictList[0]['pulse_sequence_offsets_vector'] ) * parDictList[0]['baseband_samplerate']
+       plt.scatter(pulse_times, pulse_times*0)
        plt.grid(True)
        plt.ylabel("Beamformed (dB)")
        plt.xlabel(xAxis_label)
