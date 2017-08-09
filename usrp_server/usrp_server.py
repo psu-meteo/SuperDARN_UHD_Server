@@ -39,6 +39,7 @@ from clear_frequency_search import read_restrict_file, record_clrfreq_raw_sample
 from profiling_tools import *
 import logging_usrp
 
+RMSG_PORT = 45000
 MAX_CHANNELS = 10
 CLRFREQ_RES_HZ = 1000
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
@@ -323,9 +324,9 @@ class usrpMixingFreqManager():
           channel.logger.error("Channel bandwidth ({} MHz- {} MHz) is not covered by radar hardware limits ({} MHz - {} MHz)".format(newLower/1000, newUpper/1000, RHM.hardwareLimit_freqRange[0]/1000, RHM.hardwareLimit_freqRange[1]/1000))
           return False
 
-       channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager")
+       channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager", channel.cnum)
        self.semaphore.acquire()
-       channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager")
+       channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager", channel.cnum)
    
        if newLower > (self.current_mixing_freq - self.usrp_bandwidth/2) and newUpper < (self.current_mixing_freq + self.usrp_bandwidth/2):
           channel.logger.debug("channel range is within USRP bandwidth")
@@ -636,9 +637,11 @@ class RadarHardwareManager:
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
+
         self.logger = logging.getLogger('HwManager')
         self.logger.info('listening on port ' + str(port) + ' for control programs')
 
+        self.exit_usrp_server = False
     #    self.mixingFreqManager       = None
     #    self.usrpManager = None
  
@@ -700,8 +703,12 @@ class RadarHardwareManager:
            
             while True:
 
-               # statusFile.update()
+                # statusFile.update()
                 statusFile.update_advanced()
+
+                if self.exit_usrp_server:
+                   self.logger.info("ending main_control_loop ")
+                   break
 
                 # set start time of integration period (will be overwriten if not triggered)
                 self.starttime_period = time.time() # TODO change this to refence clock and scan times
@@ -761,6 +768,10 @@ class RadarHardwareManager:
         while True:
             usrp_server_logger.info('waiting for control program')
             client_conn, addr = self.client_sock.accept()
+
+            if self.exit_usrp_server:
+               self.logger.info("ending control program sock loop ")
+               break
 
             usrp_server_logger.info('connection from control program, spawning channel handler thread')
             ct = threading.Thread(target=spawn_channel, args=(client_conn,), daemon=False)
@@ -1013,6 +1024,20 @@ class RadarHardwareManager:
 
     def exit(self):
         self.logger.warning("Entering RadarHardwareManager.exit() for clean exit")
+        self.disconnect_driver_and_clean_up()
+     #   self.logger.debug("Closing client socket... ")
+     #   self.client_sock.close()
+        self.logger.debug("Settinge exit flag... ")
+        self.exit_usrp_server = True
+
+        # conntect to ros port overcome blocking          
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(('localhost', RMSG_PORT))
+        sock.close()
+        # sys.exit(0)
+
+    def disconnect_driver_and_clean_up(self):
+        self.logger.warning("Entering RadarHardwareManager.disconnect_driver_and_clean_up() ")
         # clean up and exit
         self.client_sock.close()
 
@@ -1038,7 +1063,6 @@ class RadarHardwareManager:
            self.mixingFreqManager.semaphore.unlink()
         
      
-        sys.exit(0)
 
     def _calc_period_details(self, newChannels=[]):
         """ calculate details for integration period and save it in channel objects"""
@@ -1645,6 +1669,7 @@ class RadarChannelHandler:
                 self.logger.error('unrecognized command! {}'.format(rmsg.payload))
                 self.close()
                 break
+                  
 
             try:
                if command in rmsg_handlers:
@@ -1659,8 +1684,11 @@ class RadarChannelHandler:
                 self.close()
                 break
 
-            if status == 'exit': # output of QuitHandler
+            if status == 'exit_channel': # output of QuitHandler
                 break
+ 
+            if status == 'exit_server': # output of ExitServer
+                sys.exit(0)
  
             rmsg.set_data('status', status)
             rmsg.set_data('type', rmsg.payload['type'])
@@ -1737,7 +1765,7 @@ class RadarChannelHandler:
     def ExitServerHandler(self, rmsg):
         self.logger.debug("Entering Exit Server Handler...")
         self.parent_RadarHardwareManager.exit()
-        return 0
+        return 'exit_server'
 
     def QuitHandler(self, rmsg):
         self.logger.debug("Entering Quit handler...")
@@ -1746,7 +1774,7 @@ class RadarChannelHandler:
         #rmsg.set_data('type', rmsg.payload['type'])
         #rmsg.transmit()
         self.close()
-        return 'exit'
+        return 'exit_channel'
 
     def PingHandler(self, rmsg):
         return RMSG_SUCCESS
@@ -2023,8 +2051,10 @@ class RadarChannelHandler:
 
 
         # period not jet triggered
-        if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c 
+        if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
+           self.logger.debug("Ch {} waiting for Paramter semaphore...".format(self.cnum)) 
            RHM.set_par_semaphore.acquire()
+           self.logger.debug("Ch {} acquired semaphore, setting parameter ".format(self.cnum)) 
 
            if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
@@ -2042,6 +2072,7 @@ class RadarChannelHandler:
            else:
               self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
            RHM.set_par_semaphore.release()
+           self.logger.debug("Ch {} released semaphore ".format(self.cnum)) 
  
         # in middle of scan, period already triggerd. only compare with prediction
         elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
@@ -2412,9 +2443,8 @@ def main():
     logging_usrp.initLogging('server.log')
     logging.info('Strating main() of usrp_server')
 
-    rmsg_port = 45000
 
-    radar = RadarHardwareManager(rmsg_port)
+    radar = RadarHardwareManager(RMSG_PORT)
     radar.run()
 
 
