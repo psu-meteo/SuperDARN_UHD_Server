@@ -1486,6 +1486,9 @@ class RadarHardwareManager:
         beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         debugPlot = False
+
+        maxInt16value = np.iinfo(np.int16).max # +32767
+        minInt16value = np.iinfo(np.int16).min # -32768
     
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
@@ -1495,12 +1498,11 @@ class RadarHardwareManager:
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
                 
                 # MAIN ARRAY
-                phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in RHM.antenna_idx_list_main])  # calculate a complex number representing the phase shift for each antenna
-                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel]) * RHM.scaling_factor_rx_bb 
+                first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20] 
+                phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
+                complex_float_samples = phasing_matrix * np.delete(np.matrix(main_samples[iChannel]),first_pol_ant_idx, 0)  * RHM.scaling_factor_rx_bb 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
-                maxInt16value = np.iinfo(np.int16).max # 32767
-                minInt16value = np.iinfo(np.int16).min # -32768
                 abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
                 RHM.logger.info("Abs max_value is {} (int16_max= {}, max_value / int16_max = {} ) ".format(abs_max_value, maxInt16value, abs_max_value / maxInt16value ))                
 
@@ -1511,6 +1513,7 @@ class RadarHardwareManager:
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
                    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
+
                 complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.uint16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
@@ -1614,6 +1617,7 @@ class RadarChannelHandler:
         #   OKAY                 : self.OkayHandler,\
         #   NOOP                 : self.NoopHandler,\
             QUIT                 : self.QuitHandler,\
+            ExitServer           : self.ExitServerHandler,\
             REGISTER_SEQ         : self.RegisterSeqHandler,\
         #   REMOVE_SEQ           : self.RemoveSeqHandler,\
             REQUEST_ASSIGNED_FREQ: self.RequestAssignedFreqHandler,\
@@ -1730,7 +1734,13 @@ class RadarChannelHandler:
         pdb.set_trace()
         return RMSG_FAILURE
 
+    def ExitServerHandler(self, rmsg):
+        self.logger.debug("Entering Exit Server Handler...")
+        self.parent_RadarHardwareManager.exit()
+        return 0
+
     def QuitHandler(self, rmsg):
+        self.logger.debug("Entering Quit handler...")
         # TODO: close down stuff cleanly
         #rmsg.set_data('status', RMSG_FAILURE)
         #rmsg.set_data('type', rmsg.payload['type'])
