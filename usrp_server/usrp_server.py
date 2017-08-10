@@ -28,6 +28,7 @@ import posix_ipc
 import mmap
 import pickle
 
+
 sys.path.insert(0, '../python_include')
 
 from phasing_utils import *
@@ -40,7 +41,7 @@ from profiling_tools import *
 import logging_usrp
 
 RMSG_PORT = 45000
-MAX_CHANNELS = 10
+MAX_CHANNELS = 4
 CLRFREQ_RES_HZ = 1000
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
 USRP_SOCK_TIMEOUT = 7 # sec
@@ -324,9 +325,9 @@ class usrpMixingFreqManager():
           channel.logger.error("Channel bandwidth ({} MHz- {} MHz) is not covered by radar hardware limits ({} MHz - {} MHz)".format(newLower/1000, newUpper/1000, RHM.hardwareLimit_freqRange[0]/1000, RHM.hardwareLimit_freqRange[1]/1000))
           return False
 
-       channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager", channel.cnum)
+       channel.logger.debug("ch {}: waiting for semaphore of usrpMixingFreqManager".format(channel.cnum))
        self.semaphore.acquire()
-       channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager", channel.cnum)
+       channel.logger.debug("ch {}: acquired semaphore of usrpMixingFreqManager".format(channel.cnum))
    
        if newLower > (self.current_mixing_freq - self.usrp_bandwidth/2) and newUpper < (self.current_mixing_freq + self.usrp_bandwidth/2):
           channel.logger.debug("channel range is within USRP bandwidth")
@@ -357,7 +358,7 @@ class usrpMixingFreqManager():
           
      
        self.semaphore.release()
-       channel.logger.debug("ch {}: released semaphore of usrpMixingFreqManager")
+       channel.logger.debug("ch {}: released semaphore of usrpMixingFreqManager".format(channel.cnum))
        return result
 
     def get_range_of_channel(self, channel):
@@ -653,6 +654,7 @@ class RadarHardwareManager:
 
         self.nRegisteredChannels = 0  # number of channels after compatibility check 
         self.nControlPrograms    = 0  # number of control programs, also include unregistered channels
+        self.channel_manager_consecutive_number = 10 # serial number shown in logger of channel_manager
 
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
@@ -663,18 +665,19 @@ class RadarHardwareManager:
         self.record_new_data         = self.clearFreqRawDataManager.record_new_data
         self.swingManager            = swingManager()
 
-        self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
+        #self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
+        self.set_par_semaphore = threading.Semaphore()
         self.set_par_semaphore.release()
         self.lastSwingInvalid = False
         self.trigger_next_function_running = False
         self.commonChannelParameter = {}
-
 
     def run(self):
         def spawn_channel(conn):
             # start new radar channel handler
             self.nControlPrograms += 1
             channel = RadarChannelHandler(conn, self)
+            self.channel_manager_consecutive_number += 1
             try:
                 channel.run()
             except socket.error:
@@ -946,7 +949,7 @@ class RadarHardwareManager:
     def initialize_channel(RHM):
         """ Adds first period of channel for new channel or after CS_INACTIVE. Also appends channel to RHM.channels if not already done."""
         wait_start_time = time.time()
-        while (time.time() - wait_start_time < 0.2) and (RHM.nControlPrograms > len(RHM.channels) + len(RHM.newChannelList) ):
+        while (time.time() - wait_start_time < 0.1) and (RHM.nControlPrograms > len(RHM.channels) + len(RHM.newChannelList) ):
            RHM.logger.debug("initialize_channel: waiting 5 ms for other control program to SET_PARAMETER")
            time.sleep(0.005)
 
@@ -1057,7 +1060,7 @@ class RadarHardwareManager:
         # clean up server semaphores
         if hasattr(self, 'set_par_semaphore'):
            self.set_par_semaphore.release()
-           self.set_par_semaphore.unlink()
+         #  self.set_par_semaphore.unlink()
         if hasattr(self, 'mixingFreqManager'):
            self.mixingFreqManager.semaphore.release()
            self.mixingFreqManager.semaphore.unlink()
@@ -1279,7 +1282,7 @@ class RadarHardwareManager:
                            for iAntenna in range(nAntennas):
                                antIdx = recv_dtype(cudasock, np.uint16)
                                nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
-                               self.logger.debug("Receiving {} bb samples.".format(nSamples_bb))
+                               self.logger.debug("Receiving {} bb samples. (Channel {}, ant idx {})".format(nSamples_bb, channel.cnum, antIdx))
                                if main_samples is None:
                                   main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
                                   back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
@@ -1522,9 +1525,10 @@ class RadarHardwareManager:
                 pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
                 
                 # MAIN ARRAY
-                first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20] 
+                first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
+                first_pol_matrix_idx = [RHM.antenna_idx_list_main.index(ant_idx) for ant_idx in first_pol_ant_idx] 
                 phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
-                complex_float_samples = phasing_matrix * np.delete(np.matrix(main_samples[iChannel]),first_pol_ant_idx, 0)  * RHM.scaling_factor_rx_bb 
+                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel])[first_pol_matrix_idx,:]  * RHM.scaling_factor_rx_bb 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
                 abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
@@ -1581,7 +1585,7 @@ class RadarChannelHandler:
         self.conn = conn
         self.update_channel = True # flag indicating a new beam or pulse sequence 
         self.parent_RadarHardwareManager = parent_RadarHardwareManager
-        self.logger = logging.getLogger("ChManager")
+        self.logger = logging.getLogger("ChManager #{}".format(parent_RadarHardwareManager.channel_manager_consecutive_number ))
         self.state      = [CS_INACTIVE, CS_INACTIVE]
         self.next_state = [CS_INACTIVE, CS_INACTIVE]
 
@@ -1626,6 +1630,14 @@ class RadarChannelHandler:
     def next_processing_state(self, value):
         self.next_state[self.swingManager.processingSwing] = value 
  
+    def wait_to_unsync_channels(self):
+        """ Wait a few miliseconds, depending on cnum to avoid acquiring semaphores at the exact same time from two channels. """
+
+        now = datetime.datetime.now()
+        wait_time = (now.microsecond/1000+self.cnum-1)%MAX_CHANNELS 
+        self.logger.debug("Ch {} waiting {} ms ...".format(self.cnum, wait_time)) 
+        time.sleep(wait_time/1000) 
+
 
     def run(self):
         rmsg_handlers = {\
@@ -2052,7 +2064,10 @@ class RadarChannelHandler:
 
         # period not jet triggered
         if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
+           
+           self.wait_to_unsync_channels()
            self.logger.debug("Ch {} waiting for Paramter semaphore...".format(self.cnum)) 
+     #      self.logger.debug("Ch {} waiting for Paramter semaphore... ({} form {})".format(self.cnum, RHM.set_par_semaphore.__str__(), RHM.__str__())) 
            RHM.set_par_semaphore.acquire()
            self.logger.debug("Ch {} acquired semaphore, setting parameter ".format(self.cnum)) 
 
