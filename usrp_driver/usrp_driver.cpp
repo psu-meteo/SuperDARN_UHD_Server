@@ -853,7 +853,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         for(uint32_t p_i = 0; p_i < pulse_time_offsets.size(); p_i++) {
                             double offset_time = pulse_sample_idx_offsets[p_i] / txrate;
                             pulse_time_offsets[p_i] = offset_time_spec(start_time, offset_time);
-                            //DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
+                           // DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
                         }
 
                         DEBUG_PRINT("first TRIGGER_PULSE time is %2.5f and last is %2.5f\n", pulse_time_offsets[0].get_real_secs(), pulse_time_offsets.back().get_real_secs());

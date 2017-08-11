@@ -68,6 +68,8 @@ sys.path.insert(0, basePath + '/tools')
 
 import networkTool
 
+sys.path.insert(0, basePath + '/python_include')
+import rosmsg
 
 # TODO: get from config
 CUDADriverPort = 55420
@@ -77,7 +79,7 @@ USRPDriverPort = 54420
 UHD_EXIT = ord('e')
 
 USRP_SERVER_PORT = 45000
-USRP_SERVER_QUIT  = '.'
+USRP_SERVER_QUIT  = ',' # '.'
 
 
 # time to wait for usrps
@@ -379,18 +381,23 @@ def stop_usrp_server():
     myPrint(" Stopping usrp_server...")
     serverProcesses = get_process_ids("usrp_server")
     if len(serverProcesses):
-       try:
+      try:
           for process in serverProcesses:
                myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-               sock.connect(('localhost',USRP_SERVER_PORT))
-               sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
-           
+               sock.connect(('localhost', USRP_SERVER_PORT))
+               time.sleep(0.3)
+           #    sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
+               rmsg = rosmsg.rosmsg_command(sock)
+               rmsg.set_data('status', 0)
+               rmsg.set_data('type', ord(USRP_SERVER_QUIT))
+               rmsg.transmit()
+ 
           time.sleep(1)
-       except:
+      except:
           myPrint("Error while connecting to server. Killing PID...")
-       # terminate processes if they still exis
-       terminate_all(serverProcesses)
+          # terminate processes if they still exis
+      terminate_all(serverProcesses)
     else:
        myPrint("  No usrp_server processes found...")
     

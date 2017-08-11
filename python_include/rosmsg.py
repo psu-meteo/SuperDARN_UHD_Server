@@ -17,6 +17,7 @@ PING = '='
 OKAY = '^'
 NOOP = '~'
 QUIT = '.'
+ExitServer = ','
 
 REGISTER_SEQ = '+'
 REMOVE_SEQ = '-'
@@ -39,7 +40,7 @@ MSG_FAILURE = False
 
 RMSG_COMMAND_NAMES = {'SET_RADAR_CHAN' : 'R', 'SET_INACTIVE' : 'a', 'SET_ACTIVE' : 'A', 'QUERY_INI_SETTINGS' : 'i', \
         'GET_SITE_SETTINGS' : 's', 'UPDATE_SITE_SETTINGS' : 'S', 'GET_PARAMETERS' : 'c', 'SET_PARAMETERS' : 'C', \
-        'PING' : '=', 'OKAY' : '^', 'NOOP' : '~', 'QUIT' : '.', 'REGISTER_SEQ' : '+', 'REMOVE_SEQ' : '-', \
+        'PING' : '=', 'OKAY' : '^', 'NOOP' : '~', 'QUIT' : '.', 'ExitServer' : ExitServer, 'REGISTER_SEQ' : '+', 'REMOVE_SEQ' : '-', \
         'REQUEST_ASSIGNED_FREQ' : '>', 'REQUEST_CLEAR_FREQ_SEARCH' : '<', 'LINK_RADAR_CHAN' : 'L', 'SET_READY_FLAG' : '1',\
         'UNSET_READY_FLAG' : '!', 'SET_PROCESSING_FLAG' : '2', 'UNSET_PROCESSING_FLAG' : '@', 'GET_DATA' : 'd'}
 RMSG_COMMAND_NAMES = {v: k for k, v in RMSG_COMMAND_NAMES.items()} 
