@@ -666,8 +666,7 @@ class RadarHardwareManager:
         self.swingManager            = swingManager()
 
         #self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
-        self.set_par_semaphore = threading.Semaphore()
-        self.set_par_semaphore.release()
+        self.set_par_semaphore = threading.BoundedSemaphore()
         self.lastSwingInvalid = False
         self.trigger_next_function_running = False
         self.commonChannelParameter = {}
@@ -1634,6 +1633,7 @@ class RadarChannelHandler:
         """ Wait a few miliseconds, depending on cnum to avoid acquiring semaphores at the exact same time from two channels. """
 
         now = datetime.datetime.now()
+        channel_scramle_list = [0, 2, 1, 3] # to maximze distance betwenn ususal case of two channels
         wait_time = (now.microsecond/1000+self.cnum-1)%MAX_CHANNELS 
         self.logger.debug("Ch {} waiting {} ms ...".format(self.cnum, wait_time)) 
         time.sleep(wait_time/1000) 
@@ -2065,11 +2065,11 @@ class RadarChannelHandler:
         # period not jet triggered
         if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
            
-           self.wait_to_unsync_channels()
+     ##      self.wait_to_unsync_channels()
            self.logger.debug("Ch {} waiting for Paramter semaphore...".format(self.cnum)) 
      #      self.logger.debug("Ch {} waiting for Paramter semaphore... ({} form {})".format(self.cnum, RHM.set_par_semaphore.__str__(), RHM.__str__())) 
            RHM.set_par_semaphore.acquire()
-           self.logger.debug("Ch {} acquired semaphore, setting parameter ".format(self.cnum)) 
+           self.logger.debug("Ch {} acquired semaphore, setting parameter {} ".format(self.cnum, str(datetime.datetime.now()))) 
 
            if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
@@ -2087,7 +2087,7 @@ class RadarChannelHandler:
            else:
               self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
            RHM.set_par_semaphore.release()
-           self.logger.debug("Ch {} released semaphore ".format(self.cnum)) 
+           self.logger.debug("Ch {} released semaphore {} ".format(self.cnum, str(datetime.datetime.now()))) 
  
         # in middle of scan, period already triggerd. only compare with prediction
         elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
