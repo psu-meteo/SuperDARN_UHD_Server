@@ -652,7 +652,8 @@ class RadarHardwareManager:
      #   self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
 
-        self.nRegisteredChannels = 0  # number of channels after compatibility check 
+        self.nRegisteredChannels = 0  # number of channels after compatibility check
+        self.n_SetParameterHandlers_active = 0 
         self.nControlPrograms    = 0  # number of control programs, also include unregistered channels
         self.channel_manager_consecutive_number = 10 # serial number shown in logger of channel_manager
 
@@ -734,6 +735,9 @@ class RadarHardwareManager:
 
                 # FRIST CUDA_ADD FOR NEW CHANNELS
                 if len(self.newChannelList) != 0:
+                   while( self.n_SetParameterHandlers_active):
+                      self.logger.debug("Waiting for all {} SetParameterHandlers to finish before initializing new channels".format(self.n_SetParameterHandlers_active))
+                      time.sleep(0.001)
                    controlLoop_logger.info('initializing channel')
                    self.initialize_channel()
                            
@@ -1151,7 +1155,7 @@ class RadarHardwareManager:
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
         for ch in self.channels:
-            self.logger.debug('cnum {}: tfreq={}, rfreq={}, usrp_center={} rx_rate={}Mhz '.format(ch.cnum, ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate/1e6))
+            self.logger.debug('cnum {}: tfreq={}, rfreq={}, usrp_center={} rx_rate={}MHz '.format(ch.cnum, ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate/1e6))
             if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
                     self.logger.warning('tfreq (={}) != rfreq (={}) !'.format( ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq']))
         
@@ -1629,16 +1633,6 @@ class RadarChannelHandler:
     def next_processing_state(self, value):
         self.next_state[self.swingManager.processingSwing] = value 
  
-    def wait_to_unsync_channels(self):
-        """ Wait a few miliseconds, depending on cnum to avoid acquiring semaphores at the exact same time from two channels. """
-
-        now = datetime.datetime.now()
-        channel_scramle_list = [0, 2, 1, 3] # to maximze distance betwenn ususal case of two channels
-        wait_time = (now.microsecond/1000+self.cnum-1)%MAX_CHANNELS 
-        self.logger.debug("Ch {} waiting {} ms ...".format(self.cnum, wait_time)) 
-        time.sleep(wait_time/1000) 
-
-
     def run(self):
         rmsg_handlers = {\
             SET_RADAR_CHAN       : self.SetRadarChanHandler,\
@@ -2051,11 +2045,13 @@ class RadarChannelHandler:
         # TODO add compatibility check in parameter prediction function
 
         RHM = self.parent_RadarHardwareManager
+        RHM.n_SetParameterHandlers_active += 1
 
         if self.scanManager.isInitSetParameter:
            self.scanManager.isInitSetParameter = False
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+           RHM.n_SetParameterHandlers_active -= 1
            return RMSG_SUCCESS
        
         # wait if RHM.trigger_next_swing() is slower... 
@@ -2065,11 +2061,9 @@ class RadarChannelHandler:
         # period not jet triggered
         if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
            
-     ##      self.wait_to_unsync_channels()
            self.logger.debug("Ch {} waiting for Paramter semaphore...".format(self.cnum)) 
-     #      self.logger.debug("Ch {} waiting for Paramter semaphore... ({} form {})".format(self.cnum, RHM.set_par_semaphore.__str__(), RHM.__str__())) 
            RHM.set_par_semaphore.acquire()
-           self.logger.debug("Ch {} acquired semaphore, setting parameter {} ".format(self.cnum, str(datetime.datetime.now()))) 
+           self.logger.debug("Ch {} acquired semaphore, setting parameter".format(self.cnum)) 
 
            if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
@@ -2079,6 +2073,7 @@ class RadarChannelHandler:
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
 
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
+              RHM.n_SetParameterHandlers_active -= 1
               return RMSG_FAILURE
 
            if self not in self.parent_RadarHardwareManager.newChannelList:
@@ -2087,7 +2082,7 @@ class RadarChannelHandler:
            else:
               self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
            RHM.set_par_semaphore.release()
-           self.logger.debug("Ch {} released semaphore {} ".format(self.cnum, str(datetime.datetime.now()))) 
+           self.logger.debug("Ch {} released semaphore".format(self.cnum)) 
  
         # in middle of scan, period already triggerd. only compare with prediction
         elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
@@ -2106,14 +2101,17 @@ class RadarChannelHandler:
         else:
            self.logger.error("ROS:SetParameter: Active state is {} (nextSwingToTrigger={}, activeSwing={} ). Dont know what to do...".format(self.state[self.swingManager.nextSwingToTrigger], self.swingManager.activeSwing,  self.active_state))
            self.logger.error("ROS:SetParameter: Exit usrp_server...")
+           RHM.n_SetParameterHandlers_active -= 1
            return RMSG_FAILURE
            self.parent_RadarHardwareManager.exit()
 
         
         if (self.rnum < 0 or self.cnum < 0):
-            self.logger.error("SET_PARAMETER: Invalid radar or channel number: rnum={}, cnum={}".format(self.rnum, self.cnum))
-            return RMSG_FAILURE
+           self.logger.error("SET_PARAMETER: Invalid radar or channel number: rnum={}, cnum={}".format(self.rnum, self.cnum))
+           RHM.n_SetParameterHandlers_active -= 1
+           return RMSG_FAILURE
 
+        RHM.n_SetParameterHandlers_active -= 1
         return RMSG_SUCCESS
 
     def CheckChannelCompatibility(self):

@@ -397,7 +397,7 @@ def stop_usrp_server():
       except:
           myPrint("Error while connecting to server. Killing PID...")
           # terminate processes if they still exis
-          terminate_all(serverProcesses)
+      terminate_all(serverProcesses)
     else:
        myPrint("  No usrp_server processes found...")
     
