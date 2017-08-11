@@ -144,20 +144,19 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     clrfreq_cmd = usrp_clrfreq_command(usrp_sockets, num_clrfreq_samples, clrfreq_time, center_freq, clrfreq_rate_requested)
     clrfreq_cmd.transmit()
 
-    dbPrint("command sent, waiting for raw samples")
+    dbPrint("CLRFREQ command sent, waiting for raw samples")
     # grab raw samples
     for usrpsock in usrp_sockets:
         output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
         clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
-
-        dbPrint("------")
-        dbPrint("actual clrfreq rate: {}".format(clrfreq_rate_actual))
-        dbPrint("requested clrfreq rate: {}".format(clrfreq_rate_requested))
-
-        dbPrint("command sent, waiting for raw samples")
         assert clrfreq_rate_actual == clrfreq_rate_requested
-        samples = recv_dtype(usrpsock, np.int16, 2 * int(num_clrfreq_samples))
-        output_samples_list.append( samples[0::2] + 1j * samples[1::2])
+
+        #dbPrint("antenna {} clrfreq rate is: {} (requested: {})".format(output_antenna_idx_list[-1], clrfreq_rate_actual, clrfreq_rate_requested))
+        dbPrint("antenna {} waiting for {} samples".format(output_antenna_idx_list[-1], int(num_clrfreq_samples)))
+       
+        sample_buf = recv_dtype(usrpsock, np.int16, nitems = int(2 * num_clrfreq_samples))
+
+        output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
     
     clrfreq_cmd.client_return()
 
@@ -165,49 +164,6 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
 
     return output_samples_list, output_antenna_idx_list
 
-'''
-def test_clrfreq(USRP_ANTENNA_IDX = [0]):
-    import sys
-    restricted_frequencies = read_restrict_file(RESTRICT_FILE)
-
-    # setup to talk to usrp_driver, request clear frequency search
-    usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
-    usrp_driver_socks = []
-    
-    USRP_DRIVER_PORT = 54420
-    
-    for aidx in USRP_ANTENNA_IDX:
-        usrp_driver_port = USRP_DRIVER_PORT + aidx
-
-        try:
-            cprint('connecting to usrp driver on port {}'.format(usrp_driver_port), 'blue')
-            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            usrpsock.connect(('localhost', usrp_driver_port))
-            usrp_driver_socks.append(usrpsock)
-
-        except ConnectionRefusedError:
-            cprint('USRP server connection failed', 'blue')
-            sys.exit(1)
-
-    pdb.set_trace()
-    cmd = usrp_setup_command(usrp_driver_socks, 10000, 10000, 10000000, 10000000, 20, 10000000*2, 42000, [0, 1000 , 20000])
-    cmd.transmit()
-
-    client_returns = cmd.client_return()
-
-
-    
-    clrfreq_struct = clrfreqprm_struct(usrp_driver_socks)
-
-    # simulate received clrfreq_struct
-    clrfreq_struct.payload['start'] = 10050
-    clrfreq_struct.payload['end'] = 13050
-    clrfreq_struct.payload['filter_bandwidth'] = 3250
-    clrfreq_struct.payload['pwr_threshold'] = .9
-    clrfreq_struct.payload['nave'] =  10
-    clear_freq, noise = clrfreq_search(clrfreq_struct, usrp_driver_socks, restricted_frequencies, 3, 3.24, 16, 15.4)
-    print('clear frequency: {}, noise: {}'.format(clear_freq, noise))
-'''
 
 if __name__ == '__main__':
     pass
