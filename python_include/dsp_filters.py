@@ -17,7 +17,7 @@ def gaussian_pulse(samples, trise, rate):
 
 # filter also includes mixing frequencies
 def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
-    gain = 3.5
+    gain = 3.73 # was 3.5 before
     beta = 5
     filterData = np.zeros((len(channelFreqVec), nTaps,2), dtype=np.float32)
     m = nTaps - 1
@@ -39,7 +39,7 @@ def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
 
     return filterData
 
-#TODO: test thsi filter
+#TODO: test this filter
 def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
 #simple filter: real = 1, image = 0
     filterData = np.zeros((len(channelFreqVec), nTaps,2), dtype=np.float32)
@@ -70,7 +70,7 @@ def raisedCosine_filter(nTaps, nChannels, normalize = True):
            filterData[:,iTap,0] = np.sin(np.pi*t/(nTaps-1)) / (np.pi*t/(nTaps-1)) * np.cos(alpha*np.pi*t / (nTaps-1)) / (1-2*(alpha*t/(nTaps-1))**2)
         
     if normalize:
-        filterData /= np.sum(filterData[0]) / np.sqrt(2)
+        filterData /= np.sum(filterData[0]) 
 
     return filterData
 

@@ -55,8 +55,8 @@ C = 3e8
 nAntennas_per_polarization = 20 # used to reset (modulo) the tx phasing input antenna number 
 
 
-RF_IF_GAIN = 6
-IF_BB_GAIN = 6 
+RF_IF_GAIN = 1
+IF_BB_GAIN = 1 
 
 rx_shm_list = [ [] for iSwing in allSwings] 
 tx_shm_list = [ [] for iSwing in allSwings]
@@ -877,26 +877,27 @@ class ProcessingGPU(object):
             start_time = 5e-3
             stop_time =  30e-3
 
-
-            # PLOT all three frequency bands
-            ax = plt.subplot(311)
-            mpt.plot_time(self.rx_rf_samples[0][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
-          #  ax.set_ylim([50, 200])
-            plt.ylabel('RF')
-
-            ax = plt.subplot(312)
-            mpt.plot_freq(self.rx_if_samples[0][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-         ##   mpt.plot_freq(self.rx_if_samples[0][1][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
-          #  ax.set_ylim([50, 200])
-            plt.ylabel('IF')
-
-            ax =plt.subplot(313)
-            mpt.plot_freq(self.rx_bb_samples[0][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
-          #  ax.set_ylim([50, 200])
-            plt.ylabel('BB')
-
-
             plot_only_rf_and_bb = False
+            plot_freq = False
+            # PLOT all three frequency bands
+            if plot_freq:
+               ax = plt.subplot(311)
+               mpt.plot_time(self.rx_rf_samples[0][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+          #     ax.set_ylim([50, 200])
+               plt.ylabel('RF')
+
+               ax = plt.subplot(312)
+               mpt.plot_freq(self.rx_if_samples[0][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+         ##      mpt.plot_freq(self.rx_if_samples[0][1][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+          #     ax.set_ylim([50, 200])
+               plt.ylabel('IF')
+
+               ax =plt.subplot(313)
+               mpt.plot_freq(self.rx_bb_samples[0][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+          #     ax.set_ylim([50, 200])
+               plt.ylabel('BB')
+
+
             if plot_only_rf_and_bb:
                plt.figure()
                ax = plt.subplot(211) 
