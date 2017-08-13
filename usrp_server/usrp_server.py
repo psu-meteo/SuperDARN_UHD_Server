@@ -492,6 +492,7 @@ class scanManager():
         self.beam_times = None
         self.scan_duration = None
         self.integration_duration = None 
+        self.camping = False
  
         self.isFirstPeriod = True
 
@@ -533,6 +534,7 @@ class scanManager():
 
         # list of [bmnum, bmnum..] 
         self.scan_beam_list = scan_beam_list
+        self.camping = len(scan_beam_list) == 1
 
         # sync paramater
         self.syncBeams  = scan_times_list != None
@@ -567,7 +569,9 @@ class scanManager():
            self.isPrePeriod = False
            return
 
-        if not self.isLastPeriod:
+        if self.camping:
+            self.logger.debug("Camping beam, no need to increasing current_period.")
+        elif not self.isLastPeriod:
             self.current_period += 1
             self.logger.debug("Increasing current_period to {}".format(self.current_period))
         else:
@@ -585,6 +589,9 @@ class scanManager():
         
     @property        
     def next_beam(self):
+        if self.camping:
+            return self.scan_beam_list[0]
+
         if self.current_period == len(self.scan_beam_list) -1:
             return None
         else:
@@ -623,10 +630,14 @@ class scanManager():
 
     @property
     def isForelastPeriod(self):
+        if self.camping:
+           return False
         return self.current_period + 2 == len(self.scan_beam_list) or len(self.scan_beam_list) == 1 # for one beam scan: first is also forelast
         
     @property
     def isLastPeriod(self):
+        if self.camping:
+           return False
         return self.current_period + 1 == len(self.scan_beam_list) and len(self.scan_beam_list) != 1 # for one beam scan: first is not last
        
 # handle arbitration with multiple channels accessing the usrp hardware
@@ -1061,8 +1072,8 @@ class RadarHardwareManager:
                 sock.close()
         
         # clean up server semaphores
-        if hasattr(self, 'set_par_semaphore'):
-           self.set_par_semaphore.release()
+       # if hasattr(self, 'set_par_semaphore'):
+       #    self.set_par_semaphore.release()
          #  self.set_par_semaphore.unlink()
         if hasattr(self, 'mixingFreqManager'):
            self.mixingFreqManager.semaphore.release()
@@ -1365,7 +1376,7 @@ class RadarHardwareManager:
                  channel.next_processing_state = CS_INACTIVE
                  channel.active_state          = CS_INACTIVE
                  channel.next_active_state     = CS_INACTIVE
-                 self.nRegisteredChannels -= 1 
+                 # self.nRegisteredChannels -= 1 
                  channel.logger.debug('last period finished, setting active and next processing state to CS_INACTIVE')
               elif channel.scanManager.isLastPeriod:
                  channel.next_processing_state = CS_LAST_SWING
@@ -1491,6 +1502,8 @@ class RadarHardwareManager:
               if channel.scanManager.isFirstPeriod: 
                  channel.logger.debug('setting active state (cnum {}, swing {}) to CS_TRIGGER to start second period'.format(channel.cnum, self.swingManager.activeSwing))
                  channel.active_state = CS_TRIGGER
+                 channel.triggered_swing_list.insert(0, self.swingManager.nextSwingToTrigger)
+
                  channel.scanManager.isFirstPeriod = False
  
         self.trigger_next_function_running = False
@@ -1605,6 +1618,7 @@ class RadarChannelHandler:
         self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager.array_beam_sep, self.parent_RadarHardwareManager.array_nBeams)
         self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
+        self.triggered_swing_list = []
         
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
@@ -1818,6 +1832,7 @@ class RadarChannelHandler:
  #       transmit_dtype(self.conn, self.nSequences_per_period, np.uint32) # TODO mgu transmit here nSeq ?     
         self.logger.debug("ch {}: SetReadyFlagHandler: setting nextSwingToTrigger state (swing {}) to CS_TRIGGER".format(self.cnum, self.swingManager.nextSwingToTrigger))
         self.state[self.swingManager.nextSwingToTrigger] = CS_TRIGGER
+        self.triggered_swing_list.insert(0, self.swingManager.nextSwingToTrigger)
         # send trigger command
         return RMSG_SUCCESS
     
@@ -2151,6 +2166,8 @@ class RadarChannelHandler:
                                    [10 ,20],  # 5M => 25k 
                                    [10 ,75],  # 2.5M => 3.333k 
                                    [30 ,100], # 10M => 3.333k 
+                                   [20, 50],  # 10M => 10k 
+                                   [20 ,20],  # 10M => 25k 
             ]
          
             total_downsample_rate = hardwareManager.usrp_rf_rx_rate / hardwareManager.commonChannelParameter['baseband_samplerate']
@@ -2226,7 +2243,8 @@ class RadarChannelHandler:
 
         # TODO investigate possible race conditions
 
-        finishedSwing = self.swingManager.lastSwingWithData 
+    ##    finishedSwing = self.swingManager.lastSwingWithData 
+        finishedSwing = self.triggered_swing_list.pop() 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(self.cnum, finishedSwing))
         self.logger.debug("start waiting for CS_SAMPLES_READY")
         self._waitForState(finishedSwing, CS_SAMPLES_READY)
@@ -2365,42 +2383,36 @@ class RadarChannelHandler:
         self.active = True
 
         self.logger.debug('SetActiveHandler starting')
-        
-        if self.parent_RadarHardwareManager.trigger_next_function_running:
-           self.logger.debug('start SetActiveHandler: waiting for trigger_next() to finish')
-           while self.parent_RadarHardwareManager.trigger_next_function_running:
-              time.sleep(0.01)
-           self.logger.debug('end SetActiveHandler: waiting for trigger_next() to finish')
 
-
-        scan_num_beams = recv_dtype(self.conn, np.int32)
-        self.logger.debug('SetActiveHandler number of beams per scan: {}'.format(scan_num_beams))
-
-        fixFreq  =  recv_dtype(self.conn, np.int32)
-        self.logger.debug('SetActiveHandler fixFreq: {}'.format(fixFreq))
-
-        clrfreq_start_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        self.logger.debug('SetActiveHandler clear frequency search start frequencies: {}'.format(clrfreq_start_list))
-
+        # receive all data from control program        
+        scan_num_beams         = recv_dtype(self.conn, np.int32)
+        fixFreq                = recv_dtype(self.conn, np.int32)
+        clrfreq_start_list     = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
         clrfreq_bandwidth_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        self.logger.debug('SetActiveHandler clear frequency search bandwidths (Hz): {}'.format(clrfreq_bandwidth_list))
-
-        scan_beam_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))
-
-        syncBeams  =  recv_dtype(self.conn, np.int32)
-        scan_time_sec =  recv_dtype(self.conn, np.int32)  
-        scan_time_us =  recv_dtype(self.conn, np.int32) 
-        scan_time        = scan_time_sec + scan_time_us/1e6 
-        self.logger.debug('SetActiveHandler scan_duration: {}'.format(scan_time))
-
-        integration_time_sec =  recv_dtype(self.conn, np.int32)  
-        integration_time_us =  recv_dtype(self.conn, np.int32)  
-        integration_time = integration_time_sec + integration_time_us/1e6
-        self.logger.debug('SetActiveHandler integration_duration: {}'.format(integration_time))
-        
-        start_period =  recv_dtype(self.conn, np.int32) 
+        scan_beam_list         = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
+        syncBeams              = recv_dtype(self.conn, np.int32)
+        scan_time_sec          = recv_dtype(self.conn, np.int32)  
+        scan_time_us           = recv_dtype(self.conn, np.int32) 
+        integration_time_sec   = recv_dtype(self.conn, np.int32)  
+        integration_time_us    = recv_dtype(self.conn, np.int32)  
+        start_period           = recv_dtype(self.conn, np.int32)
  
+        integration_time = integration_time_sec + integration_time_us/1e6
+        scan_time = scan_time_sec + scan_time_us/1e6 
+
+        if scan_num_beams == 1: # make sure this variables are list even for one beam per scan
+           clrfreq_start_list = [clrfreq_start_list]
+           clrfreq_bandwidth_list = [clrfreq_bandwidth_list]
+           scan_beam_list = [scan_beam_list]
+
+        self.logger.debug('SetActiveHandler number of beams per scan: {}'.format(scan_num_beams))
+        self.logger.debug('SetActiveHandler fixFreq: {}'.format(fixFreq))
+        self.logger.debug('SetActiveHandler clear frequency search start frequencies: {}'.format(clrfreq_start_list))
+        self.logger.debug('SetActiveHandler clear frequency search bandwidths (Hz): {}'.format(clrfreq_bandwidth_list))
+        self.logger.debug('SetActiveHandler scan beam list: {}'.format(scan_beam_list))
+        self.logger.debug('SetActiveHandler scan_duration: {}'.format(scan_time))
+        self.logger.debug('SetActiveHandler integration_duration: {}'.format(integration_time))
+         
         if syncBeams == 1:
            scan_times_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams) / 1000
            self.logger.debug('SetActiveHandler scan_times_list: {}'.format(scan_times_list))
@@ -2408,9 +2420,22 @@ class RadarChannelHandler:
            scan_times_list  = None       
            self.logger.debug('SetActiveHandler: no time sync of beams')
 
+        if self.scanManager.camping: 
+            # if camping==True control progam uses SetActive for every new beam but no paramater should change
+            # in this case skip reset of scanManager and swingManager to be able to use two swings parallel
+            assert(fixFreq == self.scanManager.fixFreq)
+            assert(scan_beam_list == self.scanManager.scan_beam_list)
+            self.logger.info("SetActiveHandler: Skipping reset of scanManager and swingManager because nothing changed with camping beam.")
+            return RMSG_SUCCESS 
+
+
+        if self.parent_RadarHardwareManager.trigger_next_function_running:
+           self.logger.debug('start SetActiveHandler: waiting for trigger_next() to finish')
+           while self.parent_RadarHardwareManager.trigger_next_function_running:
+              time.sleep(0.01)
+           self.logger.debug('end SetActiveHandler: waiting for trigger_next() to finish')
 
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
-
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
         self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_time, integration_time, start_period)
@@ -2442,7 +2467,8 @@ class RadarChannelHandler:
             RHM.channels.remove(channelObject)
 
             RHM.nRegisteredChannels -= 1
-            if RHM.nRegisteredChannels == 0:  
+            if RHM.nRegisteredChannels == 0: 
+                RHM.logger.debug("No channels left, removing commonChannelParameter") 
                 RHM.commonChannelParameter = {}
 
         channelObject.active = False

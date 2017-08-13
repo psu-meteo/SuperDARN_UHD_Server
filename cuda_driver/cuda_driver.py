@@ -709,8 +709,11 @@ class ProcessingGPU(object):
     def rx_pre_init(self, swing): 
         """ pre init of rx: before synth of pulses. put all posible rx_init() stuff into the waiting period. (here exact integration period is still unknown ) """
         # build arrays based on first sequence.
-        seq = self.sequences[swing][0] # TODO: check if seq[0] exists
-        ctrlprm = seq.ctrlprm
+        ### seq = self.sequences[swing][0] # TODO: check if seq[0] exists
+        iActiveChannel = 0
+        while self.sequences[swing][iActiveChannel] == None:
+            iActiveChannel += 1
+        ctrlprm = self.sequences[swing][iActiveChannel].ctrlprm
         
         decimationRate_rf2if = self.rx_rf2if_downsamplingRate
         decimationRate_if2bb = self.rx_if2bb_downsamplingRate
@@ -755,8 +758,15 @@ class ProcessingGPU(object):
     def synth_channels(self, bb_signal, swing):
         self.rx_pre_init(swing) 
 
-        # TODO: this assumes all channels have the same number of samples 
-        tx_bb_nSamples_per_pulse = int(bb_signal[0].shape[2]) # number of baseband samples per pulse
+        tx_bb_nSamples_per_pulse = None
+        # TODO: this assumes all channels have the same number of samples
+        for iCh in range(len(bb_signal)):
+           if bb_signal[iCh] != None: 
+              tx_bb_nSamples_per_pulse = int(bb_signal[iCh].shape[2]) # number of baseband samples per pulse
+              break
+        if  tx_bb_nSamples_per_pulse == None:
+           self.logger.error("No active channel found, can not synth channels")
+
         self.tx_init(tx_bb_nSamples_per_pulse)
 
         self.synth_tx_rf_pulses(bb_signal, tx_bb_nSamples_per_pulse, swing)
