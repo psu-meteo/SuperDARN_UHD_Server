@@ -413,6 +413,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     int32_t verbose = 1; 
     int32_t rx_worker_status = 0; 
+    int32_t clrfreq_rx_worker_status = 0; 
     int32_t mute_output = 0; // used if rx_worker error happends
 
     int32_t rx_stream_reset_count = 0;
@@ -1025,20 +1026,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
-                    uhd::rx_metadata_t md;
-                    double timeout = 5.0; // TODO: set this dynamically using max delay for clrfreq search
-
                     uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
                     uint32_t clrfreq_time_full   = sock_get_uint32(driverconn);
                     double clrfreq_time_frac     = sock_get_float64(driverconn);
                     double clrfreq_cfreq         = sock_get_float64(driverconn);
                     double clrfreq_rate          = sock_get_float64(driverconn);
 
+                    std::vector<std::vector<std::complex<int16_t>>> clrfreq_data_buffer(nSides, std::vector<std::complex<int16_t>>(num_clrfreq_samples));
+
                     uint32_t real_time; 
                     double frac_time;
-
-                    size_t num_acc_samps = 0;
-                    const size_t num_max_request_samps = rx_stream->get_max_num_samps();
 
                     DEBUG_PRINT("CLRFREQ time: %d . %.2f \n", clrfreq_time_full, clrfreq_time_frac);
                     DEBUG_PRINT("CLRFREQ rate: %.2f, CLRFREQ_nsamples %d, freq: %.2f\n", clrfreq_rate, num_clrfreq_samples, clrfreq_cfreq);
@@ -1047,81 +1044,29 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     frac_time = clrfreq_start_time.get_frac_secs();
                     DEBUG_PRINT("CLRFREQ UHD clrfreq target time: %d %.2f \n", real_time, frac_time);
 
-                    std::vector<std::complex<int16_t>> clrfreq_data_buffer;
-                    clrfreq_data_buffer.resize(num_clrfreq_samples);
 
-                    // TODO: does this take too long?
+                    // TODO: only set rate if it is different!
                     usrp->set_rx_rate(clrfreq_rate);
-                    usrp->set_rx_freq(clrfreq_cfreq);
-                    
-                    // verify that rate is set..
                     clrfreq_rate = usrp->get_rx_rate(); // read back actual rate
                     DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
+                    //clrfreq_cfreq = usrp->get_rx_freq(); 
+                    //DEBUG_PRINT("CLRFREQ actual freq: %.2f\n", clrfreq_cfreq);
 
-                    // set up for USRP sampling
-                    md.error_code = uhd::rx_metadata_t::ERROR_CODE_NONE;
-                    uhd::stream_cmd_t stream_cmd = uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE;
-                    stream_cmd.num_samps = num_clrfreq_samples;
-                    stream_cmd.stream_now = false;
-                    stream_cmd.time_spec = clrfreq_start_time;
- 
-                    start_time = usrp->get_time_now();
-                    real_time = start_time.get_real_secs();
-                    frac_time = start_time.get_frac_secs();
-                    DEBUG_PRINT("CLRFREQ UHD before waiting for samples : %d %.2f \n", real_time, frac_time);
+                    usrp_rx_worker(usrp, rx_stream, &clrfreq_data_buffer, num_clrfreq_samples, clrfreq_start_time, &clrfreq_rx_worker_status);
 
-                    usrp->issue_stream_cmd(stream_cmd);                   
-                    DEBUG_PRINT("CLRFREQ starting to grab samples\n");
-                    // and start grabbin'
-                    // so, we're segfaulting on rx_stream->recv, check data buffers
-                    while(num_acc_samps < num_clrfreq_samples) {
-                        size_t samp_request = std::min(num_max_request_samps, num_clrfreq_samples - num_acc_samps);
-                        DEBUG_PRINT("CLRFREQ requesting %zu samples with timeout %.2f\n", samp_request, timeout);
-                        size_t num_rx_samps = rx_stream->recv(&((clrfreq_data_buffer)[num_acc_samps]), samp_request, md, timeout);
-
-                        timeout = .1; 
-
-                        //handle the error codes
-                        if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) break;
-                        if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
-                            throw std::runtime_error(str(boost::format(
-                                "Receiver error %s"
-                            ) % md.strerror()));
-                        }
-
-                        if (DEBUG) {
-                            start_time = usrp->get_time_now();
-                            real_time = start_time.get_real_secs();
-                            frac_time = start_time.get_frac_secs();
-                            std::cout << boost::format("Received packet: %u samples") % num_rx_samps << std::endl;
-                            DEBUG_PRINT("CLRFREQ UHD time: %d %.2f \n", real_time, frac_time);
-                        }
-                        num_acc_samps += num_rx_samps;
-                    }
-
-                    if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_TIMEOUT) {
-                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
-                        std::cerr << "Timeout encountered at " << rx_error_time.get_real_secs() << std::endl;
-                    }
-                    if (md.error_code == uhd::rx_metadata_t::ERROR_CODE_OVERFLOW){
-                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
-                        std::cerr << "Overflow encountered at " << rx_error_time.get_real_secs() << std::endl;
-                    }
-                    if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
-                    uhd::time_spec_t rx_error_time = usrp->get_time_now();
-                        std::cerr << "Unexpected error code " << md.error_code <<
-                    " encountered at " << rx_error_time.get_real_secs() << std::endl;
-                    }
-                    DEBUG_PRINT("CLRFREQ received samples, relaying them back...\n");
-                    
+                    DEBUG_PRINT("CLRFREQ received samples, relaying %d samples back...\n", num_clrfreq_samples);
                     sock_send_int32(driverconn, (int32_t) antennaVector[0]); // TODO both sides?
                     sock_send_float64(driverconn, clrfreq_rate);
 
                     // send back samples                   
-                    for(uint32_t i = 0; i < num_clrfreq_samples; i++) {
-                        sock_send_cshort(driverconn, clrfreq_data_buffer[i]);
-                    }
+                    send(driverconn, &clrfreq_data_buffer[0][0], sizeof(std::complex<short int>) * num_clrfreq_samples, 0);
 
+                    //for(uint32_t i = 0; i < num_clrfreq_samples; i++) {
+                        //DEBUG_PRINT("sending %d - %d\n", i, clrfreq_data_buffer[0][i]);
+                    //    sock_send_cshort(driverconn, clrfreq_data_buffer[0][i]);
+                   // }
+
+                    DEBUG_PRINT("CLRFREQ samples sent for antenna %d...\n", antennaVector[0]);
                     // restore usrp rates
                     usrp->set_rx_rate(rxrate);
                     usrp->set_rx_freq(rxfreq);
