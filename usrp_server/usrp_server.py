@@ -450,9 +450,9 @@ class swingManager():
 
         # async buffers for control program handlers
         # a/p swing status is switched in main loop async from crtl progam. this var is used for GetDataHandler to get the correct swing no matter when handler is called
-        self.lastSwingWithData  = self.activeSwing  
         self.nextSwingToTrigger = self.activeSwing
     def reset(self):
+        """ This should only be called if no other channels are active"""
         self.__init__() # for now reset is the same as init
 
     def switch_swings(self):
@@ -1194,7 +1194,7 @@ class RadarHardwareManager:
 
            # wait if periods should be time synchronized  
            for tmpChannel in self.channels:
-              if (tmpChannel is not None): 
+              if (tmpChannel is not None) and (not tmpChannel.scanManager.isLastPeriod): 
                  tmpChannel.scanManager.wait_for_next_trigger()
  
  
@@ -1232,9 +1232,10 @@ class RadarHardwareManager:
            resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
            resultDict['results_are_valid']             = True
            for channel in self.channels: 
-               resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
-               resultDict['pulse_lens']                  = channel.pulse_lens    
-               channel.resultDict_list.insert(0,resultDict.copy())
+              if (channel is not None) and (not channel.scanManager.isLastPeriod): 
+                  resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
+                  resultDict['pulse_lens']                  = channel.pulse_lens    
+                  channel.resultDict_list.insert(0,resultDict.copy())
 
     
            # broadcast the start of the next integration period to all usrp
@@ -2243,7 +2244,6 @@ class RadarChannelHandler:
 
         # TODO investigate possible race conditions
 
-    ##    finishedSwing = self.swingManager.lastSwingWithData 
         finishedSwing = self.triggered_swing_list.pop() 
         self.logger.debug('ch {}: channelHanlder:GetDataHandler waiting for channel to idle before GET_DATA (finished swing is {})'.format(self.cnum, finishedSwing))
         self.logger.debug("start waiting for CS_SAMPLES_READY")
@@ -2257,8 +2257,6 @@ class RadarChannelHandler:
         self.logger.debug('ch {}: channelHanlder:GetDataHandler finished returning samples. setting state to {}  (swing {})'.format(self.cnum, self.next_state[finishedSwing], finishedSwing))
         self.state[finishedSwing] = self.next_state[finishedSwing]
         self.logger.debug('end channelHanlder:GetDataHandler ch: {}'.format(self.cnum))
-
-        self.swingManager.lastSwingWithData = 1 - finishedSwing   # alternate swing
 
         return RMSG_SUCCESS
 
@@ -2439,12 +2437,13 @@ class RadarChannelHandler:
 
         self.logger.debug('SetActiveHandler updating swingManager with new freq/beam lists')
         self.scanManager.init_new_scan(freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_time, integration_time, start_period)
-
+        self.triggered_swing_list = []
+  
         addFreqResult = self.parent_RadarHardwareManager.mixingFreqManager.add_new_freq_band(self)
     
         if addFreqResult == True:
-            self.swingManager.reset()
-            self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+            #self.swingManager.reset()
+            #self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
             return RMSG_SUCCESS
         elif addFreqResult == False:
             self.logger.error("Freq range of new channel (cnum {}) is not in USRP bandwidth. (freq_range_list[0][0] = {} ".format(self.cnum, freq_range_list[0][0]))
@@ -2454,8 +2453,8 @@ class RadarChannelHandler:
             return RMSG_FAILURE
         else: # new mixing freq
             self.parent_RadarHardwareManager.send_cuda_setup_command()
-            self.swingManager.reset()
-            self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
+            #self.swingManager.reset()
+            #self.logger.debug("Resetting swing manager (active={}, processing={})".format(self.swingManager.activeSwing, self.swingManager.processingSwing ))
             return RMSG_SUCCESS
         
  
