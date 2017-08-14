@@ -185,8 +185,6 @@ void usrp_rx_worker(
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
     if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
-    int mute_received_samples = 0;
-
     if (num_acc_samps != num_requested_samps){
         *return_status=-100;
         uhd::time_spec_t rx_error_time = usrp->get_time_now();
@@ -221,7 +219,6 @@ void usrp_rx_worker(
 
         std::cerr << "Overflow cleanup: finished."   <<  std::endl;
    */
-        mute_received_samples = 1;
         *return_status=md.error_code * -1;
     }
     if (md.error_code != uhd::rx_metadata_t::ERROR_CODE_NONE){
