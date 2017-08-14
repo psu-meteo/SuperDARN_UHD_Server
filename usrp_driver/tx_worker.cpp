@@ -52,7 +52,7 @@ void usrp_tx_worker(
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
     size_t spb = tx_stream->get_max_num_samps();
     int32_t samples_per_pulse = pulse_samples[0].size() - 2*spb; 
-    DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%d (zero padding)\n", samples_per_pulse, spb);
+    DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     int iSide;
     int nSides = pulse_samples.size();
     std::vector<std::complex<int16_t>*> buffer(nSides); 
