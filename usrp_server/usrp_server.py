@@ -227,16 +227,18 @@ class usrpSockManager():
       nInts_rem   = nInts_shm % nZeros_per_block
       for antenna in antenna_list:
         for direction in direction_list:
-           name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
-           self.logger.debug("Filling SHM with zeros: {}".format(name))
-           memory = posix_ipc.SharedMemory(name)
-           mapfile = mmap.mmap(memory.fd, memory.size)
-           mapfile.seek(0)
-           for iBlock in  range(nFullBlocks): # TODO speed up by wrining more that one byte at a time?
-              mapfile.write(zeros_block)
-           mapfile.write(zeros_block[0:int(2*nInts_rem)])
-          
-           memory.close_fd()
+           try:
+              name = 'shm_{}_ant_{}_side_{}_swing_{}'.format(direction, int(antenna), int(side), int(swing))
+              self.logger.debug("Filling SHM with zeros: {}".format(name))
+              memory = posix_ipc.SharedMemory(name)
+              mapfile = mmap.mmap(memory.fd, memory.size)
+              mapfile.seek(0)
+              for iBlock in  range(nFullBlocks): # TODO speed up by wrining more that one byte at a time?
+                 mapfile.write(zeros_block)
+              mapfile.write(zeros_block[0:int(2*nInts_rem)])
+              memory.close_fd()
+           except:
+              self.logger.debug("Failed filling SHM with zeros: {}".format(name))
 
 
 
@@ -679,7 +681,7 @@ class RadarHardwareManager:
 
         #self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
         self.set_par_semaphore = threading.BoundedSemaphore()
-        self.lastSwingInvalid = False
+        self.processing_swing_invalid = False
         self.trigger_next_function_running = False
         self.commonChannelParameter = {}
 
@@ -1098,10 +1100,9 @@ class RadarHardwareManager:
 
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
         transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME
-        if transmitting_time_left < 0:
-            self.logger.error("no time is left in integration period for sampling!, {} seconds remain".format(transmitting_time_left))
-            transmitting_time_left = 0.3
-            self.logger.error("Setting it to {} seconds, until solution available".format(transmitting_time_left))
+        if transmitting_time_left <= 0:
+            transmitting_time_left = 0
+            self.logger.warning("no time is left in integration period for sampling!".format(transmitting_time_left))
 
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
@@ -1111,8 +1112,12 @@ class RadarHardwareManager:
 
         # calculate the number of RF transmit and receive samples
         downsamplingRates =  self.commonChannelParameter["downsample_rates"]
-        nSamples_per_sequence_if =  int(downsamplingRates[1])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(downsamplingRates[1]*2) # assumes fixed nTaps for filter = 2*downsampling 
-        num_requested_rx_samples =  int(downsamplingRates[0])* (nSamples_per_sequence_if                      - 1 ) +  int(downsamplingRates[0]*2) # assumes fixed nTaps for filter = 2*downsampling 
+        if nSequences_per_period == 0:
+           nSamples_per_sequence_if = nSequences_per_period  
+           num_requested_rx_samples = nSequences_per_period
+        else:
+           nSamples_per_sequence_if =  int(downsamplingRates[1])* ((nSamples_per_sequence*nSequences_per_period) - 1 ) +  int(downsamplingRates[1]*2) # assumes fixed nTaps for filter = 2*downsampling 
+           num_requested_rx_samples =  int(downsamplingRates[0])* (nSamples_per_sequence_if                      - 1 ) +  int(downsamplingRates[0]*2) # assumes fixed nTaps for filter = 2*downsampling 
 
         self.logger.debug("RFIFRATE: {}, IFBBRATE: {}, nSamples_per_sequence_if: {}, nSamples_per_sequence: {}, nSequences_per_period: {}, NTapsRX_ifbb: {}, NTapsRX_rfif: {}".format( \
                 downsamplingRates[0], downsamplingRates[1], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, downsamplingRates[0]*2, downsamplingRates[1]*2))
@@ -1120,8 +1125,6 @@ class RadarHardwareManager:
 
         self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
 
-        if num_requested_rx_samples < 0:
-            self.logger.error("a negative number of samples was requested for an integration period!")
 
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
 
@@ -1163,6 +1166,7 @@ class RadarHardwareManager:
         self.gain_control_divide_by_nChannels()
         
         self._calc_period_details()
+        trigger_next_period = self.nSequences_per_period != 0 # don't triger if no time left
 
         nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
         for ch in self.channels:
@@ -1182,37 +1186,35 @@ class RadarHardwareManager:
         self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
 
         if transmittingChannelAvailable:
-           # USRP SETUP
-           self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
-           self.logger.debug("start USRP_SETUP")
-           cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                    self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
-           cmd.transmit()
-           self.usrpManager.eval_client_return(cmd)
-           self.logger.debug("end USRP_SETUP")
+           if trigger_next_period:
+              # USRP SETUP
+              self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
+              self.logger.debug("start USRP_SETUP")
+              cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
+                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
+              cmd.transmit()
+              self.usrpManager.eval_client_return(cmd)
+              self.logger.debug("end USRP_SETUP")
+
+              # wait if periods should be time synchronized  
+              for tmpChannel in self.channels:
+                 if (tmpChannel is not None) and (not tmpChannel.scanManager.isLastPeriod): 
+                    tmpChannel.scanManager.wait_for_next_trigger()
+ 
+ 
+              # USRP_TRIGGER
+              self.logger.debug("start USRP_GET_TIME")
+              cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
+              cmd.transmit()
+             
+              # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
+              # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
+              usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
+              usrp_time = cmd.recv_time(self.usrpManager.socks[0])
+              cmd.client_return()
+              self.logger.debug("end USRP_GET_TIME")
+
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
-
-           # wait if periods should be time synchronized  
-           for tmpChannel in self.channels:
-              if (tmpChannel is not None) and (not tmpChannel.scanManager.isLastPeriod): 
-                 tmpChannel.scanManager.wait_for_next_trigger()
- 
- 
-           # USRP_TRIGGER
-           self.logger.debug("start USRP_GET_TIME")
-           cmd = usrp_get_time_command(self.usrpManager.socks[0]) # grab current usrp time from one usrp_driver 
-           cmd.transmit()
-          
-    ##       self.swingManager.nextSwingToTrigger = self.swingManager.processingSwing
-    ##     self.logger.debug("setting nextSwingToTrigger to swing {}".format(self.swingManager.nextSwingToTrigger))
-
-           # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
-           # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
-           usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
-           usrp_time = cmd.recv_time(self.usrpManager.socks[0])
-           cmd.client_return()
-           self.logger.debug("end USRP_GET_TIME")
-
 
            # calculate sequence times for control program
            sequence_start_time_secs  = np.zeros(self.nSequences_per_period, dtype=np.uint64)
@@ -1237,32 +1239,33 @@ class RadarHardwareManager:
                   resultDict['pulse_lens']                  = channel.pulse_lens    
                   channel.resultDict_list.insert(0,resultDict.copy())
 
-    
-           # broadcast the start of the next integration period to all usrp
-           self.logger.debug('start USRP_TRIGGER')
-           trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
-           cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
-           self.logger.debug('sending trigger pulse command')
-           cmd.transmit()
+           if trigger_next_period: 
+              # broadcast the start of the next integration period to all usrp
+              self.logger.debug('start USRP_TRIGGER')
+              trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
+              cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
+              self.logger.debug('sending trigger pulse command')
+              cmd.transmit()
+              self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
 
-           self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
            # set state of channel to CS_PROCESSING
            for ch in self.channels:
                if ch.active_state == CS_TRIGGER:
                   ch.active_state = CS_PROCESSING
                   ch.logger.debug("Changing active channel state from CS_TRIGGER to CS_PROCESSING (cnum: {}, swing {}, period {})".format(ch.cnum, self.swingManager.activeSwing, ch.scanManager.current_period))
-           self.logger.debug('waiting for trigger return')
-           returns = self.usrpManager.eval_client_return(cmd)
+           if trigger_next_period: 
+              self.logger.debug('waiting for trigger return')
+              returns = self.usrpManager.eval_client_return(cmd)
 
-           if TRIGGER_BUSY in returns:
-               self.logger.error('could not trigger, usrp driver is busy')
-               pdb.set_trace()
-           self.logger.debug('end USRP_TRIGGER')
+              if TRIGGER_BUSY in returns:
+                  self.logger.error('could not trigger, usrp driver is busy')
+                  pdb.set_trace()
+              self.logger.debug('end USRP_TRIGGER')
         else:
            self.logger.debug('No tranmitting channles available. Skipping USRP_TRIGGER')
 
         allProcessingChannelStates = [ch.processing_state for ch in self.channels]
-        if self.lastSwingInvalid: # TODO check if this works (in control program or data files)
+        if self.processing_swing_invalid: # TODO check if this works (in control program or data files)
            self.logger.warning("Last swing has been invalid. Preparing 0 sequences to transmit")
            for iChannel, channel in enumerate(self.channels):
               if channel.processing_state is CS_PROCESSING:
@@ -1274,7 +1277,17 @@ class RadarHardwareManager:
                  for item in channel.ctrlprm_struct.dataqueue:
                     if item.name == 'rbeam':
                        channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
-           self.lastSwingInvalid = False
+
+           # save BB samples if usrp live view is active
+           if os.path.isfile("./bufferLiveData.flag"):
+              self.logger.info("Buffering raw data to disk.")
+              chResExportList = [ ch.resultDict_list[-1] for ch in self.channels if ch.processing_state == CS_PROCESSING]
+              with open('tmpRawData.pkl', 'wb') as f:
+                 pickle.dump([[], [], chResExportList, self.antenna_idx_list_main, self.antenna_idx_list_back],f,  pickle.HIGHEST_PROTOCOL)
+              os.rename("tmpRawData.pkl", "liveRawData.pkl")
+              os.remove("./bufferLiveData.flag")
+
+           self.processing_swing_invalid = False
         else:
            if CS_PROCESSING in allProcessingChannelStates:
                # CUDA_GET_DATA
@@ -1423,7 +1436,7 @@ class RadarHardwareManager:
            cmd.client_return()
            self.logger.debug('end CUDA_GENERATE_PULSE')
 
-        if transmittingChannelAvailable:
+        if transmittingChannelAvailable and trigger_next_period: 
            # USRP_READY_DATA for activeSwing 
            self.logger.debug('start USRP_READY_DATA')
            cmd = usrp_ready_data_command(self.usrpManager.socks, swingManager.activeSwing)
@@ -1456,12 +1469,6 @@ class RadarHardwareManager:
                          print_name += " and out_of_sequence=1"
                      self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP]))
 
-    
-
-
-                    # this is now down in usrp_driver (faster) 
-                    # self.logger.error("Error ({}) occurred in rx_worker. Filling SHM of antennas {} with zeros... ".format(rx_status, self.usrpManager.antennaList_active[iUSRP])) 
-                    # self.usrpManager.fill_shm_with_zeros(self.usrpManager.antennaList_active[iUSRP], swingManager.activeSwing, ["rx"])
                   else:
                      all_usrps_report_failure = False
 
@@ -1485,12 +1492,13 @@ class RadarHardwareManager:
         self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
   
         if transmittingChannelAvailable:
-           # CUDA_PROCESS for processingSwing
-           self.logger.debug('start CUDA_PROCESS')
-           cmd = cuda_process_command(self.cudasocks, swing=swingManager.processingSwing, nSamples=nSamples_rx_requested_of_last_trigger)
-           cmd.transmit()
-           cmd.client_return()
-           self.logger.debug('end CUDA_PROCESS')
+           if trigger_next_period:
+              # CUDA_PROCESS for processingSwing
+              self.logger.debug('start CUDA_PROCESS')
+              cmd = cuda_process_command(self.cudasocks, swing=swingManager.processingSwing, nSamples=nSamples_rx_requested_of_last_trigger)
+              cmd.transmit()
+              cmd.client_return()
+              self.logger.debug('end CUDA_PROCESS')
 
            # repeat CLR_FREQ record for 2nd period (if executed for 1st)
            if self.clearFreqRawDataManager.repeat_request_for_2nd_period:
@@ -1507,6 +1515,9 @@ class RadarHardwareManager:
 
                  channel.scanManager.isFirstPeriod = False
  
+        if trigger_next_period:
+           self.processing_swing_invalid = True # set for next call of trigger_next_period 
+
         self.trigger_next_function_running = False
         
 
