@@ -1162,7 +1162,6 @@ class RadarHardwareManager:
         self.logger.debug('running RHM.trigger_next_swing()')
         swingManager = self.swingManager
      
-        self.logger.warning('TODO: where do we want to do gain control?')
         self.gain_control_divide_by_nChannels()
         
         self._calc_period_details()
@@ -1516,6 +1515,7 @@ class RadarHardwareManager:
                  channel.scanManager.isFirstPeriod = False
  
         if trigger_next_period:
+           self.logger.info("This swing has not been triggered, setting processing_swing_invalid.")
            self.processing_swing_invalid = True # set for next call of trigger_next_period 
 
         self.trigger_next_function_running = False
