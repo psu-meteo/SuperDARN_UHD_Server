@@ -1547,7 +1547,7 @@ class RadarHardwareManager:
 
                  channel.scanManager.isFirstPeriod = False
  
-        if trigger_next_period:
+        if not trigger_next_period:
            self.logger.info("This swing has not been triggered, setting processing_swing_invalid.")
            self.processing_swing_invalid = True # set for next call of trigger_next_period 
 
