@@ -9,10 +9,6 @@
 # - has a radar_main_control_loop() that executes clear freq search, adding new channels and triggering
 #
 
-# TODO: write mock arbyserver that can handle these commands
-# TODO: write mock arby server that can feed multiple normalscans with false data..
-
-
 import sys
 import os
 import numpy as np
@@ -66,6 +62,37 @@ CS_SAMPLES_READY = 'CS_SAMPLES_READY'
 CS_LAST_SWING    = 'CS_LAST_SWING'
 
 
+class integrationTimeManager():
+   """ Estimates the time the integration period has to be reduced to be able to setup urps copy samples etc"""
+   def __init__(self, RHM):
+      self.RHM = RHM
+      self.last_start = None # of trigger next function
+
+   def started_trigger_next(self):
+      now = datetime.datetime.now()
+      if self.last_start != None:
+         nSeconds = (now - self.last_start).total_seconds()
+         self.RHM.logger.debug("Time with overhead for last integration period: {} s".format(nSeconds))
+      self.last_start = now
+
+   def estimate_calc_time(self):
+      int_time = self.RHM.commonChannelParameter['integration_period_duration']  
+      # TODO optimize by tracking times of last periods
+      if int_time == 3.5:
+         overhead_time = 0.3
+      elif int_time == 1:
+         overhead_time = 0.01
+      else:
+         error_str = "No overhead time defined for {} s, please add it...".format(int_time)
+         RHM.logger.error(error_str)
+         raise ValueError(error_str)
+      return overhead_time
+    
+
+ 
+   
+
+
 class statusUpdater():
    " Class to a file every x minutes to allow checking uspr_status from outside"
 
@@ -79,7 +106,8 @@ class statusUpdater():
    def create_status_information(self):
       status = self.str_start
       status += "USRPs: {} active, {} inactive\n".format(len(self.RHM.usrpManager.addressList_active), len(self.RHM.usrpManager.addressList_inactive))
-      status += "Number of channels: {}\n".format(self.RHM.nRegisteredChannels)
+      status += "Channels: {} active (of {})\n".format(self.RHM.nRegisteredChannels, len(self.RHM.channels))
+      status += "Sequences per period: {}".format(self.RHM.nSequences_per_period)
       return status
       
       
@@ -684,6 +712,9 @@ class RadarHardwareManager:
         self.processing_swing_invalid = False
         self.trigger_next_function_running = False
         self.commonChannelParameter = {}
+        self.integration_time_manager = integrationTimeManager(self)
+        self.nSequences_per_period = 0
+
 
     def run(self):
         def spawn_channel(conn):
@@ -1099,7 +1130,7 @@ class RadarHardwareManager:
         self.logger.debug("INTEGRATION_PERIOD_SYNC_TIME: {}".format(INTEGRATION_PERIOD_SYNC_TIME))
 
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME
+        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME - self.integration_time_manager.estimate_calc_time()
         if transmitting_time_left <= 0:
             transmitting_time_left = 0
             self.logger.warning("no time is left in integration period for sampling!".format(transmitting_time_left))
@@ -1160,6 +1191,7 @@ class RadarHardwareManager:
     def trigger_next_swing(self):
         self.trigger_next_function_running = True
         self.logger.debug('running RHM.trigger_next_swing()')
+        self.integration_time_manager.started_trigger_next()
         swingManager = self.swingManager
      
         self.gain_control_divide_by_nChannels()
