@@ -874,10 +874,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
 
+                        sock_send_uint8(driverconn, TRIGGER_PULSE);
+
                         uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
                         DEBUG_PRINT("TRIGGER_PULSE rx_worker, tx_worker and dio threads on swing %d\n joined.", swing);
 
-                        sock_send_uint8(driverconn, TRIGGER_PULSE);
 
                     }
 
