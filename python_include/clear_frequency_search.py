@@ -56,7 +56,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     tfreq = np.mean(clear_freq_range)
     x_spacing = sample_meta_data['x_spacing']
 
-    usrp_center_freq = sample_meta_data['usrp_fcenter']
+    usrp_center_freq = sample_meta_data['usrp_fcenter'] # center frequency, in kHz..
     usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
 
     # calculate phasing matrix 
@@ -70,8 +70,8 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     spectrum_power = fft_clrfreq_samples(raw_samples)[0]
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
-    fstart_actual = usrp_center_freq - usrp_sampling_rate / 2.0 
-    fstop_actual = usrp_center_freq + usrp_sampling_rate / 2.0 
+    fstart_actual = usrp_center_freq * 1e3 - usrp_sampling_rate / 2.0 
+    fstop_actual = usrp_center_freq * 1e3 + usrp_sampling_rate / 2.0 
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
  
     # mask restricted frequencies
@@ -101,12 +101,12 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     # return lowest power frequency
     channel_filter = np.ones(clear_bw / CLRFREQ_RES)
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
-    
+         
     # mask channel power spectrum to between fstart and fstop
     usable_mask = (spectrum_freqs > fstart) * (spectrum_freqs < fstop)
     channel_power = channel_power[usable_mask]
     spectrum_freqs = spectrum_freqs[usable_mask]
-
+    
     # find lowest power channel
     clrfreq_idx = np.argmin(channel_power) 
     
