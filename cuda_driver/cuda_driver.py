@@ -27,6 +27,7 @@ import pycuda.autoinit
 
 import pickle # for cuda dump
 from datetime import datetime
+import time
 
 sys.path.insert(0, '../python_include')
 
@@ -692,7 +693,9 @@ class ProcessingGPU(object):
 
         self.logger.debug("nSamples_rx: bb={}, if={}, rf={}".format(rx_bb_nSamples, rx_if_nSamples, self.rx_rf_nSamples))
 
-        self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+        #self.rx_rf_samples = cuda.pagelocked_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.host_alloc_flags.DEVICEMAP)
+
+        self.rx_rf_samples = cuda.managed_empty((self.nAntennas,  self.rx_rf_nSamples*2), np.int16, mem_flags=cuda.mem_attach_flags.GLOBAL)
         self.rx_if_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_if_nSamples]))
         self.rx_bb_samples = np.float32(np.zeros([self.nAntennas, self.nChannels, 2 * rx_bb_nSamples]))
 
@@ -833,7 +836,8 @@ class ProcessingGPU(object):
     # transfer rf samples from shm to memory pagelocked to gpu
     def rxsamples_shm_to_gpu(self, shm):      
         for aidx in range(self.nAntennas):
-            self.logger.debug("Getting ant {} from SHM".format(aidx))
+
+            self.logger.debug("Getting ant {} from SHM, {}".format(aidx, time.time()))
             shm[aidx].seek(0)
             self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
             # self.logger.debug("Input from SHM, Ant {} meanAbs= {} #sampleTrace (copied {} samples)".format(aidx, np.mean(np.abs(self.rx_rf_samples[aidx])), self.rx_rf_nSamples ))

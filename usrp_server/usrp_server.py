@@ -53,6 +53,8 @@ nSwings = 2
 
 debug = True 
 
+USRP_DEFAULT_CFREQ = 13000
+
 # channel states (CS) for each channel
 CS_INACTIVE      = 'CS_INACTIVE'
 CS_READY         = 'CS_READY'
@@ -94,7 +96,7 @@ class integrationTimeManager():
 
 
 class statusUpdater():
-   " Class to a file every x minutes to allow checking uspr_status from outside"
+   " Class to a file every x minutes to allow checking usrp_status from outside"
 
    def __init__(self, RHM ):
       self.fileName = '../log/usrp_server_status.txt'
@@ -652,9 +654,12 @@ class scanManager():
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         
 
-        self.logger.debug("clear_freq_range: {}".format(self.clear_freq_range_list[iPeriod]))
+        self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
 
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
+
+        self.logger.debug("selected {} , noise level {}".format(clearFreq, noise))
+
         return (clearFreq, noise, recordTime)
 
 
@@ -684,8 +689,6 @@ class RadarHardwareManager:
         self.logger.info('listening on port ' + str(port) + ' for control programs')
 
         self.exit_usrp_server = False
-    #    self.mixingFreqManager       = None
-    #    self.usrpManager = None
  
         self.ini_file_init()
         self.usrp_init()
@@ -695,19 +698,17 @@ class RadarHardwareManager:
 
         self.nRegisteredChannels = 0  # number of channels after compatibility check
         self.n_SetParameterHandlers_active = 0 
-        self.nControlPrograms    = 0  # number of control programs, also include unregistered channels
+        self.nControlPrograms  = 0  # number of control programs, also include unregistered channels
         self.channel_manager_consecutive_number = 10 # serial number shown in logger of channel_manager
 
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
-        self.logger.warning("RadarHardwareManager: hardcoded clear frequency search frequency!, modify code to use adaptive center freq")
-        self.clearFreqRawDataManager.set_clrfreq_search_span(12.5e6, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+        self.clearFreqRawDataManager.set_clrfreq_search_span(USRP_DEFAULT_CFREQ, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
         self.newChannelList      = []
-        self.record_new_data         = self.clearFreqRawDataManager.record_new_data
-        self.swingManager            = swingManager()
+        self.record_new_data     = self.clearFreqRawDataManager.record_new_data
+        self.swingManager        = swingManager()
 
-        #self.set_par_semaphore = posix_ipc.Semaphore('SET_PAR', posix_ipc.O_CREAT)
         self.set_par_semaphore = threading.BoundedSemaphore()
         self.processing_swing_invalid = False
         self.trigger_next_function_running = False
@@ -877,7 +878,7 @@ class RadarHardwareManager:
       self.usrpManager = usrpSockManager(self)
       self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
       self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
-      self.mixingFreqManager = usrpMixingFreqManager(11500, self.usrp_rf_tx_rate/1000)
+      self.mixingFreqManager = usrpMixingFreqManager(USRP_DEFAULT_CFREQ, self.usrp_rf_tx_rate/1000)
 
       self._resync_usrps()
 
