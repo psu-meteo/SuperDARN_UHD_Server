@@ -81,9 +81,9 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.3
+         overhead_time = 0.5
       elif int_time == 1:
-         overhead_time = 0.01
+         overhead_time = 0.2
       else:
          error_str = "No overhead time defined for {} s, please add it...".format(int_time)
          RHM.logger.error(error_str)
@@ -109,7 +109,7 @@ class statusUpdater():
       status = self.str_start
       status += "USRPs: {} active, {} inactive\n".format(len(self.RHM.usrpManager.addressList_active), len(self.RHM.usrpManager.addressList_inactive))
       status += "Channels: {} active (of {})\n".format(self.RHM.nRegisteredChannels, len(self.RHM.channels))
-      status += "Sequences per period: {}".format(self.RHM.nSequences_per_period)
+      status += "Sequences per period: {}\n".format(self.RHM.nSequences_per_period)
       return status
       
       
@@ -693,7 +693,7 @@ class RadarHardwareManager:
         self.ini_file_init()
         self.usrp_init()
         self.rxfe_init()
-     #   self.test_rxfe_control() # toggle all amp and att stages on and off for testing
+        #self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
 
         self.nRegisteredChannels = 0  # number of channels after compatibility check
@@ -955,6 +955,19 @@ class RadarHardwareManager:
         testParSet = [[False, False, 0], [True, False, 0], [True, True, 0], [False, True, 0], [True, True, 31.5]] + [[False, False, 2**i/2] for i in range(6) ]
         
         nSets = len(testParSet)
+        while True:
+
+            print("flasing wax off")
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 0) # *2 since LSB is 0.5 dB 
+            cmd.transmit()
+            cmd.client_return()
+            time.sleep(1)
+            print("flasing wax on")
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 63) # *2 since LSB is 0.5 dB 
+            cmd.transmit()
+            cmd.client_return()
+            time.sleep(1)
+
         for iSet in range(nSets):
             amp1 = testParSet[iSet][0]
             amp2 = testParSet[iSet][1]
@@ -2256,7 +2269,8 @@ class RadarChannelHandler:
                     self.logger.error(" Pulse length of new channel ({}) is not compatible to old channel(s) ({})".format(pulseLength, hardwareManager.commonChannelParameter['pulseLength'])) 
                 return False
             else:
-                hardwareManager.nRegisteredChannels += 1
+                if self not in hardwareManager.channels:
+                   hardwareManager.nRegisteredChannels += 1
                 return True
                     
 
