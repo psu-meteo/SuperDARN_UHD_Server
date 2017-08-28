@@ -2522,7 +2522,9 @@ class RadarChannelHandler:
 def main():
     # maybe switch to multiprocessing with manager process
     
-    logging_usrp.initLogging('server.log')
+    now = datetime.datetime.now()
+    now_string = now.strftime("__%Y%m%d_%H%M%S")
+    logging_usrp.initLogging('server' + now_string + '.log')
     logging.info('Strating main() of usrp_server')
 
 
