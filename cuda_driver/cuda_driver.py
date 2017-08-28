@@ -1052,7 +1052,9 @@ def release_sem(semList):
 
 
 def main():
-    logging_usrp.initLogging('cuda.log')
+    now = datetime.now()
+    now_string = now.strftime("__%Y%m%d_%H%M%S")
+    logging_usrp.initLogging('cuda' + now_string + '.log')
     logger = logging.getLogger('cuda_driver')
 
     # parse usrp config file, read in antennas list
