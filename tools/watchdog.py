@@ -102,9 +102,9 @@ class usrpClass():
       start_arg = ["./usrp_driver", "--host", self.host]
       for iSide, side in enumerate(self.side):
          if side.lower() == 'a':
-            start_arg.append(["--antennaA"], [self.ant[iSide]] )
+            start_arg += [ ["--antennaA"], self.ant[iSide]]
          elif side.lower() == 'b':
-            start_arg.append(["--antennaB"], self.ant[iSide]] )
+            start_arg += [ ["--antennaB"], self.ant[iSide]] 
          else:
             print("unknown usrp side: {}".format(side))
       return start_arg
@@ -124,7 +124,9 @@ while True:
       with open(server_status_file, "r") as f:
          status = f.readlines()
       for line in status:
-         print("    " + line[:-1])
+         if line[-1] == "\n":
+            line = line[:-1]
+         print("    " + line)
       print("\n\n")
 
 

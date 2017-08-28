@@ -18,7 +18,7 @@ configFileName = '/etc/network/interfaces.d/interfaces10G_usrp.cfg'
 hostName = socket.gethostname()
 print(hostName)
 if hostName == 'kodiak-aux':
-   interface_bases = ['ens4f', 'ens6f']
+   interface_bases = ['ens4f', 'ens6f', 'ens2f']
    SUBNET_BASE = 48
 elif hostName == 'kodiak-main':
    interface_bases = ['enp10s0f', 'enp11s0f']

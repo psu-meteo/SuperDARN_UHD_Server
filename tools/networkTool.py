@@ -210,7 +210,7 @@ def main():
    userInput = 's'
    printStatus()
    while userInput != "":
-       print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast (checks 192.168.[0..254].2)\n  i    : IP scan (slow)\n  x    : IP scan class C (checks i.i.i.[0..254], i is form interface )\n  c    : continuous update status\n  Enter: quit" + ENDC)
+       print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast (checks 192.168.[0..254].2)\n  i    : IP scan (slow)\n  x    : IP scan class C (checks i.i.i.[0..254], i is from interface )\n  c    : continuous update status\n  Enter: quit" + ENDC)
        userInput = input(' Input: ')
      
        if userInput.lower() == 's':
