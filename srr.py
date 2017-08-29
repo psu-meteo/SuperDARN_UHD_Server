@@ -490,7 +490,11 @@ def start_usrps_from_config(usrp_sleep = False):
                 newDevice = False
                 break
         if newDevice:
-           start_arg_list.append( [usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ])
+           allArgs =[ usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ] 
+           if usrp_config[usrpName]['mainarray'] == "False":
+              allArgs += ["--interferometer"]
+
+           start_arg_list.append(allArgs)
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
