@@ -337,7 +337,7 @@ class cuda_get_data_handler(cudamsg_handler):
                 self.sock.sendall(samples[iAntenna][channelIndex].tobytes())
 
             channel = recv_dtype(self.sock, np.int32) 
-
+        self.gpu.rx_rf_samples.base.free()
 #       release_sem(rx_sem_list[swing]) # TODO why is this here so lonely? (mgu)
 
 # take copy and process IF data from shared memory, send to usrp_server via socks 
