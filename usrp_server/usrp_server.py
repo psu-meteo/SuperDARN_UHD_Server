@@ -425,7 +425,9 @@ class clearFrequencyRawDataManager():
          
         self.metaData = {}
         self.rawData = None
+        self.get_raw_data_semaphore = threading.BoundedSemaphore()
         
+
         self.metaData['x_spacing'] = antenna_spacing 
 
         self.logger = logging.getLogger('clearFrequency')
@@ -467,10 +469,12 @@ class clearFrequencyRawDataManager():
         self.logger.debug("clrfreq record time: {}".format(self.recordTime))
 
     def get_raw_data(self):
+        self.get_raw_data_semaphore.acquire()
         if self.rawData is None or not self.raw_data_available_from_this_period:
            self.record_new_data()
         else:
            print("clearFreqDataManager: provide raw data (age {}) ".format(time.time() - self.recordTime))
+        self.get_raw_data_semaphore.release()
         return self.rawData, self.metaData, self.recordTime
 
 class swingManager():
@@ -653,7 +657,6 @@ class scanManager():
         rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         
-
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
 
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
