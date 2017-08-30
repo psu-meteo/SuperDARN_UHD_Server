@@ -99,7 +99,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     # apply filter to convolve spectrum with filter response
     # TODO: filter response is currently assumed to be boxcar..
     # return lowest power frequency
-    channel_filter = np.ones(clear_bw / CLRFREQ_RES)
+    channel_filter = np.ones(int(clear_bw / CLRFREQ_RES))
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
          
     # mask channel power spectrum to between fstart and fstop

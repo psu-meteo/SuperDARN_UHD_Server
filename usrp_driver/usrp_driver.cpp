@@ -438,6 +438,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     socklen_t addr_size;
     uint32_t exit_driver = 0;
 
+    uint32_t tx_worker_active;
+
     uhd::time_spec_t start_time, rx_start_time;
     
     // vector of all pulse start times over an integration period
@@ -473,12 +475,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     // process command line arguments
     struct arg_lit  *al_help   = arg_lit0(NULL, "help", "Prints help information and then exits");
 //    struct arg_int  *ai_ant    = arg_intn("a", "antenna", NULL, 1, 2, "Antenna position index for the USRP"); 
-    struct arg_int  *ai_ant_a  = arg_int0("a", "antennaA", NULL, "Antenna position index for the USRP on side A"); 
-    struct arg_int  *ai_ant_b  = arg_int0("b", "antennaB", NULL, "Antenna position index for the USRP on side B"); 
-    struct arg_str  *as_host   = arg_str0("h", "host", NULL, "Hostname or IP address of USRP to control (e.g usrp1)"); 
-    struct arg_lit  *al_intclk = arg_lit0("i", "intclk", "Select internal clock (default is external)"); 
-    struct arg_end  *ae_argend = arg_end(ARG_MAXERRORS);
-    void* argtable[] = {al_help, ai_ant_a, ai_ant_b, as_host, al_intclk, ae_argend};
+    struct arg_int  *ai_ant_a          = arg_int0("a", "antennaA", NULL, "Antenna position index for the USRP on side A"); 
+    struct arg_int  *ai_ant_b          = arg_int0("b", "antennaB", NULL, "Antenna position index for the USRP on side B"); 
+    struct arg_str  *as_host           = arg_str0("h", "host", NULL, "Hostname or IP address of USRP to control (e.g usrp1)"); 
+    struct arg_lit  *al_intclk         = arg_lit0("i", "intclk", "Select internal clock (default is external)"); 
+    struct arg_lit  *al_interferometer = arg_lit0("x", "interferometer", "Disable tx_worker for interferometer antennas"); 
+    struct arg_end  *ae_argend         = arg_end(ARG_MAXERRORS);
+    void* argtable[] = {al_help, ai_ant_a, ai_ant_b, as_host, al_intclk, al_interferometer, ae_argend};
     
     double txrate, rxrate, txfreq, rxfreq;
     double txrate_new, rxrate_new, txfreq_new, rxfreq_new;
@@ -608,6 +611,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         }
     }
 
+    if(al_interferometer->count > 0) {
+       DEBUG_PRINT("Disable tx_worker ...\n");
+       tx_worker_active = 0;
+    } else {
+       tx_worker_active = 1;
+    }
 
     if(al_intclk->count > 0) {
         usrp->set_clock_source("internal");
@@ -870,8 +879,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d\n", swing,(int) nSamples_rx);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
-                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status)); 
-                        uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
+                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status));
+                        if (tx_worker_active) { 
+                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
+                        }
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
