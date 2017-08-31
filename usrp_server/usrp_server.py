@@ -708,7 +708,9 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
         self.clearFreqRawDataManager.set_clrfreq_search_span(USRP_DEFAULT_CFREQ, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
-        self.newChannelList      = []
+        self.active_channels     = []   # list of channels where ROS called SET_ACTIVE
+        self.channels            = []   # all channels that are really transmitting
+        self.newChannelList      = []   # waiting list for channels to be added at the right time (between two trigger_next() calls)
         self.record_new_data     = self.clearFreqRawDataManager.record_new_data
         self.swingManager        = swingManager()
 
@@ -782,7 +784,15 @@ class RadarHardwareManager:
 
 
                 # FRIST CUDA_ADD FOR NEW CHANNELS
-                if len(self.newChannelList) != 0:
+                if len(self.newChannelList) != 0:                   
+                   self.logger.debug("active_channel list: {}".format([active_ch.cnum for active_ch in self.active_channels]))
+                   self.logger.debug("channel list: {}".format([ch.cnum for ch in self.channels]))
+                   self.logger.debug("new channel list: {}".format([ch.cnum for ch in self.newChannelList]))
+
+                   for active_ch in self.active_channels:
+                      while (active_ch not in (self.channels + self.newChannelList)):
+                         self.logger.info("Waiting for ch {} to be added to newChannelList".format(active_ch.cnum))
+                         time.sleep(0.01)
                    while( self.n_SetParameterHandlers_active):
                       self.logger.debug("Waiting for all {} SetParameterHandlers to finish before initializing new channels".format(self.n_SetParameterHandlers_active))
                       time.sleep(0.001)
@@ -814,7 +824,6 @@ class RadarHardwareManager:
 
         self.client_sock.listen(MAX_CHANNELS)
         client_threads = []
-        self.channels = []
         usrp_server_logger = logging.getLogger('usrp_server')
 
         ct = threading.Thread(target=radar_main_control_loop)
@@ -2137,7 +2146,7 @@ class RadarChannelHandler:
         # period not jet triggered
         if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
            
-           self.logger.debug("Ch {} waiting for Paramter semaphore...".format(self.cnum)) 
+           self.logger.debug("Ch {} waiting for Parameter semaphore...".format(self.cnum)) 
            RHM.set_par_semaphore.acquire()
            self.logger.debug("Ch {} acquired semaphore, setting parameter".format(self.cnum)) 
 
@@ -2440,6 +2449,10 @@ class RadarChannelHandler:
     def SetActiveHandler(self, rmsg):
         # called by site library at the start of a scan 
         self.active = True
+        if self not in self.parent_RadarHardwareManager.active_channels:
+           self.parent_RadarHardwareManager.active_channels.append(self)
+           self.logger.debug("Added ch {} to RHM.active_channels list".format(self.cnum))
+           
 
         self.logger.debug('SetActiveHandler starting')
 
@@ -2522,6 +2535,10 @@ class RadarChannelHandler:
     def SetInactiveHandler(channelObject, rmsg):
         RHM = channelObject.parent_RadarHardwareManager
 
+        if channelObject in RHM.active_channels:
+            RHM.logger.info('ROS:SET_INACTVIVE removing channel {} from RHM.active_channels'.format(RHM.channels.index(channelObject)))
+            RHM.active_channels.remove(channelObject)
+           
         if channelObject in RHM.channels:
             RHM.logger.info('ROS:SET_INACTVIVE removing channel {} from HardwareManager'.format(RHM.channels.index(channelObject)))
             RHM.channels.remove(channelObject)
