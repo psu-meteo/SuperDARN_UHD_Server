@@ -425,7 +425,9 @@ class clearFrequencyRawDataManager():
          
         self.metaData = {}
         self.rawData = None
+        self.freq_occupied_by_other_channels = []
         self.get_raw_data_semaphore = threading.BoundedSemaphore()
+        self.select_clear_freq = threading.BoundedSemaphore()
         
 
         self.metaData['x_spacing'] = antenna_spacing 
@@ -449,6 +451,7 @@ class clearFrequencyRawDataManager():
 
     def period_finished(self):
         self.raw_data_available_from_this_period = False
+        self.freq_occupied_by_other_channels = []
    
     def record_new_data(self):
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
@@ -477,6 +480,9 @@ class clearFrequencyRawDataManager():
         self.get_raw_data_semaphore.release()
         return self.rawData, self.metaData, self.recordTime
 
+    def add_channel(self, freq, bandwidth):
+        self.freq_occupied_by_other_channels.append([freq - bandwidth*1.5, freq + bandwidth*1.5])
+
 class swingManager():
     """ Class to handle which swing is active and processing """
 
@@ -503,23 +509,24 @@ class scanManager():
         created for each RadarChannelHandler """
         
 
-    def __init__(self, restricted_frequency_list, beamSep, numBeams):
+    def __init__(self, restricted_frequency_list, RHM):
         self.scan_beam_list        = []
         self.clear_freq_range_list = []
         self.fixFreq = None
         
         self.current_period = 0
         self.repeat_clrfreq_recording = False # 2nd period is triggered automatically before ROS finishes 1st. if CLR_FRQ was requested for 1st => also do record on 2nd
-        
-        self.beamSep = beamSep
-        self.numBeams = numBeams
+       
+        self.RHM = RHM 
+        self.beamSep = self.RHM.array_beam_sep
+        self.numBeams = self.RHM.array_nBeams
 
         self.current_clrFreq_result = None
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast = False # to handle last trigger_next_swing() call
 
-        self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
+ ###       self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
         self.isInitSetParameter = True
         self.restricted_frequency_list = restricted_frequency_list
         self.logger = logging.getLogger('scanManager')
@@ -654,14 +661,21 @@ class scanManager():
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
-        rawData, metaData, recordTime = self.get_clr_freq_raw_data() 
+        # TODO make sure this is function is only called once at a time
+     ### rawData, metaData, recordTime = self.get_clr_freq_raw_data()
+        RHM = self.RHM
+        rawData, metaData, recordTime = RHM.clearFreqRawDataManager.get_raw_data()
+    
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
 
+        all_restricted_freq = self.restricted_frequency_list + RHM.clearFreqRawDataManager.freq_occupied_by_other_channels
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
+        bandwidth = 3.333 # TODO get this from channel
+        RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
-        self.logger.debug("selected {} , noise level {}".format(clearFreq, noise))
+        self.logger.debug("clear freq result: selected {} , noise level {}".format(clearFreq, noise))
 
         return (clearFreq, noise, recordTime)
 
@@ -1073,7 +1087,15 @@ class RadarHardwareManager:
        #    # don't delete channel in middle of trigger, pretrigger, or ....
        #     channelObject._waitForState([CS_READY, CS_INACTIVE])  
             self.logger.info('unregister_channel_from_HardwareManager() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
-            self.channels.remove(channelObject)
+            if channelObject in self.channels:
+               self.channels.remove(channelObject)
+
+            if channelObject in self.active_channels:
+               self.active_channels.remove(channelObject)
+
+            if channelObject in self.newChannelList:
+               self.newChannelList.remove(channelObject)
+
             # remove channel from cuda
             self.logger.debug('send CUDA_REMOVE_CHANNEL')
             for iSwing in range(nSwings):
@@ -1685,8 +1707,8 @@ class RadarChannelHandler:
         self.cnum = 'unknown'
         self.resultDict_list = []
 
-        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager.array_beam_sep, self.parent_RadarHardwareManager.array_nBeams)
-        self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
+        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager)
+  ###      self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
         self.triggered_swing_list = []
         
