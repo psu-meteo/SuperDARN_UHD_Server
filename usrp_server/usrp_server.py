@@ -481,6 +481,8 @@ class clearFrequencyRawDataManager():
         return self.rawData, self.metaData, self.recordTime
 
     def add_channel(self, freq, bandwidth):
+        freq *= 1000
+        bandwidth *= 1000
         self.freq_occupied_by_other_channels.append([freq - bandwidth*1.5, freq + bandwidth*1.5])
 
 class swingManager():
@@ -509,7 +511,7 @@ class scanManager():
         created for each RadarChannelHandler """
         
 
-    def __init__(self, restricted_frequency_list, RHM):
+    def __init__(self, restricted_frequency_list, channel):
         self.scan_beam_list        = []
         self.clear_freq_range_list = []
         self.fixFreq = None
@@ -517,7 +519,8 @@ class scanManager():
         self.current_period = 0
         self.repeat_clrfreq_recording = False # 2nd period is triggered automatically before ROS finishes 1st. if CLR_FRQ was requested for 1st => also do record on 2nd
        
-        self.RHM = RHM 
+        self.channel = channel
+        self.RHM = channel.parent_RadarHardwareManager
         self.beamSep = self.RHM.array_beam_sep
         self.numBeams = self.RHM.array_nBeams
 
@@ -667,15 +670,18 @@ class scanManager():
         rawData, metaData, recordTime = RHM.clearFreqRawDataManager.get_raw_data()
     
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
-        
+        RHM.clearFreqRawDataManager.select_clear_freq.acquire()
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
-
+   
         all_restricted_freq = self.restricted_frequency_list + RHM.clearFreqRawDataManager.freq_occupied_by_other_channels
+        print(self.restricted_frequency_list)
+        print(RHM.clearFreqRawDataManager.freq_occupied_by_other_channels)
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
         bandwidth = 3.333 # TODO get this from channel
         RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
-        self.logger.debug("clear freq result: selected {} , noise level {}".format(clearFreq, noise))
+        self.logger.debug("clear freq result for channel {}: selected {} , noise level {}".format(self.channel.cnum, clearFreq, noise))
+        RHM.clearFreqRawDataManager.select_clear_freq.release()
 
         return (clearFreq, noise, recordTime)
 
@@ -1082,19 +1088,22 @@ class RadarHardwareManager:
 
 
     def unregister_channel_from_HardwareManager(self, channelObject):
+        while self.trigger_next_function_running:
+           self.logger.debug("Waiting for trigger_next_swing() to finish before deleting channel...")
+           # no time.sleep() here because there is not much time between two trigger calls...
+        
+        if channelObject in self.active_channels:
+           self.active_channels.remove(channelObject)
+
+        if channelObject in self.newChannelList:
+           self.newChannelList.remove(channelObject)
+
         if channelObject in self.channels:
        # this is only called if something went wrong or crtl program quit => so don't care about channel states ? 
        #    # don't delete channel in middle of trigger, pretrigger, or ....
        #     channelObject._waitForState([CS_READY, CS_INACTIVE])  
             self.logger.info('unregister_channel_from_HardwareManager() removing channel {} from HardwareManager'.format(self.channels.index(channelObject)))
-            if channelObject in self.channels:
-               self.channels.remove(channelObject)
-
-            if channelObject in self.active_channels:
-               self.active_channels.remove(channelObject)
-
-            if channelObject in self.newChannelList:
-               self.newChannelList.remove(channelObject)
+            self.channels.remove(channelObject)
 
             # remove channel from cuda
             self.logger.debug('send CUDA_REMOVE_CHANNEL')
@@ -1707,7 +1716,7 @@ class RadarChannelHandler:
         self.cnum = 'unknown'
         self.resultDict_list = []
 
-        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self.parent_RadarHardwareManager)
+        self.scanManager  = scanManager(read_restrict_file(RESTRICT_FILE), self)
   ###      self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
         self.triggered_swing_list = []
