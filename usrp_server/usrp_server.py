@@ -482,7 +482,6 @@ class clearFrequencyRawDataManager():
 
     def add_channel(self, freq, bandwidth):
         freq *= 1000
-        bandwidth *= 1000
         self.freq_occupied_by_other_channels.append([freq - bandwidth*1.5, freq + bandwidth*1.5])
 
 class swingManager():
@@ -678,7 +677,8 @@ class scanManager():
         if 'baseband_samplerate' in RHM.commonChannelParameter: 
            bandwidth = RHM.commonChannelParameter['baseband_samplerate'] 
         else:    # first call before channel details are known
-           bandwidth = 3.333
+           bandwidth = 3333
+        print(bandwidth)
 
         RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
@@ -1186,13 +1186,12 @@ class RadarHardwareManager:
         self.logger.debug("self.starttime_period: {}".format(self.starttime_period))
         self.logger.debug("self.commonChannelParameter['integration_period_duration: {}".format(self.commonChannelParameter['integration_period_duration']))
         self.logger.debug("time.time(): {}".format(time.time()))
-        self.logger.debug("INTEGRATION_PERIOD_SYNC_TIME: {}".format(INTEGRATION_PERIOD_SYNC_TIME))
 
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
         transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME - self.integration_time_manager.estimate_calc_time()
         if transmitting_time_left <= 0:
             transmitting_time_left = 0
-            self.logger.warning("no time is left in integration period for sampling!".format(transmitting_time_left))
+            self.logger.warning("no time is left in integration period for sampling!")
 
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
@@ -1337,6 +1336,8 @@ class RadarHardwareManager:
               self.logger.debug('sending trigger pulse command')
               cmd.transmit()
               self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
+           else:
+              self.logger.info("No time left, not triggering this swing.")
 
            # set state of channel to CS_PROCESSING
            for ch in self.channels:
@@ -1393,21 +1394,18 @@ class RadarHardwareManager:
                for cudasock in self.cudasocks:
                    nAntennas = recv_dtype(cudasock, np.uint32)
                    for iChannel,channel in enumerate(self.channels):
-
                        if channel.processing_state == CS_PROCESSING:
+                           channel.logger.debug("Receiving {} antennas for channel {}".format(nAntennas, channel.cnum))
                            transmit_dtype(cudasock, channel.cnum, np.int32)
 
                            for iAntenna in range(nAntennas):
                                antIdx = recv_dtype(cudasock, np.uint16)
                                nSamples_bb = int(recv_dtype(cudasock, np.uint32) / 2)
-                               self.logger.debug("Receiving {} bb samples. (Channel {}, ant idx {})".format(nSamples_bb, channel.cnum, antIdx))
+                               # self.logger.debug("Receiving {} bb samples. (Channel {}, ant idx {})".format(nSamples_bb, channel.cnum, antIdx))
                                if main_samples is None:
                                   main_samples = np.zeros((len(self.channels), nMainAntennas, nSamples_bb), dtype=np.complex64)
                                   back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
 
-
-                            #   self.logger.warning('CUDA_GET_DATA: stalling for 100 ms to avoid a race condition')
-                            #   time.sleep(.1)
                                samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
                                samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
                                
@@ -1420,7 +1418,9 @@ class RadarHardwareManager:
                                else:
                                    self.logger.error("Cuda tranmitted antenna ({}) that is not in main array list ({}) and back array list ({}). (Maybe differnt antenna definietions in usrp_config.ini on both computers?)".format(antIdx, self.antenna_idx_list_main, self.antenna_idx_list_back))
                                    sys.exit(1)
-                                           
+                       else:
+                          channel.logger.debug("Receiving NOTHING for channel {} because processing_state is {}".format( channel.cnum, channel.processing_state))
+                    
              
                    transmit_dtype(cudasock, -1, np.int32) # to end transfer process
                    
