@@ -674,10 +674,12 @@ class scanManager():
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
    
         all_restricted_freq = self.restricted_frequency_list + RHM.clearFreqRawDataManager.freq_occupied_by_other_channels
-        print(self.restricted_frequency_list)
-        print(RHM.clearFreqRawDataManager.freq_occupied_by_other_channels)
-        clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, self.restricted_frequency_list, self.clear_freq_range_list[iPeriod], beam_angle) 
-        bandwidth = 3.333 # TODO get this from channel
+        clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, all_restricted_freq, self.clear_freq_range_list[iPeriod], beam_angle)
+        if 'baseband_samplerate' in RHM.commonChannelParameter: 
+           bandwidth = RHM.commonChannelParameter['baseband_samplerate'] 
+        else:    # first call before channel details are known
+           bandwidth = 3.333
+
         RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
         self.logger.debug("clear freq result for channel {}: selected {} , noise level {}".format(self.channel.cnum, clearFreq, noise))
