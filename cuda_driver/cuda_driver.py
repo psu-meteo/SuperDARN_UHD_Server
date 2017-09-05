@@ -298,9 +298,13 @@ class cuda_remove_channel_handler(cudamsg_handler):
             chIdx = self.gpu.channelNumbers[swing].index(channelNumber)
             self.gpu.sequences[swing][chIdx] = None
             self.gpu.channelNumbers[swing][chIdx] = None
-            self.logger.debug("Delete Channel {}  at idx {}. ".format(channelNumber, chIdx))
+            self.logger.debug("Delete Channel {}  at idx {} (swing {}). ".format(channelNumber, chIdx, swing))
         else:
             self.logger.warning("cuda remove channel: No channel {} in cuda. (channel numbers : {}) swing {}".format(channelNumber, self.gpu.channelNumbers[swing], swing))
+
+        if len(self.gpu.channelNumbers[0]) + len(self.gpu.channelNumbers[1]) == 0:
+           self.logger.debug('No channels left, freeing rx_rf_samples.') # to be ready for next control program
+           self.gpu.rx_rf_samples.base.free()
 
         
 

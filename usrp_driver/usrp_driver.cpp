@@ -749,26 +749,31 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
                     }
                  */   
+                    // TODO use return argument of set_xx to save new rate/freq                    
+   
                     // if necessary, retune USRP frequency and sampling rate
                     if(rxrate != rxrate_new) {
-                        usrp->set_rx_rate(rxrate_new);
-                        rxrate = usrp->get_rx_rate();
+                       usrp->set_rx_rate(rxrate_new);
+                       rxrate = usrp->get_rx_rate();
                     }
 
                     if(txrate != txrate_new) {
-                        usrp->set_tx_rate(txrate_new);
-                        txrate = usrp->get_tx_rate();
-   
+                       usrp->set_tx_rate(txrate_new);
+                       txrate = usrp->get_tx_rate();
                     }
-                    
+
                     if(rxfreq != rxfreq_new) {
-                        usrp->set_rx_freq(rxfreq_new);
-                        rxfreq = usrp->get_rx_freq();
+                       for(iSide = 0; iSide < nSides; iSide++) {
+                          usrp->set_rx_freq(rxfreq_new, iSide);
+                       }
+                       rxfreq = usrp->get_rx_freq();
                     }
 
                     if(txfreq != txfreq_new) {
-                        usrp->set_tx_freq(txfreq_new);
-                        txfreq = usrp->get_tx_freq();
+                       for(iSide = 0; iSide < nSides; iSide++) {
+                          usrp->set_tx_freq(txfreq_new, iSide);
+                       }
+                       txfreq = usrp->get_tx_freq();
                     }
 
                     if(verbose) {

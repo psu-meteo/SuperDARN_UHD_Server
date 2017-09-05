@@ -10,8 +10,9 @@
 #                 [single|master|slave] : network mode, default is master for main and slave for aux
 #                 [singlePol|dualPol]   : polarization, default is singlePol
 #            
-#     srr.py networkTool           : calls networkTool.py 
+#     srr.py networkTool|net       : calls networkTool.py 
 #     srr.py rawView               : plot raw rx bb samples of all antennas
+#     srr.py watchdog|w            : calls tools/watchdog.py
 #     srr.py help                  : show this help
 #
 #     srr.py start   PROCESS       : start a process or process group (see below for processes) 
@@ -595,6 +596,11 @@ def start_liveRawView_tool():
     os.chdir(os.path.join(basePath, "tools") )   
     subprocess.Popen(['./plotRawSamples_usrpServer.py' ])
 
+def start_watchdog():
+    myPrint("Starting tools/watchdog.py...")
+    os.chdir(os.path.join(basePath, "tools") )   
+    subprocess.Popen(['./watchdog.py' ])
+
 ###############
 def restart_all():
    myPrint("Restarting all processes")
@@ -632,6 +638,8 @@ def main():
           initialize(inputArg)
       elif firstArg.lower() in ["liverawview", "rawview"]:
            start_liveRawView_tool()  
+      elif firstArg.lower() in ["watchdog", "w"]:
+           start_watchdog()  
       elif firstArg.lower() in ["network", "networktool", "net"]:
            start_network_tool()  
       elif firstArg == "start":
