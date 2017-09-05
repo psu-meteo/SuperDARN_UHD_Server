@@ -659,7 +659,12 @@ class scanManager():
                self.logger.debug("Using fixed frequency of {} kHz for next period".format(self.fixFreq))
            else:
                # print("  calc next clr_freq (period {})".format(self.current_period+1))
-               self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
+               if self.camping:
+                   next_period = self.current_period
+               else:
+                   next_period = self.current_period + 1
+
+               self.next_clrFreq_result = self.evaluate_clear_freq(next_period ,self.next_beam)
         return self.next_clrFreq_result        
         
     def evaluate_clear_freq(self, iPeriod, beamNo):
