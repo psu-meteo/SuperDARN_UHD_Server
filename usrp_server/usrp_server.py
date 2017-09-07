@@ -648,7 +648,7 @@ class scanManager():
                self.current_clrFreq_result = [self.fixFreq, 0, 0]
                self.logger.debug("Using fixed frequency of {} kHz for current period".format(self.fixFreq))
            else:
-               # print("  calc current clr_freq (period {})".format(self.current_period))
+               self.logger.debug("  calc current clr_freq (ch {}, period {})".format(self.channel.cnum, self.current_period))
                self.current_clrFreq_result = self.evaluate_clear_freq(self.current_period, self.current_beam)
         return self.current_clrFreq_result
         
@@ -658,7 +658,7 @@ class scanManager():
                self.next_clrFreq_result = [self.fixFreq, 0, 0]
                self.logger.debug("Using fixed frequency of {} kHz for next period".format(self.fixFreq))
            else:
-               # print("  calc next clr_freq (period {})".format(self.current_period+1))
+               self.logger.debug("  calc next clr_freq (ch {}, period {})".format(self.channel.cnum, self.current_period+1))
                self.next_clrFreq_result = self.evaluate_clear_freq(self.current_period+1,self.next_beam)
         return self.next_clrFreq_result        
         
@@ -1500,6 +1500,13 @@ class RadarHardwareManager:
                cmd.transmit()
                cmd.client_return()      
                self.logger.debug("end CUDA_REMOVE_CHANNEL")
+               if channel.scanManager.isPostLast:
+
+                  if channel in self.channels:
+                     self.channels.remove(channel)
+                  if channel in self.active_channels:
+                     self.active_channels.remove(channel)
+
             else:
                if channel.active:
                   self.logger.debug("start CUDA_ADD_CHANNEL")
@@ -1613,10 +1620,14 @@ class RadarHardwareManager:
         
 
     def next_period_RHM(self):
-        self.clearFreqRawDataManager.period_finished()
+        ch_do_not_increase_period = []
         for ch in self.channels:
-            if ch is not None: 
+            if ch is not None:
+                  ch_do_not_increase_period.append(ch.scanManager.isPrePeriod or ch.scanManager.isLastPeriod)
                   ch.scanManager.period_finished()
+        if not all(ch_do_not_increase_period):
+           self.clearFreqRawDataManager.period_finished()
+   
 
 
     def gain_control_divide_by_nChannels(self, nChannelsWillBeAdded=0):
@@ -1911,7 +1922,7 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, clrFreqResult[0], np.int32)
         transmit_dtype(self.conn, clrFreqResult[1], np.float32)
 
-        self.logger.info('ch {}: clr frequency search raw data age: {} s'.format(self.cnum, time.time() - clrFreqResult[2]))
+        self.logger.info('ch {}: clr frequency search raw data age: {:2.1f} s'.format(self.cnum, time.time() - clrFreqResult[2]))
         return RMSG_SUCCESS
 
     #@timeit
