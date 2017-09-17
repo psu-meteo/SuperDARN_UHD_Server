@@ -684,7 +684,18 @@ class ProcessingGPU(object):
         self.rx_decimationRates[:] = (int(decimationRate_rf2if), int(decimationRate_if2bb))
         cuda.memcpy_htod(self.cu_rx_decimationRates, self.rx_decimationRates)
 
-        # allocate memory on GPU
+        # generate filters
+        channelFreqVec = [None for i in range(self.nChannels)]
+        for iChannel in range(self.nChannels):
+            if self.sequences[swing][iChannel] != None:
+               channelFreqVec[iChannel] = -( self.sequences[swing][iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq[swing]) # use negative frequency here since filter is not time inverted for convolution
+               self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
+ 
+        self.rx_filtertap_rfif = RF_IF_GAIN * dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)
+        # dsp_filters.rolloff_filter_s1()
+        self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
+    
+       # allocate memory on GPU
         self.cu_rx_filtertaps_rfif[swing] = cuda.mem_alloc_like(self.rx_filtertap_rfif)
         self.cu_rx_filtertaps_ifbb[swing] = cuda.mem_alloc_like(self.rx_filtertap_ifbb)
         cuda.memcpy_htod(self.cu_rx_filtertaps_rfif[swing], self.rx_filtertap_rfif)
@@ -756,16 +767,16 @@ class ProcessingGPU(object):
         self.rx_filtertap_rfif = np.float32(np.zeros([self.nChannels, self.ntaps_rfif, 2]))
         self.rx_filtertap_ifbb = np.float32(np.zeros([self.nChannels, self.ntaps_ifbb, 2]))
     
-        # generate filters
-        channelFreqVec = [None for i in range(self.nChannels)]
-        for iChannel in range(self.nChannels):
-            if self.sequences[swing][iChannel] != None:
-               channelFreqVec[iChannel] = -( self.sequences[swing][iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq[swing]) # use negative frequency here since filter is not time inverted for convolution
-               self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
+   ##     # generate filters
+   ##     channelFreqVec = [None for i in range(self.nChannels)]
+   ##     for iChannel in range(self.nChannels):
+   ##         if self.sequences[swing][iChannel] != None:
+   ##            channelFreqVec[iChannel] = -( self.sequences[swing][iChannel].ctrlprm['rfreq']*1000 - self.usrp_mixing_freq[swing]) # use negative frequency here since filter is not time inverted for convolution
+   ##            self.logger.debug('generating rx filter for ch {}: {} kHz (USRP baseband: {} kHz)'.format(iChannel, self.sequences[swing][iChannel].ctrlprm['rfreq'],  self.sequences[swing][iChannel].ctrlprm['rfreq'] - self.usrp_mixing_freq[swing] /1000 ))
  
-        self.rx_filtertap_rfif = RF_IF_GAIN * dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)
-        # dsp_filters.rolloff_filter_s1()
-        self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
+   ##     self.rx_filtertap_rfif = RF_IF_GAIN * dsp_filters.kaiser_filter_s0(self.ntaps_rfif, channelFreqVec, self.rx_rf_samplingRate)
+   ##     # dsp_filters.rolloff_filter_s1()
+   ##     self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
         # self._plot_filter()
         
@@ -893,24 +904,25 @@ class ProcessingGPU(object):
 
             start_time = 5e-3
             stop_time =  30e-3
-
+            
+            iAntenna = 1
             plot_only_rf_and_bb = False
             plot_freq = False
             # PLOT all three frequency bands
             if plot_freq:
                ax = plt.subplot(311)
-               mpt.plot_time(self.rx_rf_samples[0][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_rf_samples[iChannel][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('RF')
 
                ax = plt.subplot(312)
-               mpt.plot_freq(self.rx_if_samples[0][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+               mpt.plot_freq(self.rx_if_samples[iChannel][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
          ##      mpt.plot_freq(self.rx_if_samples[0][1][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('IF')
 
                ax =plt.subplot(313)
-               mpt.plot_freq(self.rx_bb_samples[0][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_freq(self.rx_bb_samples[iChannel][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('BB')
 
@@ -932,17 +944,17 @@ class ProcessingGPU(object):
                xlim = [0, 0.5]
                plt.figure()
                ax = plt.subplot(311) 
-               mpt.plot_time(self.rx_rf_samples[0], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
                ax.set_xlim(xlim)
                plt.title("RF")
 
                ax = plt.subplot(312) 
-               mpt.plot_time(self.rx_if_samples[0][0], self.rx_rf_samplingRate /  self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_if_samples[iAntenna][0], self.rx_rf_samplingRate /  self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
                ax.set_xlim(xlim)
                plt.title("IF")
 
                ax = plt.subplot(313) 
-               mpt.plot_time(self.rx_bb_samples[0][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_bb_samples[iAntenna][0], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
                ax.set_xlim(xlim)
                plt.title("BB")
 
