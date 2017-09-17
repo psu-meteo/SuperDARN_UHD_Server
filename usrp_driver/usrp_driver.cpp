@@ -832,24 +832,27 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // create local copy of transmit pulse data from shared memory
                         size_t spb = tx_stream->get_max_num_samps();
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * nSamples_tx_pulse;
+                        size_t number_of_pulses = pulse_time_offsets.size();
+                        size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
 
-
-                        // TODO side loop
+                        // TODO unpack and pad tx sample
                         for (iSide = 0; iSide<nSides; iSide++) {
-                            tx_samples[iSide].resize(nSamples_tx_pulse+2*spb);                    
-                            shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[0];
-                            memcpy(&tx_samples[iSide][spb], shm_pulseaddr, pulse_bytes);
+                            tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
+
+                            for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
+                                shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
+                                memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
+                            }
                         }
 
                         if(SAVE_RAW_SAMPLES_DEBUG) {
                             FILE *raw_dump_fp;
                             char raw_dump_name[80];
-                            int nExportSamples =  nSamples_tx_pulse+2*spb;
-                           // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", nExportSamples, nSamples_tx_pulse, spb);
+                           // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
                             for (iSide =0; iSide < nSides; iSide++){
                                 sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
                                 raw_dump_fp = fopen(raw_dump_name, "wb");
-                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),nExportSamples , raw_dump_fp);
+                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding, raw_dump_fp);
                                 fclose(raw_dump_fp);
                             }
                         }
@@ -864,7 +867,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         
                         // calculate usrp clock time of the start of each pulse over the integration period
                         // so we can schedule the io (perhaps we will have to move io off of the usrp if it can't keep up)
-                        for(uint32_t p_i = 0; p_i < pulse_time_offsets.size(); p_i++) {
+                        for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
                             double offset_time = pulse_sample_idx_offsets[p_i] / txrate;
                             pulse_time_offsets[p_i] = offset_time_spec(start_time, offset_time);
                            // DEBUG_PRINT("TRIGGER_PULSE pulse time %d is %2.5f\n", p_i, pulse_time_offsets[p_i].get_real_secs());
@@ -886,7 +889,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status));
                         if (tx_worker_active) { 
-                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, start_time, pulse_sample_idx_offsets)); 
+                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
                         }
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
 

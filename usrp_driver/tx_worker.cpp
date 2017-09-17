@@ -32,6 +32,7 @@ extern int verbose;
 void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
     std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
+    size_t num_samples_per_pulse,
     uhd::time_spec_t burst_start_time,
     std::vector<size_t> pulse_sample_idx_offsets 
 ){
@@ -51,7 +52,7 @@ void usrp_tx_worker(
 
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
     size_t spb = tx_stream->get_max_num_samps();
-    int32_t samples_per_pulse = pulse_samples[0].size() - 2*spb; 
+    int32_t samples_per_pulse = num_samples_per_pulse - 2*spb; 
     DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     int iSide;
     int nSides = pulse_samples.size();
@@ -62,6 +63,7 @@ void usrp_tx_worker(
     size_t nacc_samples = 0;
     size_t sample_idx = 0;
     uint32_t pulse_idx = 0;
+ 
 
     for (iSide =0; iSide<nSides; iSide++) {
         buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
@@ -71,6 +73,7 @@ void usrp_tx_worker(
     md.start_of_burst = false;
     md.has_time_spec = false;
     int32_t nsamples_to_send, samples_to_pulse;
+
 
     while(nacc_samples < tx_burst_length_samples) {
         // calculate the number of samples to send in the packet
@@ -82,9 +85,10 @@ void usrp_tx_worker(
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {
             if(samples_to_pulse * -1 < samples_per_pulse) {
-                sample_idx = spb - samples_to_pulse; 
+                sample_idx = spb - samples_to_pulse + pulse_idx * num_samples_per_pulse;
             } else {
                 // if we've passed the tail of the pulse, then restart and look for the next one..
+                // DEBUG_PRINT("pulse idx: %d complete\n", pulse_idx);
                 pulse_idx++;
                 continue;
             }
@@ -95,11 +99,13 @@ void usrp_tx_worker(
             sample_idx = 0;
         }
 
+        //DEBUG_PRINT("sending buffer with sample_idx: %d\n", sample_idx);
         for (iSide =0; iSide<nSides; iSide++) {
             buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
         }
 
-        size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
+
+      size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
 
         md.start_of_burst = false;
         md.has_time_spec = false;
