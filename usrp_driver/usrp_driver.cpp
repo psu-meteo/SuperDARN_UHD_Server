@@ -448,6 +448,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::vector<uint64_t> pulse_sample_idx_offsets;
 
     boost::thread_group uhd_threads;
+    boost::thread_group clrfreq_threads;
 
     // process config file for port and SHM sizes
     DEBUG_PRINT("USRP_DRIVER starting to read driver_config.ini\n");
@@ -1102,8 +1103,17 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
                     //clrfreq_cfreq = usrp->get_rx_freq(); 
                     //DEBUG_PRINT("CLRFREQ actual freq: %.2f\n", clrfreq_cfreq);
+                    clrfreq_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &clrfreq_data_buffer, num_clrfreq_samples, clrfreq_start_time, &clrfreq_rx_worker_status));
 
-                    usrp_rx_worker(usrp, rx_stream, &clrfreq_data_buffer, num_clrfreq_samples, clrfreq_start_time, &clrfreq_rx_worker_status);
+                    clrfreq_threads.join_all();
+
+                    if(clrfreq_rx_worker_status){
+                        fprintf(stderr, "Error in clrfreq_rx_worker, resetting rx_stream: %d.\n", clrfreq_rx_worker_status);
+                        rx_stream_reset_count++;
+                        fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
+                        rx_stream.reset();
+                        rx_stream = usrp->get_rx_stream(stream_args);
+                    }
 
                     DEBUG_PRINT("CLRFREQ received samples, relaying %d samples back...\n", num_clrfreq_samples);
                     sock_send_int32(driverconn, (int32_t) antennaVector[0]); // TODO both sides?
