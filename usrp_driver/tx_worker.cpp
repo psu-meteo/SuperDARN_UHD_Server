@@ -32,7 +32,7 @@ extern int verbose;
 void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
     std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
-    size_t num_samples_per_pulse,
+    size_t padded_num_samples_per_pulse,
     uhd::time_spec_t burst_start_time,
     std::vector<size_t> pulse_sample_idx_offsets 
 ){
@@ -52,14 +52,14 @@ void usrp_tx_worker(
 
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
     size_t spb = tx_stream->get_max_num_samps();
-    int32_t samples_per_pulse = num_samples_per_pulse - 2*spb; 
+    int32_t samples_per_pulse = padded_num_samples_per_pulse - 2*spb; 
     DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     int iSide;
     int nSides = pulse_samples.size();
     std::vector<std::complex<int16_t>*> buffer(nSides); 
 
     // assume at least spb length zero padding before first pulse
-    size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + samples_per_pulse; 
+    size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + padded_num_samples_per_pulse; 
     size_t nacc_samples = 0;
     size_t sample_idx = 0;
     uint32_t pulse_idx = 0;
@@ -85,7 +85,7 @@ void usrp_tx_worker(
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {
             if(samples_to_pulse * -1 < samples_per_pulse) {
-                sample_idx = spb - samples_to_pulse + pulse_idx * num_samples_per_pulse;
+                sample_idx = spb - samples_to_pulse; //+ pulse_idx * padded_num_samples_per_pulse;
             } else {
                 // if we've passed the tail of the pulse, then restart and look for the next one..
                 // DEBUG_PRINT("pulse idx: %d complete\n", pulse_idx);
