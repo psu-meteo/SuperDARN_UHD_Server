@@ -47,7 +47,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 0
+#define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
@@ -786,6 +786,37 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO: set the number of samples in a pulse. this is calculated from the pulse duration and the sampling rate 
                     // when do we know this? after USRP_SETUP
                 
+                    // create local copy of transmit pulse data from shared memory
+                    std::complex<int16_t> *shm_pulseaddr;
+                    size_t spb = tx_stream->get_max_num_samps();
+                    size_t pulse_bytes = sizeof(std::complex<int16_t>) * nSamples_tx_pulse;
+                    size_t number_of_pulses = pulse_time_offsets.size();
+                    size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
+                    DEBUG_PRINT("spb %d, pulse length %d samples, pulse with padding %d\n", spb, nSamples_tx_pulse, num_samples_per_pulse_with_padding);
+
+                    // TODO unpack and pad tx sample
+                    for (iSide = 0; iSide<nSides; iSide++) {
+                        tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
+
+                        for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
+                            shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
+                            memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
+                        }
+                    }
+
+                    if(SAVE_RAW_SAMPLES_DEBUG) {
+                        FILE *raw_dump_fp;
+                        char raw_dump_name[80];
+                       // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
+                        for (iSide =0; iSide < nSides; iSide++){
+                            sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
+                            raw_dump_fp = fopen(raw_dump_name, "wb");
+                            fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
+                            fclose(raw_dump_fp);
+                        }
+                    }
+
+
                     state_vec[swing] = ST_READY; 
                     DEBUG_PRINT("changing state_vec[swing] to ST_READY\n");
                     sock_send_uint8(driverconn, USRP_SETUP);
@@ -819,7 +850,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE busy in state_vec[swing] %d, returning\n", state_vec[swing]);
                     }
                     else {
-                        std::complex<int16_t> *shm_pulseaddr;
                         DEBUG_PRINT("TRIGGER_PULSE ready\n");
                         state_vec[swing] = ST_PULSE;
 
@@ -836,27 +866,27 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
                         DEBUG_PRINT("spb %d, pulse length %d samples, pulse with padding %d\n", spb, nSamples_tx_pulse, num_samples_per_pulse_with_padding);
 
-                        // TODO unpack and pad tx sample
-                        for (iSide = 0; iSide<nSides; iSide++) {
-                            tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
+                      //  // TODO unpack and pad tx sample
+                      //  for (iSide = 0; iSide<nSides; iSide++) {
+                      //      tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
 
-                            for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
-                                shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
-                                memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
-                            }
-                        }
+                      //      for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
+                      //          shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
+                      //          memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
+                      //      }
+                      //  }
 
-                        if(SAVE_RAW_SAMPLES_DEBUG) {
-                            FILE *raw_dump_fp;
-                            char raw_dump_name[80];
-                           // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
-                            for (iSide =0; iSide < nSides; iSide++){
-                                sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
-                                raw_dump_fp = fopen(raw_dump_name, "wb");
-                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
-                                fclose(raw_dump_fp);
-                            }
-                        }
+                      //  if(SAVE_RAW_SAMPLES_DEBUG) {
+                      //      FILE *raw_dump_fp;
+                      //      char raw_dump_name[80];
+                      //     // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
+                      //      for (iSide =0; iSide < nSides; iSide++){
+                      //          sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
+                      //          raw_dump_fp = fopen(raw_dump_name, "wb");
+                      //          fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
+                      //          fclose(raw_dump_fp);
+                      //      }
+                      //  }
 
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
