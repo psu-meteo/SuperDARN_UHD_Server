@@ -174,7 +174,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
         #assert tfreq < int(self.hardware_limits['maximum_tfreq']), 'transmit frequency too high for hardware'
 
-        assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1] + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
+        assert sum(channel.pulse_lens) / (1e6 * ((channel.pulse_offsets_vector[-1]*self.gpu.tx_rf_samplingRate + tpulse))) < float(self.hardware_limits['max_dutycycle']), ' duty cycle of pulse sequence is too high'
         
         nPulses   = self.gpu.nPulses 
         nAntennas = len(self.antenna_index_list)
@@ -216,7 +216,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # apply phase shifting to pulse using phase_mask
                 psamp = np.copy(pulsesamps)
              #   print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
-             #   print("phase mask size: {}".format(channel.phase_masks[iPulse]))
+             #   print("phase mask size: {}".format(channel.phase_masks[iPulse] ))
                 psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse % channel.npulses ])
                 # TODO: support non-1us resolution phase masks
         
@@ -229,8 +229,8 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
                 # constant phase over complete integration period
                 t = channel.pulse_offsets_vector[iPulse ]
-                freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0])
-                print("tx correction freq: {}, time of pulse {}: {} s".format(freq, iPulse, t))
+                freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
+                print("tx correction freq: {}, time of pulse {}: {} s (sample {})".format(freq, iPulse, t/self.gpu.tx_rf_samplingRate,t))
                 omega = np.float64(2*np.pi*freq)
            #     import matplotlib.pyplot as plt
            #     timeVec = np.arange(500000) /10e6
@@ -243,7 +243,6 @@ class cuda_generate_pulse_handler(cudamsg_handler):
            #     plt.legend()
            #     plt.show()
                 offset_factor = np.exp(-1j*omega*t)
-               # offset_factor = np.cos(omega*t)
                 psamp *= offset_factor 
 
                 # apply gain control
@@ -884,7 +883,7 @@ class ProcessingGPU(object):
     def rxsamples_shm_to_gpu(self, shm):      
         for aidx in range(self.nAntennas):
 
-            self.logger.debug("Getting ant {} from SHM, {}".format(aidx, time.time()))
+            # self.logger.debug("Getting ant {} from SHM, {}".format(aidx, time.time()))
             shm[aidx].seek(0)
             self.rx_rf_samples[aidx] = np.frombuffer(shm[aidx], dtype=np.int16, count = self.rx_rf_nSamples*2)
             # self.logger.debug("Input from SHM, Ant {} meanAbs= {} #sampleTrace (copied {} samples)".format(aidx, np.mean(np.abs(self.rx_rf_samples[aidx])), self.rx_rf_nSamples ))
@@ -923,29 +922,33 @@ class ProcessingGPU(object):
             #   mpt.plot_time(self.rx_rf_samples[iAnt], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
             plt.show()
         
-        if True:
+        # debug phase problem
+        if False:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
+            cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             iAntenna = 2
-            # debug phase problem
             time_range = [32e-3, 47e-3]
             sample_range = [int(t * self.rx_rf_samplingRate*2) for t in time_range]
-            rf_data = self.rx_rf_samples[iAntenna][sample_range[0]:sample_range[1]:2]
+            sample_range = [s+ s%2 for s in sample_range]
+            rf_data = self.rx_rf_samples[iAntenna][sample_range[0]:sample_range[1]:2] + 1j *self.rx_rf_samples[iAntenna][sample_range[0]+1:sample_range[1]:2] 
             t = np.array([ s/ self.rx_rf_samplingRate for s in range(len(rf_data))])
             fc = self.sequences[swing][0].ctrlprm['tfreq'] * 1000 
             print(fc)
             f = fc - self.usrp_mixing_freq[0]
             print(f)
             rf_real = np.array(rf_data)
-           # plt.plot( rf_real)
-            rf_down = rf_real * np.cos(2*np.pi*f*t)
-            plt.plot( rf_down)
-
-            plt.show()
+          #  plt.plot( np.real(rf_real))
+            rf_down = rf_real * np.exp(-1j*2*np.pi*f*t)
+            plt.plot(np.real( rf_down))
+            plt.plot(np.imag( rf_down))
+            plt.title("fc={}, f={}".format(fc,f))
+            cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             import pickle
             with open('debug_export.pkl', 'wb') as fName:
-                pickle.dump([rf_data, time_range, fc ],fName,  pickle.HIGHEST_PROTOCOL)
+                pickle.dump([rf_data, time_range, fc, self.rx_if_samples, self.rx_rf_samples ],fName,  pickle.HIGHEST_PROTOCOL)
+            plt.show()
                                            
 
         # for testing RX: plot RF, IF and BB
@@ -957,9 +960,6 @@ class ProcessingGPU(object):
             cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
             iAntenna = 2
-
-
-            mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
 
             start_time = 5e-3
             stop_time =  30e-3

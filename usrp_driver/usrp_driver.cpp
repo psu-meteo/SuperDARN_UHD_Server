@@ -47,7 +47,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 0 
+#define SAVE_RAW_SAMPLES_DEBUG 1 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
@@ -834,6 +834,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t pulse_bytes = sizeof(std::complex<int16_t>) * nSamples_tx_pulse;
                         size_t number_of_pulses = pulse_time_offsets.size();
                         size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
+                        DEBUG_PRINT("spb %d, pulse length %d samples, pulse with padding %d\n", spb, nSamples_tx_pulse, num_samples_per_pulse_with_padding);
 
                         // TODO unpack and pad tx sample
                         for (iSide = 0; iSide<nSides; iSide++) {
@@ -852,7 +853,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                             for (iSide =0; iSide < nSides; iSide++){
                                 sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
                                 raw_dump_fp = fopen(raw_dump_name, "wb");
-                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding, raw_dump_fp);
+                                fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
                                 fclose(raw_dump_fp);
                             }
                         }

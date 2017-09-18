@@ -1263,7 +1263,7 @@ class RadarHardwareManager:
         self._calc_period_details()
         trigger_next_period = self.nSequences_per_period != 0 # don't triger if no time left
 
-        nSamples_per_pulse = int(self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * int(self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)
+        nSamples_per_pulse = int(np.round((self.commonChannelParameter['pulseLength'] / 1e6 * self.usrp_rf_tx_rate) + 2 * (self.commonChannelParameter['tr_to_pulse_delay']/1e6 * self.usrp_rf_tx_rate)))
         for ch in self.channels:
             self.logger.debug('cnum {}: tfreq={}, rfreq={}, usrp_center={} rx_rate={}MHz '.format(ch.cnum, ch.ctrlprm_struct.payload['tfreq'], ch.ctrlprm_struct.payload['rfreq'], self.mixingFreqManager.current_mixing_freq, self.usrp_rf_tx_rate/1e6))
             if not (ch.ctrlprm_struct.payload['tfreq'] == ch.ctrlprm_struct.payload['rfreq']):
@@ -1889,13 +1889,13 @@ class RadarChannelHandler:
     def get_current_sequence(self):
         self.update_ctrlprm_class('current')
         self.logger.debug("Getting current sequence with {} samples (305x1500x {}) rbeam {}".format(self.nrf_rx_samples_per_integration_period, self.nrf_rx_samples_per_integration_period/305/1500, self.ctrlprm_struct.payload['rbeam']))
-        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets / self.parent_RadarHardwareManager.usrp_rf_tx_rate, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
        # seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def get_next_sequence(self):
         self.update_ctrlprm_class('next')
-        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets / self.parent_RadarHardwareManager.usrp_rf_tx_rate, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def DefaultHandler(self, rmsg):
