@@ -86,7 +86,7 @@ class integrationTimeManager():
          overhead_time = 0.2
       else:
          error_str = "No overhead time defined for {} s, please add it...".format(int_time)
-         RHM.logger.error(error_str)
+         self.RHM.logger.error(error_str)
          raise ValueError(error_str)
       return overhead_time
     
