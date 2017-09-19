@@ -230,7 +230,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
                 # constant phase over complete integration period
                 t = channel.pulse_offsets_vector[iPulse ]
                 freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
-                print("tx correction freq: {}, time of pulse {}: {} s (sample {})".format(freq, iPulse, t/self.gpu.tx_rf_samplingRate,t))
+              #  print("tx correction freq: {}, time of pulse {}: {} s (sample {})".format(freq, iPulse, t/self.gpu.tx_rf_samplingRate,t))
                 omega = np.float64(2*np.pi*freq)
            #     import matplotlib.pyplot as plt
            #     timeVec = np.arange(500000) /10e6
@@ -636,7 +636,7 @@ class ProcessingGPU(object):
                         # create interleaved real/complex bb vector
                         bb_vec_interleaved = np.zeros(tx_bb_nSamples_per_pulse * 2)
                         try:
-                            self.logger.debug('synth_tx_rf_pulses: copying baseband signals ch:{}, ant:{}, pulse:{}'.format(iChannel, iAntenna, iPulse))
+                          #  self.logger.debug('synth_tx_rf_pulses: copying baseband signals ch:{}, ant:{}, pulse:{}'.format(iChannel, iAntenna, iPulse))
                             bb_vec_interleaved[0::2] = np.real(bb_signal[iChannel][iAntenna][iPulse][:])
                             bb_vec_interleaved[1::2] = np.imag(bb_signal[iChannel][iAntenna][iPulse][:])
                             self.tx_bb_indata[iAntenna][iChannel][iPulse][:] = bb_vec_interleaved[:]
@@ -1002,7 +1002,7 @@ class ProcessingGPU(object):
                xlim = [0, 0.5]
                plt.figure()
                ax = plt.subplot(311) 
-               mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+              # mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
                ax.set_xlim(xlim)
                plt.title("RF")
 

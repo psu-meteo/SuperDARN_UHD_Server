@@ -1202,6 +1202,7 @@ class RadarHardwareManager:
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
         nSequences_per_period = int(transmitting_time_left / pulse_sequence_period)
+        nSequences_per_period_max = int((self.commonChannelParameter['integration_period_duration']  - INTEGRATION_PERIOD_SYNC_TIME - self.integration_time_manager.estimate_calc_time() ) / pulse_sequence_period)
         ### sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
 
 
@@ -1227,11 +1228,15 @@ class RadarHardwareManager:
         nPulses_per_sequence           = self.commonChannelParameter['npulses_per_sequence']
         pulse_sequence_offsets_samples = self.commonChannelParameter['pulse_sequence_offsets_vector'] * self.usrp_rf_tx_rate
 
-        # then, calculate sample indicies at which pulses start within an integration period
-        integration_period_pulse_sample_offsets = np.zeros(nPulses_per_sequence *  nSequences_per_period, dtype=np.uint64)
-        for iSequence in range(nSequences_per_period):
+        # then, calculate sample indicies at which pulses start within an integration period (all possible for cuda, only trasmitted for usrp_driver) 
+        # TODO if the pulse offsets change in one scan, this has to be changed (calc next pulse period for cuda, current for usrp driver)
+        all_possible_integration_period_pulse_sample_offsets = np.zeros(nPulses_per_sequence *  nSequences_per_period_max, dtype=np.uint64)
+        for iSequence in range(nSequences_per_period_max):
             for iPulse in range(nPulses_per_sequence):
-                integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse]
+                all_possible_integration_period_pulse_sample_offsets[iSequence * nPulses_per_sequence + iPulse] = np.round(iSequence * self.nsamples_per_sequence + pulse_sequence_offsets_samples[iPulse])
+        integration_period_pulse_sample_offsets = all_possible_integration_period_pulse_sample_offsets[:nSequences_per_period*nPulses_per_sequence]
+
+        self.all_possible_integration_period_pulse_sample_offsets = all_possible_integration_period_pulse_sample_offsets 
         self.nPulses_per_integration_period = nPulses_per_sequence * nSequences_per_period
      
         if True:
@@ -1889,13 +1894,13 @@ class RadarChannelHandler:
     def get_current_sequence(self):
         self.update_ctrlprm_class('current')
         self.logger.debug("Getting current sequence with {} samples (305x1500x {}) rbeam {}".format(self.nrf_rx_samples_per_integration_period, self.nrf_rx_samples_per_integration_period/305/1500, self.ctrlprm_struct.payload['rbeam']))
-        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.parent_RadarHardwareManager.all_possible_integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
        # seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.pulse_sequence_offsets_vector, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def get_next_sequence(self):
         self.update_ctrlprm_class('next')
-        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
+        seq = sequence(self.npulses_per_sequence,  self.tr_to_pulse_delay, self.parent_RadarHardwareManager.all_possible_integration_period_pulse_sample_offsets, self.pulse_lens, self.phase_masks, self.pulse_masks, self.channelScalingFactor,  self.ctrlprm_struct.payload )
         return seq
 
     def DefaultHandler(self, rmsg):
