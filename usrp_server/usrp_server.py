@@ -330,7 +330,7 @@ class usrpSockManager():
       # sync to other usrps
       if do_resync:
          self.RHM._resync_usrps()
-         self.RHM.rxfe_init() # TODO speed up by just calling init for new usrps?
+         self.RHM.rxfe_init() 
 
 
 class usrpMixingFreqManager():
