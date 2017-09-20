@@ -568,17 +568,17 @@ def start_rtserver():
     subprocess.Popen(commandList)
 
 def start_fitacf_write():
-    commandList = 'fitacfwrite -r ade.a -lp 41103 -ep 41000'.split(" ")
+    commandList = 'fitacfwrite -r kod.d -lp 41103 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_rawacf_write():
-    commandList = 'rawacfwrite -r ade.a -lp 41102 -ep 41000'.split(" ")
+    commandList = 'rawacfwrite -r kod.d -lp 41102 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_errorlog():
-    commandList = 'errlog -name mcm.a -lp 41000'.split(" ")
+    commandList = 'errlog -name kod.d -lp 41000'.split(" ")
     myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
     subprocess.Popen(commandList)
 
