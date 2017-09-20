@@ -6,10 +6,11 @@ import time
 basePath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, basePath )
 import srr
-
+import subprocess
 
 print_status = True
-restart  = False
+restart_all  = False
+restart_driver  = True
 inf_loop = True
 
 
@@ -17,6 +18,9 @@ inf_loop = True
 server_status_file = os.path.join(basePath, 'log', "usrp_server_status.txt")
 check_period = 1 # sec
 file_age_limit = 30 + 10
+
+usrp_restart_period = 30
+
 
 # define font color and style
 HEADER = '\033[95m'
@@ -38,8 +42,10 @@ def fail(string):
    return FAIL + string + ENDC
 
 class usrpDriverWatcher():
-   def __init__(self, fileName):
+   def __init__(self, fileName, usrp_restart_period):
       self.config = srr.read_config(fileName)
+      self.restart_period = usrp_restart_period
+      self.last_restart = None
       usrp_name_list = self.config.sections()
       self.usrp_list = []
       known_hosts = []
@@ -62,12 +68,18 @@ class usrpDriverWatcher():
          else:
             usrp.pid = None
    def restart_usrps(self):
-       os.chdir(os.path.join(basePath, "usrp_driver") )
-       for usrp in self.usrp_list:
-         if usrp.pid == None:
-            start_arg = usrp.get_start_arguments()
-            print("Starting {}".format(" ".join(start_arg) ))
-            subprocess.Popen(all_start_arg)
+       now = time.mktime(time.localtime())
+       if self.last_restart == None or (now-self.last_restart) > self.restart_period:
+          os.chdir(os.path.join(basePath, "usrp_driver") )
+          for usrp in self.usrp_list:
+            if usrp.pid == None:
+               self.last_restart = now
+               start_arg = usrp.get_start_arguments()
+               if restart_driver:
+                  print("Starting {}".format(" ".join(start_arg) ))
+                  subprocess.Popen(start_arg)
+               else:
+                  print("Starting of driver disabled ({})".format(" ".join(start_arg) ))
 
       
 
@@ -102,15 +114,15 @@ class usrpClass():
       start_arg = ["./usrp_driver", "--host", self.host]
       for iSide, side in enumerate(self.side):
          if side.lower() == 'a':
-            start_arg += [ ["--antennaA"], self.ant[iSide]]
+            start_arg += [ "--antennaA", self.ant[iSide]]
          elif side.lower() == 'b':
-            start_arg += [ ["--antennaB"], self.ant[iSide]] 
+             start_arg += [ "--antennaB", self.ant[iSide]] 
          else:
             print("unknown usrp side: {}".format(side))
       return start_arg
       
 fileName = os.path.join(basePath, 'usrp_config.ini')
-usrp_driver_watcher = usrpDriverWatcher(fileName)
+usrp_driver_watcher = usrpDriverWatcher(fileName, usrp_restart_period)
 
 while True:
    os.system('clear')
@@ -135,16 +147,17 @@ while True:
       stat_lines = usrp_driver_watcher.status_str()
       for line in stat_lines:
          print(line)
-
+      print(" ")
+      usrp_driver_watcher.restart_usrps()
 
 #   print("file: {}, now: {}, age: {} s".format(m_time, now, now-m_time))
    if file_age_limit > file_age:
        time.sleep(check_period)
    else:
        print("Age of status file is {} seconds. Restarting all processes (with srr.py) ...")
-       if restart:
+       if restart_all:
           srr.restart_all()
-          time.sleep(20) # waiting for control loop to start
+          time.sleep(30) # waiting for control loop to start
        else:
           print("Restarting disabled...")
           time.sleep(check_period)
