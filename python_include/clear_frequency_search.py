@@ -147,20 +147,27 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     dbPrint("CLRFREQ command sent, waiting for raw samples")
     # grab raw samples
     for usrpsock in usrp_sockets:
-        output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
-        clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
-        assert clrfreq_rate_actual == clrfreq_rate_requested
+        try:
+            output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
+            clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
+            assert clrfreq_rate_actual == clrfreq_rate_requested
 
-        #dbPrint("antenna {} clrfreq rate is: {} (requested: {})".format(output_antenna_idx_list[-1], clrfreq_rate_actual, clrfreq_rate_requested))
-        dbPrint("antenna {} waiting for {} samples".format(output_antenna_idx_list[-1], int(num_clrfreq_samples)))
-       
-        sample_buf = recv_dtype(usrpsock, np.int16, nitems = int(2 * num_clrfreq_samples))
+            #dbPrint("antenna {} clrfreq rate is: {} (requested: {})".format(output_antenna_idx_list[-1], clrfreq_rate_actual, clrfreq_rate_requested))
+            dbPrint("antenna {} waiting for {} samples".format(output_antenna_idx_list[-1], int(num_clrfreq_samples)))
+           
+            sample_buf = recv_dtype(usrpsock, np.int16, nitems = int(2 * num_clrfreq_samples))
 
-        output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
+            output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
+        except:
+            dbPrint("CLRFREQ response from {} failed, stuffing with zeros".format(usrpsock))
+            output_samples_list.append(1j * np.zeros(num_clrfreq_samples))
+
     
-    clrfreq_cmd.client_return()
-
-    dbPrint("record sample command completed")
+    try:
+        clrfreq_cmd.client_return()
+        dbPrint("record sample command completed")
+    except:
+        dbPrint("CLRFREQ, communication with at least one USRP failed")
 
     return output_samples_list, output_antenna_idx_list
 
