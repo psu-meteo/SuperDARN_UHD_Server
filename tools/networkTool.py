@@ -75,9 +75,9 @@ def printStatus():
 
            
     # %% print infos
-    print('\n   ' + BOLD +UNDERLINE + "{:>3}|{:>8}|{:>10}|{:>9}|{:>6}|{:>9}|{:>15}|{:>15}".format('Index', 'Name',  'State',  'flags', 'Carrier', 'MTU', 'IP', 'Mask') + ENDC)
+    print('\n   ' + BOLD +UNDERLINE + "{:>3}|{:>8}|{:>10}|{:>10}|{:>9}|{:>15}|{:>15}".format('Index', 'Name',  'State',   'Carrier', 'MTU', 'IP', 'Mask') + ENDC)
     for idx, iIFace in enumerate(ifaceDetailList):
-        print("{:>6} {:>10} {:>10}    {:<6} {:>6} {:>10} {:>15} {:>15}".format(idx, iIFace.name, iIFace.state, iIFace.flags, iIFace.carrier,  iIFace.mtu, iIFace.ip, iIFace.mask))       
+        print("{:>6} {:>10} {:>10}    {:>6} {:>10} {:>15} {:>15}".format(idx, iIFace.name, iIFace.state,  iIFace.carrier,  iIFace.mtu, iIFace.ip, iIFace.mask))       
 
 
 def ipScan(index):
