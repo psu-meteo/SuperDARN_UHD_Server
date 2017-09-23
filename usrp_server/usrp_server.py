@@ -74,13 +74,15 @@ class integrationTimeManager():
       now = datetime.datetime.now()
       if self.last_start != None:
          nSeconds = (now - self.last_start).total_seconds()
-         self.RHM.logger.debug("Time with overhead for last integration period: {} s".format(nSeconds))
+         self.RHM.logger.info("Time with overhead for last integration period: {} s".format(nSeconds))
       self.last_start = now
 
    def estimate_calc_time(self):
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
+         overhead_time = 0.5
+      if int_time == 2.9:
          overhead_time = 0.5
       elif int_time == 1:
          overhead_time = 0.2
@@ -1219,7 +1221,7 @@ class RadarHardwareManager:
                 downsamplingRates[0], downsamplingRates[1], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, downsamplingRates[0]*2, downsamplingRates[1]*2))
         
 
-        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
+        self.logger.info("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
 
 
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
