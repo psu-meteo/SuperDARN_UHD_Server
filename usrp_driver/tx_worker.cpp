@@ -15,7 +15,7 @@
 
 #define TEST_TXWORKER 0
 #define SAVE_TX_SAMPLES_DEBUG 0
-#define DEBUG 1
+#define DEBUG 0
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); }  while( false )
@@ -33,6 +33,7 @@ void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
     std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
     size_t padded_num_samples_per_pulse,
+//    size_t pulses_per_sequence,
     uhd::time_spec_t burst_start_time,
     std::vector<size_t> pulse_sample_idx_offsets 
 ){
@@ -85,7 +86,7 @@ void usrp_tx_worker(
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {
             if(samples_to_pulse * -1 < samples_per_pulse) {
-                sample_idx = spb - samples_to_pulse; //+ pulse_idx * padded_num_samples_per_pulse;
+                sample_idx = spb - samples_to_pulse + (pulse_idx) * padded_num_samples_per_pulse;
             } else {
                 // if we've passed the tail of the pulse, then restart and look for the next one..
                 // DEBUG_PRINT("pulse idx: %d complete\n", pulse_idx);
