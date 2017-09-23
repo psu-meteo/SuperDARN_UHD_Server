@@ -612,7 +612,9 @@ def restart_all():
    waitFor(nSecs_restart_pause)
    start_cuda_driver()
    start_usrp_driver()
-   waitFor(10)
+   myPrint("done starting usrps.. waiting....")
+   waitFor(25)
+   myPrint("done  waiting.... starting server")
    start_usrp_server()
 
 
