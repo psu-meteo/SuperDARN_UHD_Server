@@ -13,11 +13,21 @@ from pylab import *
 
 
 with open(filename, 'r') as raw_file:
+    subplot(211)
     samples = np.fromfile(raw_file, dtype=np.int16)
     samples = samples[0::2] + 1j * samples[1::2]
 
 #    plot_freq(samples, rfrate)
     plot(samples)
-    show()
 
+    subplot(212)
+    nSamplesPP = 8192
+    nPulses = int(len(samples) /nSamplesPP)
+    print(nPulses)
+    for iPulse in range(nPulses):
+        plot(samples[iPulse*nSamplesPP:(iPulse+1)*nSamplesPP ])
+
+    show()
+    import pdb
+    pdb.set_trace()
 

@@ -17,9 +17,9 @@ import matplotlib.pyplot as plt
 
 
 # %% used hardcoded file and path
-raw_path = "/data/image_samples/bb_data/"
-fileName = '201709231930.1.iraw.d'
-file_with_path = os.path.join(raw_path, fileName)
+#raw_path = "/data/image_samples/bb_data/"
+#fileName = '201709231930.1.iraw.d'
+#file_with_path = os.path.join(raw_path, fileName)
 
 # %%
 
