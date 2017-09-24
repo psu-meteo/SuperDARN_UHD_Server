@@ -605,7 +605,7 @@ def start_watchdog():
 def restart_all():
    myPrint("Restarting all processes")
    stop_usrp_server()
-   waitFor(2)
+   waitFor(10)
    stop_usrp_driver()
    stop_cuda_driver()
    myPrint("waiting for {} sec".format(nSecs_restart_pause))
@@ -719,9 +719,9 @@ def main():
          if nArguments == 1 or inputArg[1].lower == "all":
             myPrint("Stopping all...")
             stop_usrp_server()
-            time.sleep(1)
+            time.sleep(5)
             stop_cuda_driver()
-            time.sleep(2)
+            time.sleep(5)
             stop_usrp_driver()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             stop_usrp_driver()
