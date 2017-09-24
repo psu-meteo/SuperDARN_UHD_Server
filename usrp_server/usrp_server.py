@@ -35,10 +35,12 @@ from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
+import utils
+
 
 RMSG_PORT = 45000
 MAX_CHANNELS = 4
-CLRFREQ_RES_HZ = 1000
+CLRFREQ_RES_HZ = 2000
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
 USRP_SOCK_TIMEOUT = 7 # sec
 
@@ -74,13 +76,15 @@ class integrationTimeManager():
       now = datetime.datetime.now()
       if self.last_start != None:
          nSeconds = (now - self.last_start).total_seconds()
-         self.RHM.logger.debug("Time with overhead for last integration period: {} s".format(nSeconds))
+         self.RHM.logger.info("Time with overhead for last integration period: {} s".format(nSeconds))
       self.last_start = now
 
    def estimate_calc_time(self):
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
+         overhead_time = 0.5
+      if int_time == 2.9:
          overhead_time = 0.5
       elif int_time == 1:
          overhead_time = 0.2
@@ -1219,7 +1223,7 @@ class RadarHardwareManager:
                 downsamplingRates[0], downsamplingRates[1], nSamples_per_sequence_if, nSamples_per_sequence, nSequences_per_period, downsamplingRates[0]*2, downsamplingRates[1]*2))
         
 
-        self.logger.debug("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
+        self.logger.info("Effective integration time: {:0.3f}s = {} sequences ({}s) swing {}".format(num_requested_rx_samples /self.usrp_rf_tx_rate, nSequences_per_period,  self.commonChannelParameter['integration_period_duration'], self.swingManager.activeSwing))
 
 
         self.nsamples_per_sequence     = pulse_sequence_period * self.usrp_rf_tx_rate
@@ -1451,41 +1455,38 @@ class RadarHardwareManager:
                      channel.resultDict_list[-1]['back_beamformed'] = beamformed_back_samples[iChannel]
                      channel.update_ctrlprm_class("current")
                      channel.resultDict_list[-1]['ctrlprm_dataqueue'] = copy.deepcopy(channel.ctrlprm_struct.dataqueue)
-                     channel.oversample_export_data['beam']  = channel.ctrlprm_struct.payload['rbeam'] 
-                     channel.oversample_export_data['rfreq'] = channel.ctrlprm_struct.payload['rfreq']
+
+                     
+                     channel.raw_export_data['beam']  = channel.ctrlprm_struct.payload['rbeam'] 
+                     channel.raw_export_data['rfreq'] = channel.ctrlprm_struct.payload['rfreq']
 
                      for item in channel.ctrlprm_struct.dataqueue:
                         if item.name == 'rbeam':
                            channel.logger.debug("saving dataqueue to resultDict (rbeam={})".format(item.data))
-               self.logger.debug('end rx beamforming')
      
                # save BB samples to file
-               if os.path.isfile("./save.raw.bb.not.working"):
-                   for iChannel, channel in enumerate(self.channels):
-                       channel.bb_export = dict()
-                       channel.bb_export["main_samples"] = main_samples[iChannel] * self.scaling_factor_rx_bb
+                     if os.path.isfile("./save.raw.bb"):
+                           self.logger.info("Saving raw bb data to disk.")
+             #            for iChannel, channel in enumerate(self.channels):
+                           channel.bb_export = dict()
+                           channel.bb_export["main_samples"] = main_samples[iChannel] * self.scaling_factor_rx_bb
+                           channel.bb_export["back_samples"] = back_samples[iChannel] * self.scaling_factor_rx_bb
+                           channel.bb_export["nMainAntennas"] = nMainAntennas 
+                           channel.bb_export["nBackAntennas"] = nBackAntennas 
+                           channel.bb_export['number_of_samples'] = channel.resultDict_list[-1]['number_of_samples']  
+                           channel.bb_export['number_of_sequences'] = channel.resultDict_list[-1]['npulses_per_sequence']
+                           channel.bb_export["antenna_list"] = self.antenna_idx_list_main + self.antenna_idx_list_back
+                           channel.bb_export['nSamples'] = nSamples_bb
 
-                       real_mat = np.real(main_samples[iChannel] * self.scaling_factor_rx_bb)
-                       imag_mat = np.imag(main_samples[iChannel] * self.scaling_factor_rx_bb)
-                       abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
-                       maxInt16value = np.iinfo(np.int16).max # +32767
-                       minInt16value = np.iinfo(np.int16).min # -32768
-                     #  RHM.logger.info("Abs max_value is {} (int16_max= {}, max_value / int16_max = {} ) ".format(abs_max_value, maxInt16value, abs_max_value / maxInt16value ))                
+                           channel.bb_export['nSequences_per_period'] = channel.resultDict_list[-1]['nSequences_per_period']
+                           channel.bb_export['sequence_start_time_secs'] = channel.resultDict_list[-1]['sequence_start_time_secs']
+                           channel.bb_export['sequence_start_time_usecs'] = channel.resultDict_list[-1]['sequence_start_time_usecs']
+                           channel.bb_export['nbb_rx_samples_per_sequence']  = channel.resultDict_list[-1]['nbb_rx_samples_per_sequence']
 
-                       # check for clipping
-                       if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
-                          self.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
-        
-                          OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                          real_mat = np.clip(real_mat, minInt16value, maxInt16value)
-                          imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
 
-                       complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.uint16(imag_mat) 
-                       beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
 
-                       channel.bb_export["nAntennas"] = nAntennas
-                       channel.bb_export['nSamples'] = nSamples_bb
-                       channel.write_bb_data()
+                           channel.write_bb_data()
+               self.logger.debug('end rx beamforming')
 
                # save BB samples if usrp live view is active
                if os.path.isfile("./bufferLiveData.flag"):
@@ -1496,20 +1497,20 @@ class RadarHardwareManager:
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
 
-               # save BB samples
-               if os.path.isfile("./save.raw.bb"):
-                  self.logger.info("Buffering raw data to disk.")
-                  chResExportList = [ copy.deepcopy(ch.resultDict_list[-1]) for ch in self.channels if ch.processing_state == CS_PROCESSING]
-                  for chEx in chResExportList:
-                      chEx['ctrlprm_dataqueue'] = []
-                  savePath = "/data/image_samples/bb_data/"
-                  if not os.path.isdir(savePath):
-                      os.mkdir(savePath)
-                  time_now = datetime.datetime.now()             
-                  fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second,  channel.rnum, 96+channel.cnum)
-                  
-                  with open(savePath + fileName, 'wb') as f:
-                     pickle.dump([main_samples, back_samples,chResExportList, self.antenna_idx_list_main, self.antenna_idx_list_back],f,  pickle.HIGHEST_PROTOCOL)
+               # save BB samples as pickle (no meta data)
+            ##   if os.path.isfile("./save.raw.bb"):
+            ##      self.logger.info("Buffering raw data to disk.")
+            ##      chResExportList = [ copy.deepcopy(ch.resultDict_list[-1]) for ch in self.channels if ch.processing_state == CS_PROCESSING]
+            ##      for chEx in chResExportList:
+            ##          chEx['ctrlprm_dataqueue'] = []
+            ##      savePath = "/data/image_samples/bb_data/"
+            ##      if not os.path.isdir(savePath):
+            ##          os.mkdir(savePath)
+            ##      time_now = datetime.datetime.now()             
+            ##      fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second,  channel.rnum, 96+channel.cnum)
+            ##      
+            ##      with open(savePath + fileName, 'wb') as f:
+            ##         pickle.dump([main_samples, back_samples,chResExportList, self.antenna_idx_list_main, self.antenna_idx_list_back],f,  pickle.HIGHEST_PROTOCOL)
 
                # save IF raw data
                for channel in self.channels:
@@ -2033,24 +2034,24 @@ class RadarChannelHandler:
         intsc = recv_dtype(self.conn, np.int32)
         intus = recv_dtype(self.conn, np.int32)
 
-        self.oversample_export_data = dict()
-        self.oversample_export_data['nrang'] = recv_dtype(self.conn, np.int32)
-        self.oversample_export_data['mpinc'] = recv_dtype(self.conn, np.int32)
-        self.oversample_export_data['smsep'] = recv_dtype(self.conn, np.int32)
-        self.oversample_export_data['lagfr'] = recv_dtype(self.conn, np.int32)
-        self.oversample_export_data['mppul'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data = dict()
+        self.raw_export_data['nrang'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data['mpinc'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data['smsep'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data['lagfr'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data['mppul'] = recv_dtype(self.conn, np.int32)
         pat = []
-        for iBaudCode in range(self.oversample_export_data['mppul']):
+        for iBaudCode in range(self.raw_export_data['mppul']):
            pat.append(recv_dtype(self.conn, np.int32))
-        self.oversample_export_data['ppat'] = pat
+        self.raw_export_data['ppat'] = pat
 
-        self.oversample_export_data['nbaud'] = recv_dtype(self.conn, np.int32)
+        self.raw_export_data['nbaud'] = recv_dtype(self.conn, np.int32)
         pcode = []
-        for iBaudCode in range(self.oversample_export_data['nbaud']):
+        for iBaudCode in range(self.raw_export_data['nbaud']):
            pcode.append(recv_dtype(self.conn, np.int32))
-        self.oversample_export_data['pcode'] = pcode
+        self.raw_export_data['pcode'] = pcode
 
-        print(self.oversample_export_data)
+#        print(self.raw_export_data)
       
         self.logger.debug('RegisterSeqHandler, received intsc: {}, intus: {}'.format(intsc, intus))
         self.integration_period_duration = intsc + (intus / 1e6)
@@ -2170,9 +2171,9 @@ class RadarChannelHandler:
           transmit_dtype(cudasock, -1, np.int32) # to end transfer process
                    
           cmd.client_return()
-          channel.oversample_export_data['data'] = if_samples * RHM.scaling_factor_rx_if
-          channel.oversample_export_data['nAntennas'] = nAntennas
-          channel.oversample_export_data['nSamples'] = nSamples_if
+          channel.raw_export_data['data'] = if_samples * RHM.scaling_factor_rx_if
+          channel.raw_export_data['nAntennas'] = nAntennas
+          channel.raw_export_data['nSamples'] = nSamples_if
           channel.logger.debug('end CUDA_GET_IF_DATA')
 
 
@@ -2180,7 +2181,6 @@ class RadarChannelHandler:
         channel.logger.debug('start saving BB samples')
         time_now = datetime.datetime.now()
         version = 2 
-        RECV_SAMPLE_HEADER = 0 # TODO is this an offset???
         hardwareManager = channel.parent_RadarHardwareManager
         
         savePath = "/data/image_samples/bb_data"
@@ -2190,6 +2190,7 @@ class RadarChannelHandler:
         fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute, channel.rnum, 96+channel.cnum)
 
         exportList = []
+        exportList = []
         exportList.append( version )
         exportList.append( time_now.year )
         exportList.append( time_now.month )
@@ -2198,23 +2199,38 @@ class RadarChannelHandler:
         exportList.append( time_now.minute )
         exportList.append( time_now.second )
         exportList.append( time_now.microsecond *1000 )
-        exportList.append( channel.oversample_export_data['nrang'])
-        exportList.append( channel.oversample_export_data['mpinc'])
-        exportList.append( channel.oversample_export_data['smsep'])
-        exportList.append( channel.oversample_export_data['lagfr'])
+        exportList.append( channel.raw_export_data['nrang'])
+        exportList.append( channel.raw_export_data['mpinc'])
+        exportList.append( channel.raw_export_data['smsep'])
+        exportList.append( channel.raw_export_data['lagfr'])
         exportList.append( hardwareManager.commonChannelParameter['pulseLength'])  # in micro sec
-        exportList.append( channel.oversample_export_data['beam'])
-        exportList.append( channel.oversample_export_data['rfreq']) # in kHz
-        exportList.append( channel.oversample_export_data['mppul'])
-        exportList +=  channel.oversample_export_data['ppat']
-        exportList.append( channel.oversample_export_data['nbaud'])
-        exportList +=  channel.oversample_export_data['pcode']
-        exportList.append( RECV_SAMPLE_HEADER)
-        exportList.append(channel.bb_export['nSamples']) 
-        exportList.append(channel.bb_export['nAntennas'])
-        print(exportList)
-        for iAntenna in range(channel.bb_export['nAntennas']):
-            exportList += channel.bb_export["main_samples"][iAntenna].tolist()
+        exportList.append( channel.raw_export_data['beam'])
+        exportList.append( channel.raw_export_data['rfreq']) # in kHz
+        exportList.append( channel.raw_export_data['mppul'])
+        exportList +=  channel.raw_export_data['ppat']
+        exportList.append( channel.raw_export_data['nbaud'])
+        exportList +=  channel.raw_export_data['pcode']
+#       exportList.append(channel.bb_export['nSamples']) 
+        exportList.append(channel.bb_export['number_of_samples']) 
+        exportList.append(channel.bb_export['nSequences_per_period']) 
+        exportList.append(channel.bb_export['nMainAntennas'] + channel.bb_export['nBackAntennas'])
+        exportList += channel.bb_export["antenna_list"]
+
+        # convert float to complex packed int16
+        int_main_data = utils.complex_float_to_int16(channel.bb_export["main_samples"], "BB raw export main samples") 
+        int_back_data = utils.complex_float_to_int16(channel.bb_export["back_samples"], "BB raw export back samples") 
+
+        for iSequence in range(channel.bb_export['nSequences_per_period']):
+            exportList.append(channel.bb_export['sequence_start_time_secs'][iSequence])
+            exportList.append(channel.bb_export['sequence_start_time_usecs'][iSequence])
+
+            pulse_sequence_start_index = iSequence * channel.bb_export['nbb_rx_samples_per_sequence']
+            pulse_sequence_end_index = pulse_sequence_start_index + channel.bb_export['number_of_samples']
+            for iAntenna in range(channel.bb_export['nMainAntennas']):
+                   exportList += int_main_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index]
+            for iAntenna in range(channel.bb_export['nBackAntennas']):
+                   exportList += int_back_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index]
+
 
         rawFile = open(os.path.join(savePath, fileName), "ba")
         rawFile.write(np.array(exportList, dtype=np.int32))
@@ -2244,23 +2260,23 @@ class RadarChannelHandler:
         exportList.append( time_now.minute )
         exportList.append( time_now.second )
         exportList.append( time_now.microsecond *1000 )
-        exportList.append( channel.oversample_export_data['nrang'])
-        exportList.append( channel.oversample_export_data['mpinc'])
-        exportList.append( channel.oversample_export_data['smsep'])
-        exportList.append( channel.oversample_export_data['lagfr'])
+        exportList.append( channel.raw_export_data['nrang'])
+        exportList.append( channel.raw_export_data['mpinc'])
+        exportList.append( channel.raw_export_data['smsep'])
+        exportList.append( channel.raw_export_data['lagfr'])
         exportList.append( hardwareManager.commonChannelParameter['pulseLength'])  # in micro sec
-        exportList.append( channel.oversample_export_data['beam'])
-        exportList.append( channel.oversample_export_data['rfreq']) # in kHz
-        exportList.append( channel.oversample_export_data['mppul'])
-        exportList +=  channel.oversample_export_data['ppat']
-        exportList.append( channel.oversample_export_data['nbaud'])
-        exportList +=  channel.oversample_export_data['pcode']
+        exportList.append( channel.raw_export_data['beam'])
+        exportList.append( channel.raw_export_data['rfreq']) # in kHz
+        exportList.append( channel.raw_export_data['mppul'])
+        exportList +=  channel.raw_export_data['ppat']
+        exportList.append( channel.raw_export_data['nbaud'])
+        exportList +=  channel.raw_export_data['pcode']
         exportList.append( RECV_SAMPLE_HEADER)
-        exportList.append(channel.oversample_export_data['nSamples']) 
-        exportList.append(channel.oversample_export_data['nAntennas'])
+        exportList.append(channel.raw_export_data['nSamples']) 
+        exportList.append(channel.raw_export_data['nAntennas'])
         print(exportList)
-        for iAntenna in range(channel.oversample_export_data['nAntennas']):
-            exportList += channel.oversample_export_data['data'][iAntenna].tolist()
+        for iAntenna in range(channel.raw_export_data['nAntennas']):
+            exportList += channel.raw_export_data['data'][iAntenna].tolist()
 
         rawFile = open(os.path.join(savePath, fileName), "ba")
         rawFile.write(np.array(exportList, dtype=np.int32))

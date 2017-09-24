@@ -119,7 +119,7 @@
 #define RXFE_MASK      (RXFE_ATT_MASK + RXFE_AMP_MASK)
 
 
-#define DEBUG 1
+#define DEBUG 0
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else

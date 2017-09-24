@@ -27,7 +27,7 @@
 
 #define RX_STREAM_EXEC_TIME .005
 
-#define DEBUG 1
+#define DEBUG 0
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else

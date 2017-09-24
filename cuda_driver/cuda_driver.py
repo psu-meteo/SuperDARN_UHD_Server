@@ -413,6 +413,7 @@ class cuda_process_handler(cudamsg_handler):
 
 #        acquire_sem(rx_sem_list[swing])
         self.gpu.rx_init(swing, cmd.payload['nSamples'])
+        #self.gpu._plot_filter()
 
         self.gpu.rxsamples_shm_to_gpu(rx_shm_list[swing])
         self.gpu._set_rx_phaseIncrement(swing) 
@@ -809,7 +810,6 @@ class ProcessingGPU(object):
    ##     # dsp_filters.rolloff_filter_s1()
    ##     self.rx_filtertap_ifbb = IF_BB_GAIN * dsp_filters.raisedCosine_filter(self.ntaps_ifbb, self.nChannels)
     
-        # self._plot_filter()
         
  
 

@@ -8,10 +8,41 @@ sys.path.insert(0, basePath )
 import srr
 import subprocess
 
+
+# input parsing
+input_var = sys.argv
+print(input_var)
+
+
+# default
 print_status = True
 restart_all  = False
-restart_driver  = True
+restart_driver  = False
 inf_loop = True
+
+
+if "restart_all" in input_var:
+    restart_all = True
+
+if "restart_usrps" in input_var:
+    restart_driver = True
+
+print("starting: print: {}, restart_all: {}, restart_driver: {}".format(print_status, restart_all, restart_driver))
+
+
+
+write_log = restart_all or restart_driver
+if write_log:
+    time_now = datetime.datetime.now()
+    fileName = '../log/watchdog__{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.log'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second)
+
+
+
+
+#print_status = True
+#restart_all  = True
+#restart_driver  = False
+#inf_loop = True
 
 
 
@@ -142,13 +173,15 @@ while True:
       print("\n\n")
 
 
-      print("  usrp_driver:")
-      usrp_driver_watcher.check_processes()
-      stat_lines = usrp_driver_watcher.status_str()
-      for line in stat_lines:
-         print(line)
-      print(" ")
-      usrp_driver_watcher.restart_usrps()
+   # check USRPSs
+   print("  usrp_driver:")
+   usrp_driver_watcher.check_processes()
+   stat_lines = usrp_driver_watcher.status_str()
+   for line in stat_lines:
+      print(line)
+   print(" ")
+
+
 
 #   print("file: {}, now: {}, age: {} s".format(m_time, now, now-m_time))
    if file_age_limit > file_age:
@@ -157,12 +190,13 @@ while True:
        print("Age of status file is {} seconds. Restarting all processes (with srr.py) ...")
        if restart_all:
           srr.restart_all()
-          time.sleep(30) # waiting for control loop to start
+          time.sleep(38) # waiting for control loop to start
+          usrp_driver_watcher.last_restart = time.mktime(time.localtime())
        else:
           print("Restarting disabled...")
           time.sleep(check_period)
 
-
+   usrp_driver_watcher.restart_usrps()
 
 
 

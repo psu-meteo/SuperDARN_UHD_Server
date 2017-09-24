@@ -19,19 +19,14 @@ from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, 
 from radar_config_constants import *
 
 MIN_CLRFREQ_DELAY = .20 # TODO: lower this?
-MAX_CLRFREQ_AVERAGE = 5 
-MAX_CLRFREQ_BANDWIDTH = 512
-MAX_CLRFREQ_USABLE_BANDWIDTH = 300
 CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
 CLRFREQ_RES = 2e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 OBEY_RESTRICTED_FREQS = True 
 
-
 SAVE_CLEAR_FREQUENCY_SEARCH = False 
 CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
-
 
 
 DEBUG = 1
@@ -91,8 +86,8 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     if SAVE_CLEAR_FREQUENCY_SEARCH:
         import pickle
         import time
-        clr_time  time.time() 
-        pickle.dump({'time':clr_time, 'clrfreq':tfreq, 'noise':noise, 'freqs':spectrum_freqs, 'power':spectrum_power, 'fstart':fstart, 'fstop':fstop}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.' + str(clr_time) + '.pickle'))
+        clr_time = time.time()
+        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freqs':spectrum_freqs,  'power':spectrum_power, 'fstart':fstart, 'fstop':fstop}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
     return tfreq, noise
 
@@ -104,7 +99,7 @@ def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, re
 
     return spectrum_power
 
-def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 10e3):
+def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 30e3):
     dbPrint("enter find_clrfreq_from_spectrum")
     # apply filter to convolve spectrum with filter response
     # TODO: filter response is currently assumed to be boxcar..
