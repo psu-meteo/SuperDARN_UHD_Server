@@ -9,68 +9,46 @@ import srr
 import subprocess
 
 
-# input parsing
-input_var = sys.argv
-print(input_var)
 
 
-# default
-print_status = True
-restart_all  = False
-restart_driver  = False
-inf_loop = True
-
-
-if "restart_all" in input_var:
-    restart_all = True
-
-if "restart_usrps" in input_var:
-    restart_driver = True
-
-print("starting: print: {}, restart_all: {}, restart_driver: {}".format(print_status, restart_all, restart_driver))
-
-
-
-write_log = restart_all or restart_driver
-if write_log:
-    time_now = datetime.datetime.now()
-    fileName = '../log/watchdog__{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.log'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second)
-
-
-
-
-#print_status = True
-#restart_all  = True
-#restart_driver  = False
-#inf_loop = True
-
-
-
-server_status_file = os.path.join(basePath, 'log', "usrp_server_status.txt")
+wait_after_restart_all = 40 # TODO check if if time is good
+wait_after_restart_driver = 30 # TODO check if if time is good
 check_period = 1 # sec
-file_age_limit = 30 + 10
 
-usrp_restart_period = 30
+# just for debug
+restart_driver  = False
+write_log = True
+
+# usrp server file
+server_status_file = os.path.join(basePath, 'log', "usrp_server_status.txt")
+file_age_limit = 30 + 10 # sec 
+usrp_restart_period = 30 # sec
 
 
-# define font color and style
-HEADER = '\033[95m'
-OKBLUE = '\033[94m'
-OKGREEN = '\033[92m'
-WARNING = '\033[93m'
-FAIL = '\033[91m'
-ENDC = '\033[0m'
-BOLD = '\033[1m'
-UNDERLINE = '\033[4m'
+watch_usrp_server = "server" in sys.argv
 
-def ok(string):
-   return OKGREEN + string + ENDC
+# LOG FILE 
+if write_log:
+    log_file_path = os.path.join(basePath, "log/watchdog")
+    time_now = datetime.datetime.now()
+    fileName = 'watchdog__{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}.log'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second)
+    print(log_file_path)
+    if not os.path.isdir(log_file_path):
+        os.mkdir(log_file_path)
+        print("creating path: {}".format(log_file_path))
 
-def warn(string):
-   return WARNING + string + ENDC
+    log_handle = open(os.path.join(log_file_path, fileName), "wt+")
 
-def fail(string):
-   return FAIL + string + ENDC
+def log(msg):
+    print(msg)
+    if write_log:
+       time_now = datetime.datetime.now()
+       log_str = '{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}   {}\n'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second, msg)
+       log_handle.write(log_str)
+
+
+log("Starting up watchdog: watch_usrp_server: {}, restart_driver: {}".format( watch_usrp_server, restart_driver))
+
 
 class usrpDriverWatcher():
    def __init__(self, fileName, usrp_restart_period):
@@ -81,13 +59,14 @@ class usrpDriverWatcher():
       self.usrp_list = []
       known_hosts = []
       for usrpName in usrp_name_list:
-         if self.config[usrpName]['usrp_hostname'] in known_hosts:
-            usrp = self.usrp_list[known_hosts.index(self.config[usrpName]['usrp_hostname'])]
-            usrp.ant.append(self.config[usrpName]['array_idx'])
-            usrp.side.append(self.config[usrpName]['side'])
-         else:
-            self.usrp_list.append(usrpClass(self.config[usrpName]))
-            known_hosts.append(self.config[usrpName]['usrp_hostname'])
+         if self.config[usrpName]['driver_hostname'] == "localhost":
+              if self.config[usrpName]['usrp_hostname'] in known_hosts:
+                 usrp = self.usrp_list[known_hosts.index(self.config[usrpName]['usrp_hostname'])]
+                 usrp.ant.append(self.config[usrpName]['array_idx'])
+                 usrp.side.append(self.config[usrpName]['side'])
+              else:
+                 self.usrp_list.append(usrpClass(self.config[usrpName]))
+                 known_hosts.append(self.config[usrpName]['usrp_hostname'])
   
    def check_processes(self):
       usrp_processes = srr.get_usrp_driver_processes()
@@ -107,32 +86,15 @@ class usrpDriverWatcher():
                self.last_restart = now
                start_arg = usrp.get_start_arguments()
                if restart_driver:
-                  print("Starting {}".format(" ".join(start_arg) ))
+                  log("Starting {}".format(" ".join(start_arg) ))
                   subprocess.Popen(start_arg)
                else:
-                  print("Starting of driver disabled ({})".format(" ".join(start_arg) ))
-
-      
-
-
-   def status_str(self):
-      status = []
-      status.append("  usrp driver processes")
-      for usrp in self.usrp_list:
-         if usrp.pid == None:
-            tmp_str = fail("NA")
-         elif usrp.pid > 0:
-            tmp_str = ok("PID: " + str(usrp.pid))
-         else:
-            tmp_str = warn("restarting... ({})".format(-usrp.pid))
-            usrp.pid += check_period
-         status.append("   usrp: {} |  antennas:{:>8} |  {}".format(usrp.host, ", ".join(usrp.ant), tmp_str))
-      return status
-
+                  log("Starting of driver disabled ({})".format(" ".join(start_arg) ))
       
    
 
 class usrpClass():
+   """ For each USRP one"""
    def __init__(self, configDict):
       self.host = configDict['usrp_hostname']
       self.computer = configDict['driver_hostname']
@@ -149,54 +111,60 @@ class usrpClass():
          elif side.lower() == 'b':
              start_arg += [ "--antennaB", self.ant[iSide]] 
          else:
-            print("unknown usrp side: {}".format(side))
+            log("unknown usrp side: {}".format(side))
       return start_arg
-      
+
+
+
+
 fileName = os.path.join(basePath, 'usrp_config.ini')
 usrp_driver_watcher = usrpDriverWatcher(fileName, usrp_restart_period)
 
+
+restart_server = False
+
 while True:
-   os.system('clear')
-   m_time = os.path.getmtime(server_status_file)
-   now = time.mktime(time.localtime())
-   file_age = now - m_time
-   if print_status:
-      print(" Age of status file: {:0.0f} sec\n".format(file_age))
-      print("  usrp_server status:")
 
-      with open(server_status_file, "r") as f:
-         status = f.readlines()
-      for line in status:
-         if line[-1] == "\n":
-            line = line[:-1]
-         print("    " + line)
-      print("\n\n")
+   if watch_usrp_server:
+       # check age of server status file 
+       m_time = os.path.getmtime(server_status_file)
+       now = time.mktime(time.localtime())
+       file_age = now - m_time
+       restart_server = file_age_limit < file_age 
 
 
-   # check USRPSs
-   print("  usrp_driver:")
-   usrp_driver_watcher.check_processes()
-   stat_lines = usrp_driver_watcher.status_str()
-   for line in stat_lines:
-      print(line)
-   print(" ")
-
-
-
-#   print("file: {}, now: {}, age: {} s".format(m_time, now, now-m_time))
-   if file_age_limit > file_age:
-       time.sleep(check_period)
+   if restart_server:
+       log("Age of usrp_server status file is {} seconds. Restarting all processes (with srr.py) ...".format(file_age))
+       srr.restart_all()
+       time.sleep(wait_after_restart_all)
+       usrp_driver_watcher.last_restart = time.mktime(time.localtime())
+       
    else:
-       print("Age of status file is {} seconds. Restarting all processes (with srr.py) ...")
-       if restart_all:
-          srr.restart_all()
-          time.sleep(38) # waiting for control loop to start
-          usrp_driver_watcher.last_restart = time.mktime(time.localtime())
-       else:
-          print("Restarting disabled...")
-          time.sleep(check_period)
+       # check if cuda driver is running
+       cuda_processes = srr.get_cuda_driver_processes()
+       print(cuda_processes)
+       if len(cuda_processes) == 0:
+           if watch_usrp_server:
+               log("No cuda driver found. Restarting all driver and server...")
+               srr.restart_all()
+               time.sleep(wait_after_restart_all)
+           else:
+               log("No cuda driver found. Restarting all driver...")
+               srr.restart_driver()
+               time.sleep(wait_after_restart_driver)
+           usrp_driver_watcher.last_restart = time.mktime(time.localtime())
 
-   usrp_driver_watcher.restart_usrps()
+       else:
+           # check USRPSs
+           usrp_driver_watcher.check_processes()          
+           usrp_driver_watcher.restart_usrps()
+
+
+
+
+
+   time.sleep(check_period)
+
 
 
 

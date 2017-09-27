@@ -205,8 +205,26 @@ def get_processes():
    return processList
 
 def print_status():
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver"]
     processList = get_processes()
+    srrProcesses = get_known_processes(processList)
+   
+    myPrint("Local: Found {} processes:".format(len(srrProcesses)))
+    for line in srrProcesses:
+       myPrint("  {}".format(line))
+
+    remote_pc_list = get_remote_driver_host()
+    for remote_pc in remote_pc_list:
+       myPrint(" ")
+       respond = remote_command_echo("radar", remote_pc, "ps -aux", verbose=False)
+       processList = respond.decode("UTF-8").split("\n")
+       srrProcesses = get_known_processes(processList)
+       myPrint("Remote {}: Found {} processes:".format(remote_pc, len(srrProcesses)))
+       for line in srrProcesses:
+          myPrint("  {}".format(line))
+
+
+def get_known_processes(processList):
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "./watchdog"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -216,10 +234,8 @@ def print_status():
                if commandString.startswith(knowProcess):
                   srrProcesses.append( " " + commandString + "  (PID " + wordList[1] + ")")
                   break
-   
-    myPrint("Found {} processes:".format(len(srrProcesses)))
-    for line in srrProcesses:
-       myPrint("  {}".format(line))
+    return srrProcesses
+
 
 def pid_exists(pid):
     """Check whether pid exists in the current process table.  UNIX only. 
@@ -461,6 +477,20 @@ def read_config(fileName):
    config.read(fileName)
    return config
 
+def get_remote_driver_host():
+    fileName = os.path.join(basePath, 'usrp_config.ini')
+    if not os.path.isfile(fileName):
+       myPrint("  ERROR: usrp_config.ini not found! Run srr init or symlink correct init file by hand.")
+       return -1
+    usrp_config = read_config(fileName)
+    usrpNameList = usrp_config.sections()
+    all_driver_hosts = []
+    for usrpName in usrpNameList:
+       curr_host = usrp_config[usrpName]['driver_hostname']
+       if curr_host not in all_driver_hosts and curr_host != "localhost":
+          all_driver_hosts.append(curr_host)
+    return all_driver_hosts
+
 def start_usrps_from_config(usrp_sleep = False):
     myPrint("Starting usrp_driver from config:")
     fileName = os.path.join(basePath, 'usrp_config.ini')
@@ -604,19 +634,42 @@ def start_watchdog():
 ###############
 def restart_all():
    myPrint("Restarting all processes")
-   stop_usrp_server()
-   waitFor(10)
-   stop_usrp_driver()
-   stop_cuda_driver()
-   myPrint("waiting for {} sec".format(nSecs_restart_pause))
-   waitFor(nSecs_restart_pause)
-   start_cuda_driver()
-   start_usrp_driver()
+   restart_driver()
    myPrint("done starting usrps.. waiting....")
    waitFor(25)
    myPrint("done  waiting.... starting server")
    start_usrp_server()
 
+def restart_driver():
+    stop_usrp_server() # this does not work....
+    waitFor(10)
+    stop_usrp_driver()
+    stop_cuda_driver()
+    waitFor(nSecs_restart_pause)
+    start_cuda_driver()
+    start_usrp_driver()
+
+
+# runs a command over ssh, returns response
+# this version is a bit more robust.. uses echo to pipe in commands
+def remote_command_echo(user, radar, command, verbose = True, port = 22):
+    commandecho = subprocess.Popen(['echo', command], stdout=subprocess.PIPE)
+
+    try:
+        signal.alarm(5)
+        failed = True
+        out = ''
+        cmdlist = ["ssh", '-T', user + '@' + radar, '-p', str(port)]
+        s = subprocess.Popen(cmdlist, stdin = commandecho.stdout, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        commandecho.stdout.close()
+        if verbose:
+            print(' '.join(cmdlist) + ' ' + command)
+        out, err = s.communicate()
+    except:
+        print('command ' + command + ' radar ' + radar + ' failed')
+
+    signal.alarm(0)
+    return out
 
 
 #########################
@@ -697,13 +750,7 @@ def main():
             start_cuda_driver()
    
          elif inputArg[1].lower() == "driver":
-            stop_usrp_server() # this does not work....
-            waitFor(2)
-            stop_usrp_driver()
-            stop_cuda_driver()
-            waitFor(nSecs_restart_pause)
-            start_cuda_driver()
-            start_usrp_driver()
+             restart_driver()
          elif inputArg[1].lower() in ["usrp_server", "server"]:
             stop_usrp_server()
             start_usrp_server()
