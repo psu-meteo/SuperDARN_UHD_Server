@@ -224,7 +224,7 @@ def print_status():
 
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "srr_watchdog.py"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -776,20 +776,25 @@ def main():
       elif firstArg == "stop":
          if nArguments == 1 or inputArg[1].lower == "all":
             myPrint("Stopping all...")
+            stop_watchdog()
             stop_usrp_server()
             time.sleep(5)
             stop_cuda_driver()
             time.sleep(5)
             stop_usrp_driver()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            stop_watchdog()
             stop_usrp_driver()
          elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            stop_watchdog()
             stop_cuda_driver()
          elif inputArg[1].lower() in ["usrp_server", "server"]:
+            stop_watchdog()
             stop_usrp_server()
          elif inputArg[1].lower() in ["rtserver"]:
             stop_rtserver()
          elif inputArg[1].lower() == "driver":
+            stop_watchdog()
             stop_usrp_driver()
             stop_cuda_driver()
          elif inputArg[1].lower() in ["errorlog", "errlog"]:

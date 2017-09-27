@@ -45,6 +45,7 @@ def log(msg):
        time_now = datetime.datetime.now()
        log_str = '{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}   {}\n'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second, msg)
        log_handle.write(log_str)
+       log_handle.flush()
 
 
 log("Starting up watchdog: watch_usrp_server: {}, restart_driver: {}".format( watch_usrp_server, restart_driver))
