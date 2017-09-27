@@ -99,7 +99,7 @@ def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, re
 
     return spectrum_power
 
-def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 30e3):
+def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 40e3):
     dbPrint("enter find_clrfreq_from_spectrum")
     # apply filter to convolve spectrum with filter response
     # TODO: filter response is currently assumed to be boxcar..
