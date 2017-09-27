@@ -16,7 +16,7 @@ wait_after_restart_driver = 30 # TODO check if if time is good
 check_period = 1 # sec
 
 # just for debug
-restart_driver  = False
+restart_driver  = True
 write_log = True
 
 # usrp server file

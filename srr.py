@@ -224,7 +224,7 @@ def print_status():
 
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "./watchdog"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "srr_watchdog.py"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -466,6 +466,17 @@ def stop_rawacf_write():
     else:
        myPrint("  No rawacfwrite processes found...")
        return 0
+    
+def stop_watchdog():
+    myPrint(" Stopping watchdog...")
+    serverProcesses = get_process_ids("srr_watchdog.py")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No watchdog processes found...")
+       return 0
+    
     
     
 
