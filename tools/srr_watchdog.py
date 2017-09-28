@@ -143,7 +143,6 @@ while True:
    else:
        # check if cuda driver is running
        cuda_processes = srr.get_cuda_driver_processes()
-       print(cuda_processes)
        if len(cuda_processes) == 0:
            if watch_usrp_server:
                log("No cuda driver found. Restarting all driver and server...")

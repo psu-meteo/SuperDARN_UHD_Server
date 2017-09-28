@@ -959,7 +959,7 @@ class ProcessingGPU(object):
        #     plt.figure()        
             cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
-            iAntenna = 2
+            iAntenna = 0
 
             start_time = 5e-3
             stop_time =  30e-3
@@ -969,18 +969,18 @@ class ProcessingGPU(object):
             # PLOT all three frequency bands
             if plot_freq:
                ax = plt.subplot(311)
-               mpt.plot_time(self.rx_rf_samples[iChannel][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_rf_samples[iAntenna][int(self.rx_rf_samplingRate*start_time/2)*2:int(self.rx_rf_samplingRate*stop_time/2)*2*2],  self.rx_rf_samplingRate, iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('RF')
 
                ax = plt.subplot(312)
-               mpt.plot_freq(self.rx_if_samples[iChannel][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
+               mpt.plot_freq(self.rx_if_samples[iAntenna][0][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
          ##      mpt.plot_freq(self.rx_if_samples[0][1][int(self.rx_rf_samplingRate*start_time / self.rx_rf2if_downsamplingRate/2)*2:int(self.rx_rf_samplingRate*stop_time / self.rx_rf2if_downsamplingRate/2)*2*2], self.rx_rf_samplingRate / self.rx_rf2if_downsamplingRate, iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('IF')
 
                ax =plt.subplot(313)
-               mpt.plot_freq(self.rx_bb_samples[iChannel][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_freq(self.rx_bb_samples[iAntenna][0][int(self.rx_bb_samplingRate*start_time/2)*2:int(self.rx_bb_samplingRate*stop_time/2)*2*2], self.rx_bb_samplingRate , iqInterleaved=True, show=False)
           #     ax.set_ylim([50, 200])
                plt.ylabel('BB')
 
@@ -1002,7 +1002,7 @@ class ProcessingGPU(object):
                xlim = [0, 0.5]
                plt.figure()
                ax = plt.subplot(311) 
-              # mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
+               mpt.plot_time(self.rx_rf_samples[iAntenna], self.rx_rf_samplingRate , iqInterleaved=True, show=False)
                ax.set_xlim(xlim)
                plt.title("RF")
 
