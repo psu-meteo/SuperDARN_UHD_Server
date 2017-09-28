@@ -12,8 +12,7 @@ import os
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
-
-
+from matplotlib import gridspec
 
 
 # %% used hardcoded file and path
@@ -43,98 +42,184 @@ else:
         file_with_path = fileName
 
 
-#%% read all data as int32
-rawFile = open(file_with_path , "rb")
-data = np.fromfile(rawFile, dtype=np.uint32)
-rawFile.close()
-# %% sort data into dictionary
+# %% read file
 
-# data structure:
-# HEADER for complete integration period
-# for each sequence:
-#   start time of sequnece (sec and usec)
-#   for each antenna:
-#     samples of this antenna for this sequnece
-#
-# and then comes the next integration period staring with HEADER
-
-all_periods = []
-curr_idx = 0
-while (curr_idx < len(data)):
-    period_dict = {}
-    period_dict['version'] = data[curr_idx]
-    period_dict['year'] = data[curr_idx+1]
-    period_dict['month'] = data[curr_idx+2]
-    period_dict['day'] = data[curr_idx+3]
-    period_dict['hour'] = data[curr_idx+4]
-    period_dict['minute'] = data[curr_idx+5]
-    period_dict['second'] = data[curr_idx+6]
-    period_dict['microsecond'] = data[curr_idx+7]
-    period_dict['nrang'] = data[curr_idx+8]
-    period_dict['mpinc'] = data[curr_idx+9]
-    period_dict['smsep'] = data[curr_idx+10]
-    period_dict['lagfr'] = data[curr_idx+11]
-    period_dict['pulseLength'] = data[curr_idx+12]
-    period_dict['beam'] = data[curr_idx+13]
+def read_raw_file(file_with_path):
+    #  read all data as int32
+    rawFile = open(file_with_path , "rb")
+    data = np.fromfile(rawFile, dtype=np.uint32)
+    rawFile.close()
     
-    period_dict['rfreq'] = data[curr_idx+14]
-    period_dict['mppul'] = data[curr_idx+15]
-    period_dict['ppat'] = data[curr_idx+16:curr_idx+16+period_dict['mppul']]
-    curr_idx = curr_idx+16+period_dict['mppul']
     
-    period_dict['nbaud'] = data[curr_idx]
-    period_dict['pcode'] = data[curr_idx+1:curr_idx+period_dict['nbaud']+1]
-    curr_idx += period_dict['nbaud']+1
     
-    period_dict['nSamples'] = data[curr_idx]
-    period_dict['nSeq'] = data[curr_idx+1]
-    period_dict['nAntennas'] = data[curr_idx+2]
-    period_dict['antenna_list']= data[curr_idx+3:curr_idx+3+period_dict['nAntennas']]
-    curr_idx += period_dict['nAntennas']+3
+    # data structure:
+    # HEADER for complete integration period
+    # for each sequence:
+    #   start time of sequnece (sec and usec)
+    #   for each antenna:
+    #     samples of this antenna for this sequnece
+    #
+    # and then comes the next integration period staring with HEADER
     
-    seq_list = []
-    
-    for iSeq in range(period_dict["nSeq"]):
-        seq_dict = {}
-        seq_dict["sequence_no_in_period"] = iSeq
-        seq_dict["seq_start_time_sec"] = data[curr_idx]
-        seq_dict["seq_start_time_usec"] = data[curr_idx+1]
-        samples = []
-        for iAntenna in range(period_dict['nAntennas']):
-           packed_data = data[curr_idx+2+iAntenna*period_dict['nSamples']:curr_idx+2+period_dict['nSamples']*(iAntenna+1) ]
-           samples.append( np.int16(packed_data >> 16) + 1j* np.int16(packed_data % 2**16))
-    
-        seq_dict["samples"] = samples
-        seq_list.append(seq_dict)
-        curr_idx += 2+period_dict['nSamples']*period_dict['nAntennas']
-      
-    period_dict['seq_list'] = seq_list
-    all_periods.append(period_dict)
+    all_periods = []
+    curr_idx = 0
+    while (curr_idx < len(data)):
+        period_dict = {}
+        period_dict['version'] = data[curr_idx]
+        period_dict['year'] = data[curr_idx+1]
+        period_dict['month'] = data[curr_idx+2]
+        period_dict['day'] = data[curr_idx+3]
+        period_dict['hour'] = data[curr_idx+4]
+        period_dict['minute'] = data[curr_idx+5]
+        period_dict['second'] = data[curr_idx+6]
+        period_dict['microsecond'] = data[curr_idx+7]
+        period_dict['nrang'] = data[curr_idx+8]
+        period_dict['mpinc'] = data[curr_idx+9]
+        period_dict['smsep'] = data[curr_idx+10]
+        period_dict['lagfr'] = data[curr_idx+11]
+        period_dict['pulseLength'] = data[curr_idx+12]
+        period_dict['beam'] = data[curr_idx+13]
+       
+        period_dict['rfreq'] = data[curr_idx+14]
+        period_dict['mppul'] = data[curr_idx+15]
+        period_dict['ppat'] = data[curr_idx+16:curr_idx+16+period_dict['mppul']]
+        curr_idx = curr_idx+16+period_dict['mppul']
+       
+        period_dict['nbaud'] = data[curr_idx]
+        period_dict['pcode'] = data[curr_idx+1:curr_idx+period_dict['nbaud']+1]
+        curr_idx += period_dict['nbaud']+1
+       
+        period_dict['nSamples'] = data[curr_idx]
+        period_dict['nSeq'] = data[curr_idx+1]
+        period_dict['nAntennas'] = data[curr_idx+2]
+        period_dict['antenna_list']= data[curr_idx+3:curr_idx+3+period_dict['nAntennas']]
+        curr_idx += period_dict['nAntennas']+3
+        print("  Integration period: {} with {} sequences".format(len(all_periods)+1, period_dict['nSeq'] ))
+        seq_list = []
+       
+        for iSeq in range(period_dict["nSeq"]):
+            seq_dict = {}
+            seq_dict["sequence_no_in_period"] = iSeq
+            seq_dict["seq_start_time_sec"] = data[curr_idx]
+            seq_dict["seq_start_time_usec"] = data[curr_idx+1]
+            samples = []
+            for iAntenna in range(period_dict['nAntennas']):
+               packed_data = data[curr_idx+2+iAntenna*period_dict['nSamples']:curr_idx+2+period_dict['nSamples']*(iAntenna+1) ]
+               samples.append( np.int16(packed_data >> 16) + 1j* np.int16(packed_data % 2**16))
+       
+            seq_dict["samples"] = samples
+            seq_list.append(seq_dict)
+            curr_idx += 2+period_dict['nSamples']*period_dict['nAntennas']
+         
+        period_dict['seq_list'] = seq_list
+        all_periods.append(period_dict)
+        
+    return all_periods
 
-# %%
-print("Read {} periods ".format(len(all_periods)))
-
-# %% plot one sequence and all antennas
-iPeriod = 0
-iSequence = 8
-
-nAntennas = all_periods[iPeriod]["nAntennas"]
-
-subplot_size = int(np.ceil(nAntennas/2))
-plt.clf()
 
 
-for iAntenna, antenna_no in enumerate(all_periods[iPeriod]["antenna_list"]):
-    plt.subplot(subplot_size,2,iAntenna+1)    
-    plt.plot(np.real(all_periods[iPeriod]["seq_list"][iSequence]['samples'][iAntenna]))
-    plt.plot(np.imag(all_periods[iPeriod]["seq_list"][iSequence]['samples'][iAntenna]))
-    plt.ylabel("ant {}".format(antenna_no))
-    plt.xlim([0, all_periods[iPeriod]["nSamples"]])
-    plt.grid(True)
+# %% plot GUI
 
-plt.subplot(subplot_size,2,1)
-plt.title("{}".format(fileName))
-plt.subplot(subplot_size,2,2)
-plt.title("period {}, sequence {} / {}".format(iPeriod, iSequence, all_periods[iPeriod]["nSeq"]))
+class RawDataGUI:
+    def __init__(self, inputFile):
+        self.inputFile = inputFile
+        self.data = read_raw_file(inputFile)
+        self.iPeriod = 0 
+        self.nPeriods = len(self.data)
+        self.iSequence = 0
+        self.nSequences = (self.data[self.iPeriod]["nSeq"])
+        self.fgh       = plt.figure()
+        
+        self.plot_db = False
 
-plt.show()
+        self.cid       = self.fgh.canvas.mpl_connect('key_press_event', self.keyCallback)
+        self.updateGUI()
+        print('Shortcuts:\n  left / right : previous / next sequence \n  up / down    : previous / next period\n  d            : toggle lin / log plotting')
+     #   mng = plt.get_current_fig_manager()
+     #   mng.full_screen_toggle()
+        plt.show()
+        
+    def keyCallback(self, event):
+       # print('you pressed', event.key, event.xdata, event.ydata)
+        if event.key == 'right':
+            self.iSequence = (self.iSequence+1) % self.nSequences
+            self.updateGUI()
+
+        elif event.key == 'left':
+            self.updateGUI()
+        elif event.key == 'up':
+            self.iPeriod = (self.iPeriod+1) % self.nPeriods
+            self.nSequences = (self.data[self.iPeriod]["nSeq"])
+            self.updateGUI()
+        elif event.key == 'down':
+            self.iPeriod = (self.iPeriod-1) % self.nPeriods
+            self.nSequences = (self.data[self.iPeriod]["nSeq"])
+            self.updateGUI()    
+        elif event.key == 'd':
+            self.plot_db = not self.plot_db
+            self.updateGUI()    
+            
+
+            
+    def updateGUI(self):
+       # self.ax.cla()
+       # self.axTxt.cla()
+        self.fgh.clf()
+        nAntennas = self.data[self.iPeriod]['nAntennas']
+        nRows = int(np.ceil(nAntennas/2)+1)
+        gs = gridspec.GridSpec(nRows, 2)
+        
+        for iAntenna in range(nAntennas):
+            ax  = self.fgh.add_subplot(gs[int(iAntenna/2),int(iAntenna%2)])
+            yLabel = "ant {}".format(self.data[self.iPeriod]['antenna_list'][iAntenna])
+            if iAntenna == 0:
+               plt.title(self.inputFile)
+            if self.plot_db:
+                min_value = 1
+                ref_value = 2**15
+
+       #         plt.plot(20*np.log10(np.abs(np.real(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value))
+       #         plt.plot(20*np.log10(np.abs(np.imag(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value))
+                plot_values = 20*np.log10(np.abs(np.abs(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value)
+                plt.plot(plot_values)
+               
+
+                
+                ax.set_ylim([-92,0])
+                yLabel += " (dB)"
+            else:
+                plt.plot(np.real(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna]))
+                plt.plot(np.imag(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna]))
+            plt.xlim([0, self.data[self.iPeriod]["nSamples"]])
+            plt.grid(True)
+            ax.set_ylabel(yLabel)
+            
+    #    self.ax    = self.fgh.add_subplot(gs[0:8,:])
+        axTxt = self.fgh.add_subplot(gs[nRows-1,:])
+        axTxt.axis("off")   
+
+    #    self.ax.plot(self.allDataSets[self.currentDataset][self.channelNames[self.iChannel]], marker='x')
+    #    self.ax.set_xlim((0,self.allDataSets[self.currentDataset][self.channelNames[self.iChannel]].shape[0]))
+
+    #    self.ax.set_title(self.inputFile)
+    #    self.ax.set_xlabel("Samples")
+    #    self.ax.set_ylabel(self.channelNames[self.iChannel] )
+        axTxt.set_title('Period:{}/{}, Seq: {}/{}'.format(self.iPeriod, self.nPeriods, self.iSequence, self.nSequences))
+        par_list = self.data[self.iPeriod].keys()
+        dont_print_list = ["antenna_list","seq_list", "pcode" ]
+        par_txt = ""
+        for iPar,par in enumerate(par_list):
+            if  par not in dont_print_list:
+                if ((iPar+1) % 5):
+                    par_txt += "{}={},  ".format(par, self.data[self.iPeriod][par])
+                else:
+                    par_txt += "{}={},\n".format(par, self.data[self.iPeriod][par])
+
+        axTxt.text(0, 1, par_txt, verticalalignment='top')
+    #    self.ax.grid(True)
+      #  self.ax.set_xlim((0,self.allDataSets[self.currentDataset][self.channelNames[self.iChannel]].shape[0]))
+        plt.draw()            
+
+
+# %% 
+x = RawDataGUI(file_with_path)
