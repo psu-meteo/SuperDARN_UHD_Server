@@ -224,7 +224,7 @@ def print_status():
 
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -349,6 +349,9 @@ def get_process_ids(processShortName):
     if processShortName == "cuda":
        processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
        nWords = 2 
+    elif processShortName == "srr_watchdog":
+       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py"]
+       nWords = 1
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
        nWords = 2
@@ -365,14 +368,14 @@ def get_process_ids(processShortName):
        
      
     processList = get_processes()
-    cudaProcesses = []
-    for line in processList:
+    foundProcesses = []
+    for iLine, line in enumerate(processList):
         wordList = [word for word in line.split(" " ) if word != ""]
         if len(wordList):
            commandString = " ".join(wordList[10:11+nWords])
            if commandString in processMatchString:
-              cudaProcesses.append(dict(pid=int(wordList[1]) ))
-    return cudaProcesses
+              foundProcesses.append(dict(pid=int(wordList[1]) ))
+    return foundProcesses
 
 def stop_cuda_driver():
     myPrint(" Stopping cuda_driver...")
@@ -469,7 +472,7 @@ def stop_rawacf_write():
     
 def stop_watchdog():
     myPrint(" Stopping watchdog...")
-    serverProcesses = get_process_ids("srr_watchdog.py")
+    serverProcesses = get_process_ids("srr_watchdog")
     if len(serverProcesses):
        terminate_all(serverProcesses)
        return 1
@@ -797,6 +800,8 @@ def main():
             stop_watchdog()
             stop_usrp_driver()
             stop_cuda_driver()
+         elif inputArg[1].lower() in ["watchdog", "srr_watchdog"]:
+             stop_watchdog()
          elif inputArg[1].lower() in ["errorlog", "errlog"]:
             stop_errorlog()
          elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
