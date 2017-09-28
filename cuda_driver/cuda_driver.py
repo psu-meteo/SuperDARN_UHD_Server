@@ -1134,6 +1134,13 @@ def main():
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
     usrpconfig.read('../usrp_config.ini')
+   
+    # remove non local usrps
+    for usrp in usrpconfig.sections():
+        if usrpconfig[usrp]['driver_hostname'] != 'localhost':
+            usrpconfig.remove_section(usrp)
+            logger.debug("removing usrp: {} since it is not local".format(usrp))
+    logger.debug("remaining local usrps: {}".format(usrpconfig.sections()))
 
     main_antennas, back_antennas = parse_usrpconfig_antennas(usrpconfig)
     antennas = main_antennas + back_antennas
