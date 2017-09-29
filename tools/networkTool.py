@@ -75,9 +75,9 @@ def printStatus():
 
            
     # %% print infos
-    print('\n   ' + BOLD +UNDERLINE + "{:>3}|{:>8}|{:>10}|{:>9}|{:>6}|{:>9}|{:>15}|{:>15}".format('Index', 'Name',  'State',  'flags', 'Carrier', 'MTU', 'IP', 'Mask') + ENDC)
+    print('\n   ' + BOLD +UNDERLINE + "{:>3}|{:>8}|{:>10}|{:>10}|{:>9}|{:>15}|{:>15}".format('Index', 'Name',  'State',   'Carrier', 'MTU', 'IP', 'Mask') + ENDC)
     for idx, iIFace in enumerate(ifaceDetailList):
-        print("{:>6} {:>10} {:>10}    {:<6} {:>6} {:>10} {:>15} {:>15}".format(idx, iIFace.name, iIFace.state, iIFace.flags, iIFace.carrier,  iIFace.mtu, iIFace.ip, iIFace.mask))       
+        print("{:>6} {:>10} {:>10}    {:>6} {:>10} {:>15} {:>15}".format(idx, iIFace.name, iIFace.state,  iIFace.carrier,  iIFace.mtu, iIFace.ip, iIFace.mask))       
 
 
 def ipScan(index):
@@ -104,12 +104,63 @@ def ipScan(index):
 
 
 
+def ipScanFastClassC(index):
+    nThreads = 100
+    ifaceDetailList = getIFaceDetails()
+    interFace = ifaceDetailList[int(index)]
+    print_lock = threading.Lock()
+    baseIP = ".".join(interFace.ip.split('.')[:3]) + "."
+
+   
+  ##  if interFace.mask[-4:] != ".0.0":
+  ##      print(FAIL + "Net mask has to be *.*.0.0 to be able to reach all IPs" + ENDC)
+  ##      return
+
+    def scanOneIP(ipSubnet):
+        response = os.system("ping -q -c 1 -I " + interFace.name+ " "  + baseIP  + str(ipSubnet) )
+        if response == 0:
+         #   print("192.168.{}.2 is responding".format(ipSubnet))
+           activeIPs.append(ipSubnet)
+           with print_lock:
+               print("{}{} active".format(baseIP, ipSubnet))
+
+    def threader():
+        while True:
+            worker = q.get()
+            scanOneIP(worker)
+            q.task_done()
+
+
+
+    subnets =   list(range(40,60))   # check this ips first
+    subnets.extend([i for i in range(1,254) if i not in subnets])
+    activeIPs = []
+   
+    q = Queue()
+    for iThread in range(nThreads):
+        t = threading.Thread(target=threader)
+        t.daemon = True
+        t.start()
+
+    for ipSubnet in subnets:
+        q.put(ipSubnet)
+
+    q.join()
+
+    print(OKGREEN + "Finished:\nFound active IPs:")
+    for iSubnet in activeIPs:
+        print(' '+ baseIP + str(iSubnet) + ' is active ')
+    print("\n" + ENDC)        
+
+
+
+
+
 def ipScanFast(index):
     nThreads = 100
     ifaceDetailList = getIFaceDetails()
     interFace = ifaceDetailList[int(index)]
     print_lock = threading.Lock()
-
    
     if interFace.mask[-4:] != ".0.0":
         print(FAIL + "Net mask has to be *.*.0.0 to be able to reach all IPs" + ENDC)
@@ -159,7 +210,7 @@ def main():
    userInput = 's'
    printStatus()
    while userInput != "":
-       print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast\n  i    : IP scan (slow)\n  c    : continuous update status\n  Enter: quit" + ENDC)
+       print(HEADER + "\n\n Input:\n  s    : print interface status\n  f    : IP scan fast (checks 192.168.[0..254].2)\n  i    : IP scan (slow)\n  x    : IP scan class C (checks i.i.i.[0..254], i is from interface )\n  c    : continuous update status\n  Enter: quit" + ENDC)
        userInput = input(' Input: ')
      
        if userInput.lower() == 's':
@@ -167,6 +218,9 @@ def main():
        if userInput.lower() == 'f':
            index = input(HEADER + "  Select Interface Index:" + ENDC )
            ipScanFast(index)
+       if userInput.lower() == 'x':
+           index = input(HEADER + "  Select Interface Index:" + ENDC )
+           ipScanFastClassC(index)
        if userInput.lower() == 'i':
            index = input(HEADER + "  Select Interface Index:" + ENDC )
            ipScan(index)

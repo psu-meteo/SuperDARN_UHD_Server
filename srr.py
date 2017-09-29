@@ -4,13 +4,20 @@
 #
 #  Usage:
 #     srr.py [status]              : shows all software radio processes 
-#     srr.py init [auto|main|aux]  : create symlink to usrp_config file (default is auto)
+#     srr.py init                  : create symlink to usrp_config and drivern_config.ini
+#                                    all arguments are optional, order doesn't matter:
+#                 [main|aux]            : computer name, default is auto detect of hostname
+#                 [single|master|slave] : network mode, default is master for main and slave for aux
+#                 [singlePol|dualPol]   : polarization, default is singlePol
+#            
+#     srr.py networkTool|net       : calls networkTool.py 
+#     srr.py rawView               : plot raw rx bb samples of all antennas
+#     srr.py watchdog|w            : calls tools/watchdog.py
+#     srr.py help                  : show this help
+#
 #     srr.py start   PROCESS       : start a process or process group (see below for processes) 
 #     srr.py stop    PROCESS       : stop a process or process group (see below for processes) 
 #     srr.py restart PROCESS       : restart a process or process group with needed wait times
-#     srr.py networkTool           : calls networkTool.py 
-#     srr.py rawView               : plot raw rx bb samples of all antennas
-#     srr.py help                  : show this help
 #
 #  Available PROCESSES:
 #     cuda (or cuda_driver)        : cuda driver
@@ -62,6 +69,8 @@ sys.path.insert(0, basePath + '/tools')
 
 import networkTool
 
+sys.path.insert(0, basePath + '/python_include')
+import rosmsg
 
 # TODO: get from config
 CUDADriverPort = 55420
@@ -71,19 +80,16 @@ USRPDriverPort = 54420
 UHD_EXIT = ord('e')
 
 USRP_SERVER_PORT = 45000
-USRP_SERVER_QUIT  = '.'
+USRP_SERVER_QUIT  = ',' # '.'
 
 
-
+# time to wait for usrps
+# UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
 
 def myPrint(msg):
    print("||>  {}".format(msg))
 basePrintLine = "||>==============================================================="
-
-print(basePrintLine)
-myPrint("Software Radio Radar")
-myPrint(" ")
 
 def waitFor(nSeconds):
    print("||> Waiting for {} second(s): ".format(nSeconds), end="", flush=True)
@@ -95,38 +101,76 @@ def waitFor(nSeconds):
 ######################
 ## init
 def initialize(inputArg):
-   configPath = basePath # might change later...
+   configPath = basePath + "/config" 
 
-   usrp_config_source_file = dict(main=configPath + "/usrp_config__kod-main.ini", aux=configPath + "/usrp_config__kod-aux.ini")
-   usrp_config_target_file = configPath + "/usrp_config.ini"
+   usrp_config_target_file   = basePath + "/usrp_config.ini"
+   driver_config_target_file = basePath + "/driver_config.ini"
 
-   if len(inputArg) == 1 or inputArg[1].lower() == "auto":
-      hostName = os.uname()[1].lower()
-      myPrint(" Auto detect of hostname: {}".format(hostName))
+   # remove old files
+   myPrint(" Removing old config files")
+   for targetFile in [usrp_config_target_file, driver_config_target_file]:
+      if os.path.isfile(targetFile) or os.path.islink(targetFile):
+         if os.path.islink(targetFile): # is a link
+             myPrint("  removing link for {}".format(targetFile))
+             os.unlink(targetFile)
+         else: # is a file
+             myPrint("  removing file {}".format(targetFile))
+             os.remove(targetFile)
+
+   # default paramter values 
+   hostName     = os.uname()[1].lower().split("-")[-1]
+   polarization = 'singlePol'
+   netConfig    = 'auto' # master, slave, or single
+   myPrint(" Starting with default: host:{}, netConfig={}, polarization={}".format(hostName, netConfig, polarization))
+
+   # parse input arguments
+   del inputArg[0] 
+   for arg in inputArg:
+      if arg.lower() in ['main', 'aux']:
+         hostName =  arg.lower()
+      elif arg in ['singlePol', 'dualPol']:
+         polarization = arg
+      elif arg.lower() in ['single', 'master', 'slave']:
+         netConfig = arg.lower()
+      else:
+         myPrint("Unknown argument for init: {} ".format(arg))
+         return
+
+   if netConfig == 'auto':
+      if hostName == "aux":
+         netConfig = "slave"
+      elif hostName == "main":
+         netconfig = "master"
+      else:
+         myPrint("Unknown host ({}), unable to set auto netconfig.".format(hostName))
+         return 
+   myPrint(" Initializing with: host={}, netConfig={}, polarization={}".format(hostName, netConfig, polarization))
+
+   # DETERMINE CONFIG FILE NAMES      
+   # for usrp_config single and slave is the same
+   if netConfig == 'slave':
+      usrp_net_config_name = 'single'
    else:
-      hostName = inputArg[1].lower()
+      usrp_net_config_name = netConfig
 
-   if hostName in ['main', 'kod-main', 'kodiak-main']:
-      computer = "main"
-   elif hostName in ['aux', 'kod-aux', 'kodiak-aux']: 
-      computer = "aux"
+   usrp_config_source_file    = configPath + "/usrp_config__" + hostName + "_" + usrp_net_config_name + "_" + polarization + ".ini"
+
+   # for netmode single the host name doesn't matter
+   if netConfig == 'single':
+      driver_host_name = ""
    else:
-      myPrint(" Error. Unkown copmuter name. Use MAIN or AUX")
-      return
+      driver_host_name = hostName + "_" 
+ 
+   driver_config_source_file = configPath + "/driver_config__" + driver_host_name + netConfig  + ".ini"
 
-   myPrint(" Initializing for computer: {}".format(computer))
+   # linking new files   
+   myPrint("Creating symlink {}".format(usrp_config_target_file))  
+   myPrint("   -> {}".format( usrp_config_source_file))  
+   os.symlink(usrp_config_source_file, usrp_config_target_file)
 
-   if os.path.isfile(usrp_config_target_file):
-      if os.path.islink(usrp_config_target_file): # is a link
-          myPrint("  removing link for {}".format(usrp_config_target_file))
-          os.unlink(usrp_config_target_file)
-      else: # is a file
-          myPrint("  removing file {}".format(usrp_config_target_file))
-          os.remove(usrp_config_target_file)
-       
-   
-   os.symlink(usrp_config_source_file[computer], usrp_config_target_file)
-   myPrint("Creating symlink {} -> {}".format(usrp_config_target_file, usrp_config_source_file[computer]))
+   myPrint("Creating symlink {} ".format(driver_config_target_file))  
+   myPrint("   -> {}".format( driver_config_source_file))  
+   os.symlink(driver_config_source_file, driver_config_target_file)
 
 def show_help():
    thisFile = open( os.path.realpath(__file__), 'r')
@@ -161,8 +205,26 @@ def get_processes():
    return processList
 
 def print_status():
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver"]
     processList = get_processes()
+    srrProcesses = get_known_processes(processList)
+   
+    myPrint("Local: Found {} processes:".format(len(srrProcesses)))
+    for line in srrProcesses:
+       myPrint("  {}".format(line))
+
+    remote_pc_list = get_remote_driver_host()
+    for remote_pc in remote_pc_list:
+       myPrint(" ")
+       respond = remote_command_echo("radar", remote_pc, "ps -aux", verbose=False)
+       processList = respond.decode("UTF-8").split("\n")
+       srrProcesses = get_known_processes(processList)
+       myPrint("Remote {}: Found {} processes:".format(remote_pc, len(srrProcesses)))
+       for line in srrProcesses:
+          myPrint("  {}".format(line))
+
+
+def get_known_processes(processList):
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -172,10 +234,8 @@ def print_status():
                if commandString.startswith(knowProcess):
                   srrProcesses.append( " " + commandString + "  (PID " + wordList[1] + ")")
                   break
-   
-    myPrint("Found {} processes:".format(len(srrProcesses)))
-    for line in srrProcesses:
-       myPrint("  {}".format(line))
+    return srrProcesses
+
 
 def pid_exists(pid):
     """Check whether pid exists in the current process table.  UNIX only. 
@@ -217,13 +277,14 @@ def get_usrp_driver_processes():
     usrpProcesses = []
     for line in processList:
         if 'usrp_driver' in line:
+            wordList = [word for word in line.split(" " ) if word != ""]
             try:
-               wordList = [word for word in line.split(" " ) if word != ""]
-               antenna = int(wordList[wordList.index("--antenna")+1])
+               antenna = int(wordList[wordList.index("--antennaA")+1])
                host = wordList[wordList.index("--host")+1]
                usrpProcesses.append(dict(pid=int(wordList[1]), host=host, antenna=antenna))
             except:
-               myPrint("  not a driver process: {}".format(line))
+               myPrint("Failed to extract host and antenna_idx: {}".format(line))
+               usrpProcesses.append(dict(pid=int(wordList[1]), host=None, antenna=None))
 
     return usrpProcesses
 
@@ -237,11 +298,17 @@ def stop_usrp_driver_soft():
     dtype = np.uint8
     
     for process in usrpProcesses:
-        myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], process['antenna'] + USRPDriverPort, process['pid']))
-        usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        usrpsock.connect(('localhost', process['antenna'] + USRPDriverPort))
+        if process['host'] == None:
+            continue
+
+        myPrint("  sending UHD_EXIT to {}:{} (pid {})".format(process['host'], int(process['host'].split(".")[2]) + USRPDriverPort, process['pid']))
+        try:
+           usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+           usrpsock.connect(('localhost', int(process['host'].split(".")[2]) + USRPDriverPort))
     
-        usrpsock.sendall(dtype(UHD_EXIT).tobytes())
+           usrpsock.sendall(dtype(UHD_EXIT).tobytes())
+        except:
+           myPrint("  connection to {}:{} (pid {}) failed".format(process['host'], int(process['host'].split(".")[2]) + USRPDriverPort, process['pid']))
     
        # dstr = usrpsock.recv(dtype().nbytes )
        # myPrint('  => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(dstr), dtype().nbytes , dstr  ))
@@ -261,7 +328,10 @@ def stop_usrp_driver_hard():
 
 def stop_usrp_driver():
     myPrint(" Stopping usrp_driver...")
-    stop_usrp_driver_soft()
+    try:
+        stop_usrp_driver_soft()
+    except:
+        myPrint("Soft USRP stop failed...")
     stop_usrp_driver_hard()
 
 def get_cuda_driver_processes():
@@ -279,6 +349,9 @@ def get_process_ids(processShortName):
     if processShortName == "cuda":
        processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
        nWords = 2 
+    elif processShortName == "srr_watchdog":
+       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py"]
+       nWords = 1
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
        nWords = 2
@@ -295,24 +368,28 @@ def get_process_ids(processShortName):
        
      
     processList = get_processes()
-    cudaProcesses = []
-    for line in processList:
+    foundProcesses = []
+    for iLine, line in enumerate(processList):
         wordList = [word for word in line.split(" " ) if word != ""]
         if len(wordList):
            commandString = " ".join(wordList[10:11+nWords])
            if commandString in processMatchString:
-              cudaProcesses.append(dict(pid=int(wordList[1]) ))
-    return cudaProcesses
+              foundProcesses.append(dict(pid=int(wordList[1]) ))
+    return foundProcesses
 
 def stop_cuda_driver():
     myPrint(" Stopping cuda_driver...")
     cudaProcesses = get_process_ids("cuda")
     if len(cudaProcesses):
        for process in cudaProcesses:
-            myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost',CUDADriverPort))
-            sock.sendall(np.uint8(CUDA_EXIT).tobytes())
+            try:
+               myPrint("  sending CUDA_EXIT to localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+               sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+               sock.connect(('localhost',CUDADriverPort))
+               sock.sendall(np.uint8(CUDA_EXIT).tobytes())
+            except:
+                myPrint(" soft extit failed: localhost:{} (pid {})".format(CUDADriverPort, process['pid']))
+                
         
        time.sleep(1)
        # terminate processes if they still exis
@@ -324,15 +401,23 @@ def stop_usrp_server():
     myPrint(" Stopping usrp_server...")
     serverProcesses = get_process_ids("usrp_server")
     if len(serverProcesses):
-       for process in serverProcesses:
-            myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost',USRP_SERVER_PORT))
-            sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
-        
-       time.sleep(1)
-       # terminate processes if they still exis
-       terminate_all(serverProcesses)
+      try:
+          for process in serverProcesses:
+               myPrint("  sending SEVER_EXIT to localhost:{} (pid {})".format(USRP_SERVER_PORT, process['pid']))
+               sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+               sock.connect(('localhost', USRP_SERVER_PORT))
+               time.sleep(0.3)
+           #    sock.sendall(np.int32(ord(USRP_SERVER_QUIT)).tobytes())
+               rmsg = rosmsg.rosmsg_command(sock)
+               rmsg.set_data('status', 0)
+               rmsg.set_data('type', ord(USRP_SERVER_QUIT))
+               rmsg.transmit()
+ 
+          time.sleep(1)
+      except:
+          myPrint("Error while connecting to server. Killing PID...")
+          # terminate processes if they still exis
+      terminate_all(serverProcesses)
     else:
        myPrint("  No usrp_server processes found...")
     
@@ -385,6 +470,17 @@ def stop_rawacf_write():
        myPrint("  No rawacfwrite processes found...")
        return 0
     
+def stop_watchdog():
+    myPrint(" Stopping watchdog...")
+    serverProcesses = get_process_ids("srr_watchdog")
+    if len(serverProcesses):
+       terminate_all(serverProcesses)
+       return 1
+    else:
+       myPrint("  No watchdog processes found...")
+       return 0
+    
+    
     
 
 ########################
@@ -394,6 +490,20 @@ def read_config(fileName):
    config = configparser.ConfigParser()
    config.read(fileName)
    return config
+
+def get_remote_driver_host():
+    fileName = os.path.join(basePath, 'usrp_config.ini')
+    if not os.path.isfile(fileName):
+       myPrint("  ERROR: usrp_config.ini not found! Run srr init or symlink correct init file by hand.")
+       return -1
+    usrp_config = read_config(fileName)
+    usrpNameList = usrp_config.sections()
+    all_driver_hosts = []
+    for usrpName in usrpNameList:
+       curr_host = usrp_config[usrpName]['driver_hostname']
+       if curr_host not in all_driver_hosts and curr_host != "localhost":
+          all_driver_hosts.append(curr_host)
+    return all_driver_hosts
 
 def start_usrps_from_config(usrp_sleep = False):
     myPrint("Starting usrp_driver from config:")
@@ -407,17 +517,42 @@ def start_usrps_from_config(usrp_sleep = False):
     usrpPIDlist  = []
     
     myPrint("  Found {} usrps in config {}:".format(len(usrpNameList), fileName))
+    start_arg_list = []
     for usrpName in usrpNameList:
-       myPrint("   {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+        myPrint("     {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+        if usrp_config[usrpName]['side'].lower()[0] == 'a':
+           ant_arg = "--antennaA"
+        elif usrp_config[usrpName]['side'].lower() == "b":
+           ant_arg = "--antennaB"
+        else:
+            print("Error: unknown side: {}".format(usrp_config[usrpName]['side'].lower()))
+            return -1
+
+        newDevice = True
+        for arg in start_arg_list:
+            if arg[0] == usrp_config[usrpName]['usrp_hostname']:
+                arg += [ant_arg, usrp_config[usrpName]['array_idx'] ]
+                newDevice = False
+                break
+        if newDevice:
+           allArgs =[ usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ] 
+           if usrp_config[usrpName]['mainarray'] == "False":
+              allArgs += ["--interferometer"]
+
+           start_arg_list.append(allArgs)
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
-    for usrpName in usrpNameList:
-      # TODO: remove intclk when octoclock is connected
-      # TODO: or do this with threading module?
-       myPrint("Starting {}: ant {}, ip {}".format(usrpName, usrp_config[usrpName]['array_idx'] , usrp_config[usrpName]['usrp_hostname'] ))
-       #with internal clock
+
+###    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
+    baseStartArg = ['./usrp_driver',  '--host' ]
+    
+    for start_arg in start_arg_list:
+       all_start_arg = baseStartArg + start_arg 
+       myPrint("Starting {}".format(" ".join(all_start_arg) ))
+
+       usrpPIDlist.append( subprocess.Popen(all_start_arg))
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
-       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
+#       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
           time.sleep(8)
     os.chdir(basePath)
@@ -477,17 +612,17 @@ def start_rtserver():
     subprocess.Popen(commandList)
 
 def start_fitacf_write():
-    commandList = 'fitacfwrite -r ade.a -lp 41103 -ep 41000'.split(" ")
+    commandList = 'fitacfwrite -r kod.d -lp 41103 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_rawacf_write():
-    commandList = 'rawacfwrite -r ade.a -lp 41102 -ep 41000'.split(" ")
+    commandList = 'rawacfwrite -r kod.d -lp 41102 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_errorlog():
-    commandList = 'errlog -name mcm.a -lp 41000'.split(" ")
+    commandList = 'errlog -name kod.d -lp 41000'.split(" ")
     myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
     subprocess.Popen(commandList)
 
@@ -505,156 +640,198 @@ def start_liveRawView_tool():
     os.chdir(os.path.join(basePath, "tools") )   
     subprocess.Popen(['./plotRawSamples_usrpServer.py' ])
 
+def start_watchdog():
+    myPrint("Starting tools/watchdog.py...")
+    os.chdir(os.path.join(basePath, "tools") )   
+    subprocess.Popen(['./watchdog.py' ])
 
+###############
+def restart_all():
+   myPrint("Restarting all processes")
+   restart_driver()
+   myPrint("done starting usrps.. waiting....")
+   waitFor(25)
+   myPrint("done  waiting.... starting server")
+   start_usrp_server()
+
+def restart_driver():
+    stop_usrp_server() # this does not work....
+    waitFor(10)
+    stop_usrp_driver()
+    stop_cuda_driver()
+    waitFor(nSecs_restart_pause)
+    start_cuda_driver()
+    start_usrp_driver()
+
+
+# runs a command over ssh, returns response
+# this version is a bit more robust.. uses echo to pipe in commands
+def remote_command_echo(user, radar, command, verbose = True, port = 22):
+    commandecho = subprocess.Popen(['echo', command], stdout=subprocess.PIPE)
+
+    try:
+        signal.alarm(5)
+        failed = True
+        out = ''
+        cmdlist = ["ssh", '-T', user + '@' + radar, '-p', str(port)]
+        s = subprocess.Popen(cmdlist, stdin = commandecho.stdout, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        commandecho.stdout.close()
+        if verbose:
+            print(' '.join(cmdlist) + ' ' + command)
+        out, err = s.communicate()
+    except:
+        print('command ' + command + ' radar ' + radar + ' failed')
+
+    signal.alarm(0)
+    return out
 
 
 #########################
 ## MAIN PART:
+def main():
+   print(basePrintLine)
+   myPrint("Software Radio Radar")
+   myPrint(" ")
 
-inputArg = sys.argv[1:]
-nArguments = len(inputArg)
-
-if nArguments == 0:   # DEFAULT option
-   print_status()
-else:
-   firstArg = inputArg[0].lower()
+   inputArg = sys.argv[1:]
+   nArguments = len(inputArg)
    
-   if firstArg == "status":
-       print_status()
-   elif firstArg == "init":
-       initialize(inputArg)
-   elif firstArg.lower() in ["liverawview", "rawview"]:
-        start_liveRawView_tool()  
-   elif firstArg.lower() in ["network", "networktool"]:
-        start_network_tool()  
-   elif firstArg == "start":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Starting all...")
-         start_cuda_driver()
-         start_usrp_driver()
-         waitFor(10)
-         start_usrp_server()
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         start_cuda_driver()
-      elif inputArg[1].lower() == "driver":
-         start_cuda_driver()
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         start_usrp_server()
-      elif inputArg[1].lower() in ["uaf_fix_onesec", "uafscan_fix_onesec"]:
-         start_uafscan_fixfreq_onesec(inputArg)
-      elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
-         start_uafscan_fixfreq(inputArg)
-      elif inputArg[1].lower() in ["normalscan"]:
-         start_normalscan()
-      elif inputArg[1].lower() in ["2normalscans"]:
-         start_2normalscans()
-      elif inputArg[1].lower() in ["rtserver"]:
-         start_rtserver()
-      elif inputArg[1].lower() in ["errorlog", "errlog"]:
-         start_errorlog()
-      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
-         start_fitacf_write()
-      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
-         start_rawacf_write()
-      else:
-         myPrint("ERROR: Unknown process to start")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-
-   elif firstArg == "restart":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Restarting all...")
-         stop_usrp_server()
-         waitFor(2)
-         stop_usrp_driver()
-         stop_cuda_driver()
-         myPrint("waiting for {} sec".format(nSecs_restart_pause))
-         waitFor(nSecs_restart_pause)
-         start_cuda_driver()
-         start_usrp_driver()
-#         start_usrp_server()
-
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         stop_usrp_driver()
-         myPrint("waiting for {} sec".format(nSecs_restart_pause))
-         time.sleep(nSecs_restart_pause)
-         start_usrp_driver()
-
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         stop_cuda_driver()
-         start_cuda_driver()
-
-      elif inputArg[1].lower() == "driver":
-         stop_usrp_server() # this does not work....
-         waitFor(2)
-         stop_usrp_driver()
-         stop_cuda_driver()
-         waitFor(nSecs_restart_pause)
-         start_cuda_driver()
-         start_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         stop_usrp_server()
-         start_usrp_server()
-
-      else:
-         myPrint("ERROR: Unknown process to restart")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-
-
-   elif firstArg == "stop":
-      if nArguments == 1 or inputArg[1].lower == "all":
-         myPrint("Stopping all...")
-         stop_usrp_server()
-         time.sleep(1)
-         stop_cuda_driver()
-         time.sleep(2)
-         stop_usrp_driver()
-      elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-         stop_usrp_driver()
-      elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
-         stop_cuda_driver()
-      elif inputArg[1].lower() in ["usrp_server", "server"]:
-         stop_usrp_server()
-      elif inputArg[1].lower() in ["rtserver"]:
-         stop_rtserver()
-      elif inputArg[1].lower() == "driver":
-         stop_usrp_driver()
-         stop_cuda_driver()
-      elif inputArg[1].lower() in ["errorlog", "errlog"]:
-         stop_errorlog()
-      elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
-         stop_fitacf_write()
-      elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
-         stop_rawacf_write()
-      elif inputArg[1].lower() in ["scans", "allscans"]:
-         stop_allscans()
-      else:
-         myPrint("ERROR: Unknown process to stop")
-         myPrint("See srr help for process names:")
-         myPrint("")
-         show_help()
-   elif firstArg == "help":
-      show_help()
-   
+   if nArguments == 0:   # DEFAULT option
+      print_status()
    else:
-      myPrint("ERROR: UNKNWON COMMAND")
-      myPrint("See srr help for usage:")
-      myPrint("")
-      show_help()
+      firstArg = inputArg[0].lower()
+      
+      if firstArg == "status":
+          print_status()
+      elif firstArg == "init":
+          initialize(inputArg)
+      elif firstArg.lower() in ["liverawview", "rawview"]:
+           start_liveRawView_tool()  
+      elif firstArg.lower() in ["watchdog", "w"]:
+           start_watchdog()  
+      elif firstArg.lower() in ["network", "networktool", "net"]:
+           start_network_tool()  
+      elif firstArg == "start":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            myPrint("Starting all...")
+            start_cuda_driver()
+            start_usrp_driver()
+            waitFor(10)
+            start_usrp_server()
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            start_usrp_driver()
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            start_cuda_driver()
+         elif inputArg[1].lower() == "driver":
+            start_cuda_driver()
+            start_usrp_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            start_usrp_server()
+         elif inputArg[1].lower() in ["uaf_fix_onesec", "uafscan_fix_onesec"]:
+            start_uafscan_fixfreq_onesec(inputArg)
+         elif inputArg[1].lower() in ["uaf_fix", "uafscan_fix"]:
+            start_uafscan_fixfreq(inputArg)
+         elif inputArg[1].lower() in ["normalscan"]:
+            start_normalscan()
+         elif inputArg[1].lower() in ["2normalscans"]:
+            start_2normalscans()
+         elif inputArg[1].lower() in ["rtserver"]:
+            start_rtserver()
+         elif inputArg[1].lower() in ["errorlog", "errlog"]:
+            start_errorlog()
+         elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+            start_fitacf_write()
+         elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+            start_rawacf_write()
+         else:
+            myPrint("ERROR: Unknown process to start")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
    
-myPrint(" ")
-print(basePrintLine)
-print(basePrintLine)
+      elif firstArg == "restart":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            restart_all()
+
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            stop_usrp_driver()
+            myPrint("waiting for {} sec".format(nSecs_restart_pause+2))
+            time.sleep(nSecs_restart_pause+2)
+            start_usrp_driver()
+   
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            stop_cuda_driver()
+            start_cuda_driver()
+   
+         elif inputArg[1].lower() == "driver":
+             restart_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            stop_usrp_server()
+            start_usrp_server()
+   
+         else:
+            myPrint("ERROR: Unknown process to restart")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
+   
+   
+      elif firstArg == "stop":
+         if nArguments == 1 or inputArg[1].lower == "all":
+            myPrint("Stopping all...")
+            stop_watchdog()
+            stop_usrp_server()
+            time.sleep(5)
+            stop_cuda_driver()
+            time.sleep(5)
+            stop_usrp_driver()
+         elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
+            stop_watchdog()
+            stop_usrp_driver()
+         elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
+            stop_watchdog()
+            stop_cuda_driver()
+         elif inputArg[1].lower() in ["usrp_server", "server"]:
+            stop_watchdog()
+            stop_usrp_server()
+         elif inputArg[1].lower() in ["rtserver"]:
+            stop_rtserver()
+         elif inputArg[1].lower() == "driver":
+            stop_watchdog()
+            stop_usrp_driver()
+            stop_cuda_driver()
+         elif inputArg[1].lower() in ["watchdog", "srr_watchdog"]:
+             stop_watchdog()
+         elif inputArg[1].lower() in ["errorlog", "errlog"]:
+            stop_errorlog()
+         elif inputArg[1].lower() in ["fitacf", "fitacfwrite"]:
+            stop_fitacf_write()
+         elif inputArg[1].lower() in ["rawacf", "rawacfwrite"]:
+            stop_rawacf_write()
+         elif inputArg[1].lower() in ["scans", "allscans"]:
+            stop_allscans()
+         else:
+            myPrint("ERROR: Unknown process to stop")
+            myPrint("See srr help for process names:")
+            myPrint("")
+            show_help()
+      elif firstArg == "help":
+         show_help()
+      
+      else:
+         myPrint("ERROR: UNKNWON COMMAND")
+         myPrint("See srr help for usage:")
+         myPrint("")
+         show_help()
+      
+   myPrint(" ")
+   print(basePrintLine)
+   print(basePrintLine)
    
    
    
-   
+if __name__ == '__main__':
+   main()
    
    
    

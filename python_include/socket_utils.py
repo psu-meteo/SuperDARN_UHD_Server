@@ -3,21 +3,21 @@ import pickle
 import socket
 
 verbose = False 
-
+# DEL
 # pack i/q samples into uint32 for sending samples over the network
 # between usrp_server and arbyserver
-def complex_int32_pack(isamp, qsamp):
-    i_mask = 0xffff0000
-    q_mask = 0x0000ffff
-    maxAbsValues = 32767
-    for inputValue in [isamp, qsamp]:
-        if inputValue < - maxAbsValues or inputValue > maxAbsValues:
-            OverflowError("socket_utils.py:complex_int32_pack: Over/underflow Error. Input value: {}".format(inputValue)) 
-
-    packed_sample = (i_mask & (np.int16(isamp) << 16)) + (q_mask & np.int16(qsamp))
-    # port of:
-    #client_main[isamp] = ((uint32_t) (temp_main[1] << 16) & 0xffff0000) | ((uint32_t) temp_main[0] & 0x0000ffff);
-    return np.uint32(packed_sample)
+# def complex_int32_pack(isamp, qsamp):
+#     i_mask = 0xffff0000
+#     q_mask = 0x0000ffff
+#     maxAbsValues = 32767
+#     for inputValue in [isamp, qsamp]:
+#         if inputValue < - maxAbsValues or inputValue > maxAbsValues:
+#             OverflowError("socket_utils.py:complex_int32_pack: Over/underflow Error. Input value: {}".format(inputValue)) 
+# 
+#     packed_sample = (i_mask & (np.int16(isamp) << 16)) + (q_mask & np.int16(qsamp))
+#     # port of:
+#     #client_main[isamp] = ((uint32_t) (temp_main[1] << 16) & 0xffff0000) | ((uint32_t) temp_main[0] & 0x0000ffff);
+#     return np.uint32(packed_sample)
 
 def recv_dtype(sock, dtype, nitems = 1):
     if dtype == str:
@@ -48,7 +48,7 @@ def pickle_send(sock, data):
 def pickle_recv(sock):
     pickle_len = recv_dtype(sock, np.uint32)
     #print('expecting pickle with size: {} bytes'.format(pickle_len))
-    pickle_data = sock.recv(pickle_len)
+    pickle_data = sock.recv(pickle_len, socket.MSG_WAITALL)
     data = pickle.loads(pickle_data)
     return data
 

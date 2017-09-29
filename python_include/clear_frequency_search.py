@@ -13,22 +13,21 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
-
 from drivermsg_library import *
 from rosmsg import *
 from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, beamform_uhd_samples
 from radar_config_constants import *
 
 MIN_CLRFREQ_DELAY = .20 # TODO: lower this?
-MAX_CLRFREQ_AVERAGE = 5 
-MAX_CLRFREQ_BANDWIDTH = 512
-MAX_CLRFREQ_USABLE_BANDWIDTH = 300
 CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
-CLRFREQ_RES = 1e3 # fft frequency resolution in kHz
+CLRFREQ_RES = 2e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
-PLOT_CLEAR_FREQUENCY_SEARCH = False 
 OBEY_RESTRICTED_FREQS = True 
+
+SAVE_CLEAR_FREQUENCY_SEARCH = False 
+CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
+
 
 DEBUG = 1
 def dbPrint(msg):
@@ -56,7 +55,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     tfreq = np.mean(clear_freq_range)
     x_spacing = sample_meta_data['x_spacing']
 
-    usrp_center_freq = sample_meta_data['usrp_fcenter']
+    usrp_center_freq = sample_meta_data['usrp_fcenter'] # center frequency, in kHz..
     usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
 
     # calculate phasing matrix 
@@ -70,8 +69,8 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     spectrum_power = fft_clrfreq_samples(raw_samples)[0]
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
-    fstart_actual = usrp_center_freq - usrp_sampling_rate / 2.0 
-    fstop_actual = usrp_center_freq + usrp_sampling_rate / 2.0 
+    fstart_actual = usrp_center_freq * 1e3 - usrp_sampling_rate / 2.0 
+    fstop_actual = usrp_center_freq * 1e3 + usrp_sampling_rate / 2.0 
     spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
  
     # mask restricted frequencies
@@ -83,6 +82,12 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     fstop =  clear_freq_range[1] * 1e3
 
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
+    
+    if SAVE_CLEAR_FREQUENCY_SEARCH:
+        import pickle
+        import time
+        clr_time = time.time()
+        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freqs':spectrum_freqs,  'power':spectrum_power, 'fstart':fstart, 'fstop':fstop}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
     return tfreq, noise
 
@@ -94,19 +99,19 @@ def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, re
 
     return spectrum_power
 
-def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 10e3):
+def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = 40e3):
     dbPrint("enter find_clrfreq_from_spectrum")
     # apply filter to convolve spectrum with filter response
     # TODO: filter response is currently assumed to be boxcar..
     # return lowest power frequency
-    channel_filter = np.ones(clear_bw / CLRFREQ_RES)
+    channel_filter = np.ones(int(clear_bw / CLRFREQ_RES))
     channel_power = scipy.signal.correlate(spectrum_power, channel_filter, mode='same')
-    
+         
     # mask channel power spectrum to between fstart and fstop
     usable_mask = (spectrum_freqs > fstart) * (spectrum_freqs < fstop)
     channel_power = channel_power[usable_mask]
     spectrum_freqs = spectrum_freqs[usable_mask]
-
+    
     # find lowest power channel
     clrfreq_idx = np.argmin(channel_power) 
     
@@ -144,70 +149,33 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     clrfreq_cmd = usrp_clrfreq_command(usrp_sockets, num_clrfreq_samples, clrfreq_time, center_freq, clrfreq_rate_requested)
     clrfreq_cmd.transmit()
 
-    dbPrint("command sent, waiting for raw samples")
+    dbPrint("CLRFREQ command sent, waiting for raw samples")
     # grab raw samples
     for usrpsock in usrp_sockets:
-        output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
-        clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
+        try:
+            output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
+            clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
+            assert clrfreq_rate_actual == clrfreq_rate_requested
 
-        dbPrint("------")
-        dbPrint("actual clrfreq rate: {}".format(clrfreq_rate_actual))
-        dbPrint("requested clrfreq rate: {}".format(clrfreq_rate_requested))
+            #dbPrint("antenna {} clrfreq rate is: {} (requested: {})".format(output_antenna_idx_list[-1], clrfreq_rate_actual, clrfreq_rate_requested))
+            dbPrint("antenna {} waiting for {} samples".format(output_antenna_idx_list[-1], int(num_clrfreq_samples)))
+           
+            sample_buf = recv_dtype(usrpsock, np.int16, nitems = int(2 * num_clrfreq_samples))
 
-        dbPrint("command sent, waiting for raw samples")
-        assert clrfreq_rate_actual == clrfreq_rate_requested
-        samples = recv_dtype(usrpsock, np.int16, 2 * int(num_clrfreq_samples))
-        output_samples_list.append( samples[0::2] + 1j * samples[1::2])
+            output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
+        except:
+            dbPrint("CLRFREQ response from {} failed, stuffing with zeros".format(usrpsock))
+            output_samples_list.append(1j * np.zeros(num_clrfreq_samples))
+
     
-    clrfreq_cmd.client_return()
-
-    dbPrint("record sample command completed")
+    try:
+        clrfreq_cmd.client_return()
+        dbPrint("record sample command completed")
+    except:
+        dbPrint("CLRFREQ, communication with at least one USRP failed")
 
     return output_samples_list, output_antenna_idx_list
 
-'''
-def test_clrfreq(USRP_ANTENNA_IDX = [0]):
-    import sys
-    restricted_frequencies = read_restrict_file(RESTRICT_FILE)
-
-    # setup to talk to usrp_driver, request clear frequency search
-    usrp_drivers = ['localhost'] # hostname of usrp drivers, currently hardcoded to one
-    usrp_driver_socks = []
-    
-    USRP_DRIVER_PORT = 54420
-    
-    for aidx in USRP_ANTENNA_IDX:
-        usrp_driver_port = USRP_DRIVER_PORT + aidx
-
-        try:
-            cprint('connecting to usrp driver on port {}'.format(usrp_driver_port), 'blue')
-            usrpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            usrpsock.connect(('localhost', usrp_driver_port))
-            usrp_driver_socks.append(usrpsock)
-
-        except ConnectionRefusedError:
-            cprint('USRP server connection failed', 'blue')
-            sys.exit(1)
-
-    pdb.set_trace()
-    cmd = usrp_setup_command(usrp_driver_socks, 10000, 10000, 10000000, 10000000, 20, 10000000*2, 42000, [0, 1000 , 20000])
-    cmd.transmit()
-
-    client_returns = cmd.client_return()
-
-
-    
-    clrfreq_struct = clrfreqprm_struct(usrp_driver_socks)
-
-    # simulate received clrfreq_struct
-    clrfreq_struct.payload['start'] = 10050
-    clrfreq_struct.payload['end'] = 13050
-    clrfreq_struct.payload['filter_bandwidth'] = 3250
-    clrfreq_struct.payload['pwr_threshold'] = .9
-    clrfreq_struct.payload['nave'] =  10
-    clear_freq, noise = clrfreq_search(clrfreq_struct, usrp_driver_socks, restricted_frequencies, 3, 3.24, 16, 15.4)
-    print('clear frequency: {}, noise: {}'.format(clear_freq, noise))
-'''
 
 if __name__ == '__main__':
     pass

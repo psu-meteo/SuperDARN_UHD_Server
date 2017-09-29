@@ -17,7 +17,7 @@ def gaussian_pulse(samples, trise, rate):
 
 # filter also includes mixing frequencies
 def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
-    gain = 3.5
+    gain = 3.73 # was 3.5 before
     beta = 5
     filterData = np.zeros((len(channelFreqVec), nTaps,2), dtype=np.float32)
     m = nTaps - 1
@@ -39,7 +39,7 @@ def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
 
     return filterData
 
-#TODO: test thsi filter
+#TODO: test this filter
 def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
 #simple filter: real = 1, image = 0
     filterData = np.zeros((len(channelFreqVec), nTaps,2), dtype=np.float32)
@@ -57,20 +57,20 @@ def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
 
 
 def raisedCosine_filter(nTaps, nChannels, normalize = True):
-    # TODO: I changed this to be a complex filter. check if this makes sense for real radar signals! (mgu)
+
     alpha = 0.22
     filterData = np.zeros((nChannels, nTaps, 2), dtype=np.float32)
     for iTap in range(nTaps-1):
         t = 2 * iTap - (nTaps-1)
         if t == 0:
-           filterData[:,iTap,:] = 1
+           filterData[:,iTap,0] = 1
         elif np.absolute(t) ==  (nTaps-1)/(2*alpha):
-           filterData[:,iTap,:] = np.sin(np.pi/(2*alpha)) / (np.pi/(2*alpha)) * np.pi/4
+           filterData[:,iTap,0] = np.sin(np.pi/(2*alpha)) / (np.pi/(2*alpha)) * np.pi/4
         else:
-           filterData[:,iTap,:] = np.sin(np.pi*t/(nTaps-1)) / (np.pi*t/(nTaps-1)) * np.cos(alpha*np.pi*t / (nTaps-1)) / (1-2*(alpha*t/(nTaps-1))**2)
+           filterData[:,iTap,0] = np.sin(np.pi*t/(nTaps-1)) / (np.pi*t/(nTaps-1)) * np.cos(alpha*np.pi*t / (nTaps-1)) / (1-2*(alpha*t/(nTaps-1))**2)
         
     if normalize:
-        filterData /= np.sum(filterData[0]) / np.sqrt(2)
+        filterData /= np.sum(filterData[0]) 
 
     return filterData
 
