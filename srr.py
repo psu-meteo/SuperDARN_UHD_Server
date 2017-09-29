@@ -519,27 +519,31 @@ def start_usrps_from_config(usrp_sleep = False):
     myPrint("  Found {} usrps in config {}:".format(len(usrpNameList), fileName))
     start_arg_list = []
     for usrpName in usrpNameList:
-        myPrint("     {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
-        if usrp_config[usrpName]['side'].lower()[0] == 'a':
-           ant_arg = "--antennaA"
-        elif usrp_config[usrpName]['side'].lower() == "b":
-           ant_arg = "--antennaB"
+        if usrp_config[usrpName]['driver_hostname'] == 'localhost':
+            myPrint("     {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
+            if usrp_config[usrpName]['side'].lower()[0] == 'a':
+               ant_arg = "--antennaA"
+            elif usrp_config[usrpName]['side'].lower() == "b":
+               ant_arg = "--antennaB"
+            else:
+                print("Error: unknown side: {}".format(usrp_config[usrpName]['side'].lower()))
+                return -1
+
+            newDevice = True
+            for arg in start_arg_list:
+                if arg[0] == usrp_config[usrpName]['usrp_hostname']:
+                    arg += [ant_arg, usrp_config[usrpName]['array_idx'] ]
+                    newDevice = False
+                    break
+            if newDevice:
+               allArgs =[ usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ] 
+               if usrp_config[usrpName]['mainarray'] == "False":
+                  allArgs += ["--interferometer"]
+
+               start_arg_list.append(allArgs)
         else:
-            print("Error: unknown side: {}".format(usrp_config[usrpName]['side'].lower()))
-            return -1
+            myPrint("not local:  {} : antenna {},   ip: {}".format( usrpName , usrp_config[usrpName]['array_idx'],  usrp_config[usrpName]['usrp_hostname'] ))
 
-        newDevice = True
-        for arg in start_arg_list:
-            if arg[0] == usrp_config[usrpName]['usrp_hostname']:
-                arg += [ant_arg, usrp_config[usrpName]['array_idx'] ]
-                newDevice = False
-                break
-        if newDevice:
-           allArgs =[ usrp_config[usrpName]['usrp_hostname'], ant_arg, usrp_config[usrpName]['array_idx'] ] 
-           if usrp_config[usrpName]['mainarray'] == "False":
-              allArgs += ["--interferometer"]
-
-           start_arg_list.append(allArgs)
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
