@@ -66,6 +66,9 @@ def read_raw_file(file_with_path):
     while (curr_idx < len(data)):
         period_dict = {}
         period_dict['version'] = data[curr_idx]
+        if period_dict['version'] != 3:
+            print("Error: only Version 3 exports are supported!")
+            return 0
         period_dict['year'] = data[curr_idx+1]
         period_dict['month'] = data[curr_idx+2]
         period_dict['day'] = data[curr_idx+3]
@@ -96,20 +99,22 @@ def read_raw_file(file_with_path):
         curr_idx += period_dict['nAntennas']+3
         print("  Integration period: {} with {} sequences".format(len(all_periods)+1, period_dict['nSeq'] ))
         seq_list = []
-       
         for iSeq in range(period_dict["nSeq"]):
             seq_dict = {}
             seq_dict["sequence_no_in_period"] = iSeq
             seq_dict["seq_start_time_sec"] = data[curr_idx]
             seq_dict["seq_start_time_usec"] = data[curr_idx+1]
             samples = []
+            nSamples = period_dict['nSamples'] *2 # because we read as uint32 but one sample is complex64 (or two float32)
             for iAntenna in range(period_dict['nAntennas']):
-               packed_data = data[curr_idx+2+iAntenna*period_dict['nSamples']:curr_idx+2+period_dict['nSamples']*(iAntenna+1) ]
-               samples.append( np.int16(packed_data >> 16) + 1j* np.int16(packed_data % 2**16))
+               packed_data = data[curr_idx+2+iAntenna*nSamples:curr_idx+2+nSamples*(iAntenna+1) ]
+               packed_data.dtype = "complex64"
+               samples.append( packed_data )
+            #   samples.append( np.int16(packed_data >> 16) + 1j* np.int16(packed_data % 2**16))
        
             seq_dict["samples"] = samples
             seq_list.append(seq_dict)
-            curr_idx += 2+period_dict['nSamples']*period_dict['nAntennas']
+            curr_idx += 2+nSamples*period_dict['nAntennas']
          
         period_dict['seq_list'] = seq_list
         all_periods.append(period_dict)

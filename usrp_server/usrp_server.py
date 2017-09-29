@@ -2179,8 +2179,8 @@ class RadarChannelHandler:
 
     def write_bb_data(channel):
         channel.logger.debug('start saving BB samples')
-        time_now = datetime.datetime.now()
-        version = 2 
+        time_now = datetime.datetime.utcnow()
+        version = 3 
         hardwareManager = channel.parent_RadarHardwareManager
         
         savePath = "/data/image_samples/bb_data"
@@ -2216,24 +2216,26 @@ class RadarChannelHandler:
         exportList.append(channel.bb_export['nMainAntennas'] + channel.bb_export['nBackAntennas'])
         exportList += channel.bb_export["antenna_list"]
 
-        # convert float to complex packed int16
-        int_main_data = utils.complex_float_to_int16(channel.bb_export["main_samples"], "BB raw export main samples") 
-        int_back_data = utils.complex_float_to_int16(channel.bb_export["back_samples"], "BB raw export back samples") 
+        # 
+        float_main_data = np.complex64(channel.bb_export["main_samples"])
+        float_back_data = np.complex64(channel.bb_export["back_samples"])
 
+        export_samples = b''
         for iSequence in range(channel.bb_export['nSequences_per_period']):
-            exportList.append(channel.bb_export['sequence_start_time_secs'][iSequence])
-            exportList.append(channel.bb_export['sequence_start_time_usecs'][iSequence])
+            export_samples += np.uint32(channel.bb_export['sequence_start_time_secs'][iSequence]).tobytes()
+            export_samples += np.uint32(channel.bb_export['sequence_start_time_usecs'][iSequence]).tobytes()
 
             pulse_sequence_start_index = iSequence * channel.bb_export['nbb_rx_samples_per_sequence']
             pulse_sequence_end_index = pulse_sequence_start_index + channel.bb_export['number_of_samples']
             for iAntenna in range(channel.bb_export['nMainAntennas']):
-                   exportList += int_main_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index]
+                   export_samples += float_main_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index].tobytes()
             for iAntenna in range(channel.bb_export['nBackAntennas']):
-                   exportList += int_back_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index]
-
+                   export_samples += float_back_data[iAntenna][pulse_sequence_start_index:pulse_sequence_end_index].tobytes()
+      
 
         rawFile = open(os.path.join(savePath, fileName), "ba")
         rawFile.write(np.array(exportList, dtype=np.int32))
+        rawFile.write(export_samples)
         rawFile.close()
         channel.logger.debug('end saving BB samples')
 
