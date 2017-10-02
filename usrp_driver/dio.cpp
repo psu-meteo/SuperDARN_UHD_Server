@@ -118,7 +118,20 @@
 #define RXFE_ATT_MASK  (ATT_D0 + ATT_D1 + ATT_D2 + ATT_D3 + ATT_D4 + ATT_D5)
 #define RXFE_MASK      (RXFE_ATT_MASK + RXFE_AMP_MASK)
 
+#define MCM_SYNC            IO_PIN_06
+#define MCM_TR              IO_PIN_05
+#define MCM_AMP_A1          IO_PIN_04
+#define MCM_AMP_A2          IO_PIN_11
+#define MCM_AMP_B1          IO_PIN_03
+#define MCM_AMP_B2          IO_PIN_10
+#define MCM_AUX_IO_A        IO_PIN_02
+#define MCM_AUX_IO_B        IO_PIN_09
+#define MCM_ATT_A_LE    IO_PIN_01
+#define MCM_ATT_B_LE    IO_PIN_08
+#define MCM_ATT_SDI     IO_PIN_00
+#define MCM_ATT_SCK     IO_PIN_07
 
+#define MCM_RXFE_MASK  (MCM_SYNC + MCM_TR + MCM_AMP_A1 + MCM_AMP_A2 + MCM_AMP_B1 + MCM_AMP_B2 + MCM_AUX_IO_A + MCM_AUX_IO_B + MCM_ATT_A_LE + MCM_ATT_B_LE + MCM_ATT_SDI + MCM_ATT_SCK)
 #define DEBUG 0
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
@@ -435,5 +448,93 @@ void kodiak_init_rxfe(uhd::usrp::multi_usrp::sptr usrp, int nSides)
          // set to 1/2 full attenuation, both amps online 
          usrp->set_gpio_attr(bank_name, "OUT", (255 - (AMP_1 + AMP_2 + ATT_D5)), RXFE_MASK);
     }
+}
+
+
+void mcm_init_rxfe(uhd::usrp::multi_usrp::sptr usrp)
+{
+    // use set FP0 (front panel dsub15) as outputs with manual control
+    usrp->set_gpio_attr("FP0", "CTRL", MANUAL_CONTROL, MCM_RXFE_MASK);
+    usrp->set_gpio_attr("FP0", "DDR", MCM_RXFE_MASK, MCM_RXFE_MASK);
+
+    // start with 1/2 full attenuation, both amps offline
+    struct RXFESettings rxfe_init_settings;
+
+    // initialize LE, SCK, SDI, and TR into safe states
+    usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_A_LE, MCM_ATT_A_LE);
+    usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_B_LE, MCM_ATT_B_LE);
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_SDI);
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_SCK);
+
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_TR);
+    
+    // initialize rxfe with no amplifiers or added attenuation
+    rxfe_init_settings.amp1 = 0;
+    rxfe_init_settings.amp2 = 0;
+    
+    rxfe_init_settings.att_05_dB = 0;
+    rxfe_init_settings.att_1_dB = 0;
+    rxfe_init_settings.att_2_dB = 0;
+    rxfe_init_settings.att_4_dB = 0;
+    rxfe_init_settings.att_8_dB = 0;
+    rxfe_init_settings.att_8_dB = 0;
+    
+    mcm_set_rxfe(usrp, rxfe_init_settings); 
+}
+
+void mcm_set_rxfe(
+    uhd::usrp::multi_usrp::sptr usrp,
+    struct RXFESettings rf_settings)
+{
+    uint16_t rxfe_dio = 0;
+    
+    if (rf_settings.amp1) {
+        rxfe_dio |= MCM_AMP_A1;
+        rxfe_dio |= MCM_AMP_B1;
+    }
+
+    if (rf_settings.amp2) {
+        rxfe_dio |= MCM_AMP_A2;
+        rxfe_dio |= MCM_AMP_B2;
+    }
+
+    uint8_t att_payload = rf_settings.att_05_dB | \
+                          rf_settings.att_1_dB << 1 | \
+                          rf_settings.att_2_dB << 2 | \
+                          rf_settings.att_4_dB << 3 | \
+                          rf_settings.att_8_dB << 4 | \
+                          rf_settings.att_16_dB << 5;
+
+    // bring both LE to enable
+    // bang out rxfe settings
+    // return LE
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_A_LE);
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_B_LE);
+   
+    // shift attenuator settings into PE4312 shift register
+    // MSB first, 6 bits
+    // max SPI clock frequency is 10 MHz
+    // TODO: check if delay is needed in bit banging
+    for(int i = 5; i >= 0; i--) {
+        usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_SCK);
+
+        if(att_payload & (1 << i)) {
+            usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_SDI, MCM_ATT_SDI);
+        }
+        else {
+            usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_SDI);
+        }
+
+        usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_SCK, MCM_ATT_SCK);
+
+    }
+
+    usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_A_LE, MCM_ATT_A_LE);
+    usrp->set_gpio_attr("FP0", "OUT", MCM_ATT_B_LE, MCM_ATT_B_LE);
+
+    // TODO: check if delay is needed, LE pulse must be at least 30 nanoseconds
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_A_LE);
+    usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_B_LE);
+
 }
 
