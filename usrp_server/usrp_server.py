@@ -910,6 +910,13 @@ class RadarHardwareManager:
         self.scaling_factor_tx_total = float(array_config['gain_control']['scaling_factor_tx_total'])
         self.scaling_factor_rx_bb    = float(array_config['gain_control']['scaling_factor_rx_bb'])
         self.scaling_factor_rx_if    = float(array_config['gain_control']['scaling_factor_rx_if'])
+        self.apply_normalization     = array_config.getboolean('gain_control','use_var_normalization')
+        self.mute_antenna_list = [int(x) for x in array_config['gain_control']['mute_antenna_idx'].split(",")]
+        if self.apply_normalization:
+            self.logger.info("Normalizing is active.")
+        if len(self.mute_antenna_list):
+            self.logger.info("Mute antennas before beamforming: {}".format(self.mute_antenna_list))
+
 
         self.ini_array_settings = array_config['array_info']
         self.array_beam_sep  = float(self.ini_array_settings['beam_sep'] ) # degrees
@@ -976,9 +983,9 @@ class RadarHardwareManager:
 
     #@timeit
     def rxfe_init(self):
-        activeStrings = ['true', '1', 'on']
-        amp1 = self.ini_rxfe_settings['enable_amp1'].lower() in activeStrings
-        amp2 = self.ini_rxfe_settings['enable_amp2'].lower() in activeStrings
+        amp1 = self.ini_rxfe_settings.getboolean('enable_amp1')
+        amp2 = self.ini_rxfe_settings.getboolean('enable_amp2')
+
         att = float(self.ini_rxfe_settings['attenuation'])
         if att < 0:
            self.logger.warning('attenuation for rxfe in array.ini is defnined positive, but given value is negative ({} dB). correcting that to {} dB...'.format(att, att*(-1)))
@@ -1448,9 +1455,9 @@ class RadarHardwareManager:
 
                # BEAMFORMING
                self.logger.debug('start rx beamforming')
-             ##  main_samples, back_samples = self.normalize_antennas( main_samples, back_samples)
+               antenna_scale_factors = self.calc_normalize_and_mute_factors( main_samples, back_samples)
                
-               beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples)
+               beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples, antenna_scale_factors)
                for iChannel, channel in enumerate(self.channels):
                   if channel.processing_state == CS_PROCESSING:
                      # copy samples and ctrlprm to transmit later to control program
@@ -1697,76 +1704,80 @@ class RadarHardwareManager:
             ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
 
     # normalize
-    def normalize_antennas(RHM, main_samples, back_samples):
-        RHM.logger.info("start normalizing rx samples")
-        debugPlot = True
-        nChannels, nAntennas_main, nSamples = main_samples.shape
-        nAntennas_back = back_samples.shape[1]
-        bb_samplingRate = RHM.commonChannelParameter['baseband_samplerate'] 
-        offset = int(np.round(900e-6*bb_samplingRate))
-#       pulse_offsets =  [ int((ti - RHM.commonChannelParameter['pulse_sequence_offsets_vector'][0] * bb_samplingRate) for ti in RHM.commonChannelParameter['pulse_sequence_offsets_vector']]
-#        pulse_offsets = np.array( RHM.commonChannelParameter['pulse_sequence_offsets_vector'])
-#        pulse_offsets = np.round((pulse_offsets - pulse_offsets[0])*bb_samplingRate)
-        channel = RHM.channels[0]
-        pulse_offsets = RHM.all_possible_integration_period_pulse_sample_offsets[:channel.resultDict_list[-1]['npulses_per_sequence'] *  channel.resultDict_list[-1]['nSequences_per_period']]
-        pulse_offsets = np.array(np.round(pulse_offsets/RHM.usrp_rf_rx_rate*bb_samplingRate), dtype=np.int)
-        pulse_offsets -= pulse_offsets[0]
-        rx_idx = []
-        for iPulse in range(len(pulse_offsets)-1):
-            rx_idx += range(pulse_offsets[iPulse]+offset, pulse_offsets[iPulse+1]-offset)
-        rx_idx += range(pulse_offsets[iPulse+1]+offset, nSamples)
-        rx_idx = np.array(rx_idx, dtype=np.int)
-        if debugPlot:
-            import matplotlib.pyplot as plt
+    def calc_normalize_and_mute_factors(RHM, main_samples, back_samples):
+        antenna_scale_factors = np.ones(max( RHM.antenna_idx_list_main + RHM.antenna_idx_list_back)+1)
+        for ant_to_mute in RHM.mute_antenna_list:
+            antenna_scale_factors[ant_to_mute] = 0
+        antenna_scale_factors = [antenna_scale_factors for i in range(len(RHM.channels))]
+
+        if RHM.apply_normalization:
+            RHM.logger.info("start normalizing rx samples")
+            debugPlot = False
+            nChannels, nAntennas_main, nSamples = main_samples.shape
+            nAntennas_back = back_samples.shape[1]
+            bb_samplingRate = RHM.commonChannelParameter['baseband_samplerate'] 
+            offset = int(np.round(900e-6*bb_samplingRate))
+            channel = RHM.channels[0]
+            pulse_offsets = RHM.all_possible_integration_period_pulse_sample_offsets[:channel.resultDict_list[-1]['npulses_per_sequence'] *  channel.resultDict_list[-1]['nSequences_per_period']]
+            pulse_offsets = np.array(np.round(pulse_offsets/RHM.usrp_rf_rx_rate*bb_samplingRate), dtype=np.int)
+            pulse_offsets -= pulse_offsets[0]
+            rx_idx = []
+            for iPulse in range(len(pulse_offsets)-1):
+                rx_idx += range(pulse_offsets[iPulse]+offset, pulse_offsets[iPulse+1]-offset)
+            rx_idx += range(pulse_offsets[iPulse+1]+offset, nSamples)
+            rx_idx = np.array(rx_idx, dtype=np.int)
+            if debugPlot:
+                import matplotlib.pyplot as plt
 
  
-        for iChannel,channel in enumerate(RHM.channels):
- #           all_var = np.var(np.real(main_samples[iChannel,:,rx_idx]), axis=1)
- #           print("all var: {}".format(10*np.log10(all_var)))
-            var_list = []
-            for iAntenna in range(nAntennas_main):
-                curr_variance =   np.var(np.real(main_samples[iChannel][iAntenna][rx_idx]))
-                var_list.append(curr_variance)
-                main_samples[iChannel][iAntenna] /= np.sqrt(curr_variance)
-                if debugPlot and iAntenna < 8:
-                    plt.subplot(8,2,iAntenna*2+1)
-                    plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
-                    plt.title("var = {}".format(curr_variance))
-                   # plot_var = np.zeros(rx_idx[-1]+1)
-                   # plot_var[rx_idx] = 100
-                   # plt.plot(plot_var-90)
+            for iChannel,channel in enumerate(RHM.channels):
+                var_list = []
+                for iAntenna in range(nAntennas_main):
+                    if antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]:
+                        curr_variance =   np.var(np.real(main_samples[iChannel][iAntenna][rx_idx]))
+                    else: # don't calculated if antenna is muted 
+                        curr_variance = 1
 
-      #      for iAntenna in range(nAntennas_back):
-      #          curr_variance =   np.var(np.real(back_samples[iChannel][iAntenna][rx_idx]))
-      #          var_list.append(curr_variance)
-            max_var= max(var_list)
-            var_threshold = 0.1
-            RHM.logger.info("max var = {} = {} **2, var_threshold = {}".format(max_var,  np.sqrt(max_var), var_threshold))
-            for iAntenna in range(nAntennas_main):
-                if var_list[iAntenna] > var_threshold:
-                    scale_factor = np.sqrt(max_var/var_list[iAntenna])
-                    main_samples[iChannel][iAntenna] *= scale_factor 
-                    RHM.logger.info("scaling antenna {} with factor {}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
-                else:
-                    RHM.logger.info("not scaling antenna {} because of small variance: {} (< threshold)".format(RHM.antenna_idx_list_main[iAntenna], var_list[iAntenna]))
-                    scale_factor = 1
-                if debugPlot and iAntenna < 8:
-                    plt.subplot(8,2,iAntenna*2+2)
-                    plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
-                    plt.title("factor: {}".format(scale_factor))
-            if debugPlot:
-               plt.show()       
+                    var_list.append(curr_variance)
+                    if debugPlot and iAntenna < 8:
+                        plt.subplot(8,2,iAntenna*2+1)
+                        plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
+                        plt.title("var = {:2.3f}".format(curr_variance))
+
+                max_var= max(var_list)
+                var_threshold = 0.1
+                RHM.logger.info("max var = {:2.3f} = {:2.3f} **2, var_threshold = {}".format(max_var,  np.sqrt(max_var), var_threshold))
+                for iAntenna in range(nAntennas_main):
+                    if antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]:
+                        if var_list[iAntenna] > var_threshold:
+                            scale_factor = np.sqrt(max_var/var_list[iAntenna]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]
+##                            main_samples[iChannel][iAntenna] *= scale_factor 
+                            antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]  =  scale_factor
+
+                            RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
+                        else:
+                            RHM.logger.info("not scaling antenna {} because of small variance: {} (< threshold)".format(RHM.antenna_idx_list_main[iAntenna], var_list[iAntenna]))
+                            scale_factor = 1
+                    else:
+                        RHM.logger.info("muting antenna {} (defined in array_config.ini)".format(RHM.antenna_idx_list_main[iAntenna], var_list[iAntenna]))
+
+                    if debugPlot and iAntenna < 8:
+                        plt.subplot(8,2,iAntenna*2+2)
+                        plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
+                        plt.title("factor: {:2.3f}".format(scale_factor))
+                if debugPlot:
+                   plt.show()       
 
 
-#            print("list var: {}".format(np.sqrt(var_list)))
-        RHM.logger.info("end normalizing rx samples")
+#                print("list var: {}".format(np.sqrt(var_list)))
+            RHM.logger.info("end normalizing rx samples")
 
-        return main_samples, back_samples
+        return antenna_scale_factors
 
 
  
     # BEAMFORMING
-    def calc_beamforming(RHM, main_samples, back_samples):
+    def calc_beamforming(RHM, main_samples, back_samples, antenna_scale_factors):
         nSamples = main_samples.shape[2]
         beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
@@ -1785,7 +1796,7 @@ class RadarHardwareManager:
                 # MAIN ARRAY
                 first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
                 first_pol_matrix_idx = [RHM.antenna_idx_list_main.index(ant_idx) for ant_idx in first_pol_ant_idx] 
-                phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift) for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift)*antenna_scale_factors[iChannel][ant_idx] for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
                 complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel])[first_pol_matrix_idx,:]  * RHM.scaling_factor_rx_bb 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
@@ -1815,7 +1826,7 @@ class RadarHardwareManager:
                    plt.title("Main array")
 
                 # BACK ARRAY (same as middle of main array, ant 16 = ant 6, ...)
-                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift) for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift* antenna_scale_factors[iChannel][ant_idx]) for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
                 complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
