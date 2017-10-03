@@ -133,10 +133,10 @@ class RawDataGUI:
         self.nPeriods = len(self.data)
         self.iSequence = 0
         self.nSequences = (self.data[self.iPeriod]["nSeq"])
-        self.fgh       = plt.figure()
         
+    def open(self):
+        self.fgh       = plt.figure()        
         self.plot_db = False
-
         self.cid       = self.fgh.canvas.mpl_connect('key_press_event', self.keyCallback)
         self.updateGUI()
         print('Shortcuts:\n  left / right : previous / next sequence \n  up / down    : previous / next period\n  d            : toggle lin / log plotting')
@@ -227,4 +227,6 @@ class RawDataGUI:
 
 
 # %% 
-x = RawDataGUI(file_with_path)
+if __name__ == '__main__':
+   x = RawDataGUI(file_with_path)
+   x.open()
