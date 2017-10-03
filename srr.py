@@ -473,12 +473,15 @@ def stop_rawacf_write():
 def stop_watchdog():
     myPrint(" Stopping watchdog...")
     serverProcesses = get_process_ids("srr_watchdog")
+
     if len(serverProcesses):
-       terminate_all(serverProcesses)
-       return 1
+        for pro in serverProcesses:
+            myPrint("   killing pid {}".format(pro['pid']))
+            os.kill(pro['pid'], signal.SIGKILL)
+        return 1
     else:
-       myPrint("  No watchdog processes found...")
-       return 0
+        myPrint("  No watchdog processes found...")
+        return 0
     
     
     
