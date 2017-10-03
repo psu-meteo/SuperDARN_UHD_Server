@@ -29,7 +29,7 @@ SAVE_CLEAR_FREQUENCY_SEARCH = False
 CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
 
 
-DEBUG = 1
+DEBUG = 0
 def dbPrint(msg):
    if DEBUG:
      print("clear_frequency_search.py : " + msg)
@@ -133,10 +133,18 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
 
     # gather current UHD time
     dbPrint("send usrp_get_time")
-    gettime_cmd = usrp_get_time_command(usrp_sockets[0])
+    gettime_cmd = usrp_get_time_command(usrp_sockets)
     gettime_cmd.transmit()
-     
-    usrptime  = gettime_cmd.recv_time(usrp_sockets[0])
+    
+    usrp_times = []
+    for sock in usrp_sockets:
+        try:
+            usrp_times.append( gettime_cmd.recv_time(sock))
+        except:
+            pass
+
+    usrptime = usrp_times[0]
+
     gettime_cmd.client_return()
 
     # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
