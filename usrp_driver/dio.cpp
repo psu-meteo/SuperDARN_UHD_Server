@@ -88,7 +88,7 @@
 #define TR_RX     IO_PIN_04
 #define TR_PINS   (TR_TX +TR_RX) 
 
-#define NOT_FAULT_PIN  IO_PIN_01
+#define FAULT_PIN  IO_PIN_01
 
 // SYNC
 #define SYNC_PINS IO_PIN_08 
@@ -154,13 +154,13 @@ void init_timing_signals(
        
        usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, SYNC_PINS);
        usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, TR_PINS);
-       usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, NOT_FAULT_PIN);
+       usrp->set_gpio_attr(bank_name,"CTRL",MANUAL_CONTROL, FAULT_PIN);
        // TODO: set in one step
-       //  usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + noFAULT)); // + or | should be the same here
+       //  usrp->set_gpio_attr(side_name_list[iSide],"CTRL",MANUAL_CONTROL, (SYNC_PINS + TR_PINS + FAULT_PIN)); // + or | should be the same here
 
        usrp->set_gpio_attr(bank_name,"DDR" ,SYNC_PINS, SYNC_PINS);
        usrp->set_gpio_attr(bank_name,"DDR" ,TR_PINS,   TR_PINS);
-       usrp->set_gpio_attr(bank_name,"DDR" ,      0,   NOT_FAULT_PIN); // NOT_FAULT as input
+       usrp->set_gpio_attr(bank_name,"DDR" ,      0,   FAULT_PIN); // FAULT as input
     }
 
    if (mimic_active) {
@@ -183,9 +183,9 @@ bool read_FAULT_status_from_control_board(
     sprintf(bank_name, "TX%c",65 + iSide);
     uint32_t input = usrp->get_gpio_attr(bank_name, "READBACK");
     DEBUG_PRINT("Readback from control board: %d\n", input);
-    bool notFAULT = (input & NOT_FAULT_PIN) != 0;
-    DEBUG_PRINT("Returning FAULT = %d\n", !notFAULT);
-    return !notFAULT;
+    bool fault = (input & FAULT_PIN) != 0;
+    DEBUG_PRINT("Returning FAULT = %d\n", fault);
+    return fault;
 }
 
 
