@@ -7,13 +7,13 @@ basePath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, basePath )
 import srr
 import subprocess
-
+import signal
 
 
 
 wait_after_restart_all = 40 # TODO check if if time is good
 wait_after_restart_driver = 30 # TODO check if if time is good
-check_period = 1 # sec
+check_period = 10 # sec
 
 # just for debug
 restart_driver  = True
@@ -22,7 +22,7 @@ write_log = True
 # usrp server file
 server_status_file = os.path.join(basePath, 'log', "usrp_server_status.txt")
 file_age_limit = 30 + 10 # sec 
-usrp_restart_period = 30 # sec
+usrp_restart_period = 60*5 # sec to next restart
 
 
 watch_usrp_server = "server" in sys.argv
@@ -49,6 +49,18 @@ def log(msg):
 
 
 log("Starting up watchdog: watch_usrp_server: {}, restart_driver: {}".format( watch_usrp_server, restart_driver))
+
+
+
+class GracefulKiller:
+  kill_now = False
+  def __init__(self):
+    signal.signal(signal.SIGINT, self.exit_gracefully)
+    signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+  def exit_gracefully(self,signum, frame):
+    self.kill_now = True
+
 
 
 class usrpDriverWatcher():
@@ -121,7 +133,7 @@ class usrpClass():
 fileName = os.path.join(basePath, 'usrp_config.ini')
 usrp_driver_watcher = usrpDriverWatcher(fileName, usrp_restart_period)
 
-
+killer =  GracefulKiller()
 restart_server = False
 
 while True:
@@ -162,6 +174,9 @@ while True:
 
 
 
+   if killer.kill_now:
+     log("Received SIGTERM or SIGKILL, shutting down watchdog.")
+     break
 
    time.sleep(check_period)
 
