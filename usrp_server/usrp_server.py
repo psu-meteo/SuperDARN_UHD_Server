@@ -1099,7 +1099,7 @@ class RadarHardwareManager:
             RHM.newChannelList.remove(channel)
 
         # CUDA_GENERATE for first period
-        RHM.logger.debug('start CUDA_GENERATE_PULSE (1st period)')
+        RHM.logger.debug('start CUDA_GENERATE_PULSE swing {} (1st period) '.format(RHM.swingManager.activeSwing))
         cmd = cuda_generate_pulse_command(RHM.cudasocks, RHM.swingManager.activeSwing, RHM.mixingFreqManager.current_mixing_freq*1000)
         cmd.transmit()
         cmd.client_return()
@@ -1110,9 +1110,12 @@ class RadarHardwareManager:
 
 
     def unregister_channel_from_HardwareManager(self, channelObject):
+        iRun = 0
         while self.trigger_next_function_running:
-           self.logger.debug("Waiting for trigger_next_swing() to finish before deleting channel...")
+            if (iRun % 100000) == 0:
+                self.logger.debug("Waiting for trigger_next_swing() to finish before deleting channel...")
            # no time.sleep() here because there is not much time between two trigger calls...
+            iRun += 1
         
         if channelObject in self.active_channels:
            self.active_channels.remove(channelObject)
@@ -1302,7 +1305,7 @@ class RadarHardwareManager:
         if transmittingChannelAvailable:
            if trigger_next_period:
               # USRP SETUP
-              self.logger.debug('triggering period no {}'.format(channel.scanManager.current_period))
+              self.logger.debug('triggering period no {}, swing {}'.format(channel.scanManager.current_period,swingManager.activeSwing))
               self.logger.debug("start USRP_SETUP")
               cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
                                        self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
@@ -1358,7 +1361,7 @@ class RadarHardwareManager:
               self.logger.debug('start USRP_TRIGGER')
               trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
               cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
-              self.logger.debug('sending trigger pulse command')
+              self.logger.debug('sending trigger pulse command for swing {}'.format(swingManager.activeSwing))
               cmd.transmit()
               self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
            else:
@@ -1591,14 +1594,12 @@ class RadarHardwareManager:
                   self.logger.error("When is this happening and is this okay???")
  
 
-        # CUDA_GENERATE for first period
-        synthNewPulses = True # TODO keep track of changes to do this only if necessary
-        if synthNewPulses:
-           self.logger.debug('start CUDA_GENERATE_PULSE')
-           cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq*1000)
-           cmd.transmit()
-           cmd.client_return()
-           self.logger.debug('end CUDA_GENERATE_PULSE')
+        # CUDA_GENERATE for next period
+        self.logger.debug('start CUDA_GENERATE_PULSE')
+        cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq*1000)
+        cmd.transmit()
+        cmd.client_return()
+        self.logger.debug('end CUDA_GENERATE_PULSE')
 
         if transmittingChannelAvailable and trigger_next_period: 
            # USRP_READY_DATA for activeSwing 
