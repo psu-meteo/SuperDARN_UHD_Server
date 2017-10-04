@@ -1746,13 +1746,12 @@ class RadarHardwareManager:
                         plt.title("var = {:2.3f}".format(curr_variance))
 
                 max_var= max(var_list)
-                var_threshold = 0.1
-                RHM.logger.info("max var = {:2.3f} = {:2.3f} **2, var_threshold = {}".format(max_var,  np.sqrt(max_var), var_threshold))
+                var_threshold = max_var * 10 ** (-30/10)
+                RHM.logger.info("max var = {:2.3f} = {:2.3f} **2, var_threshold = {} (-30 dB) ".format(max_var,  np.sqrt(max_var), var_threshold))
                 for iAntenna in range(nAntennas_main):
                     if antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]:
                         if var_list[iAntenna] > var_threshold:
                             scale_factor = np.sqrt(max_var/var_list[iAntenna]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]
-##                            main_samples[iChannel][iAntenna] *= scale_factor 
                             antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]  =  scale_factor
 
                             RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
