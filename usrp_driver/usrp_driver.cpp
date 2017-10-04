@@ -58,12 +58,6 @@
 #endif
 
 #define SETUP_WAIT 1 // in seconds
-// DEL
-//#define SWING0 0
-//#define SWING1 1
-//#define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
-//#define VERBOSE 1
-
 #define nSwings 2 // swings are slots in the swing buffer
 
 
@@ -356,51 +350,22 @@ void siginthandler(int sigint)
 }
 
 
-static unsigned long long lastTotalUser, lastTotalUserLow, lastTotalSys, lastTotalIdle;
 
-void init(){
-    FILE* file = fopen("/proc/stat", "r");
-    fscanf(file, "cpu %llu %llu %llu %llu", &lastTotalUser, &lastTotalUserLow,
-        &lastTotalSys, &lastTotalIdle);
-    fclose(file);
-}
+bool check_clock_lock(uhd::usrp::multi_usrp::sptr usrp) {
+    std::cout << std::endl << "Checking USRP devices for lock." << std::endl;
+    bool all_locked = true;
+    for(size_t ch = 0; ch < usrp->get_num_mboards(); ch++){
+        std::string ref_locked = usrp->get_mboard_sensor("ref_locked",ch).value;
 
-double getCurrentCPUValue(){
-    double percent;
-    FILE* file;
-    unsigned long long totalUser, totalUserLow, totalSys, totalIdle, total;
-
-    file = fopen("/proc/stat", "r");
-    fscanf(file, "cpu %llu %llu %llu %llu", &totalUser, &totalUserLow,
-        &totalSys, &totalIdle);
-    fclose(file);
-
-    if (totalUser < lastTotalUser || totalUserLow < lastTotalUserLow ||
-        totalSys < lastTotalSys || totalIdle < lastTotalIdle){
-        //Overflow detection. Just skip this value.
-        percent = -1.0;
+        if(ref_locked != "true") all_locked = false;
     }
-    else{
-        total = (totalUser - lastTotalUser) + (totalUserLow - lastTotalUserLow) +
-            (totalSys - lastTotalSys);
-        percent = total;
-        total += (totalIdle - lastTotalIdle);
-        percent /= total;
-        percent *= 100;
-    }
+    if(not all_locked) std::cout << std::endl << "WARNING: One or more devices not locked." << std::endl;
 
-    lastTotalUser = totalUser;
-    lastTotalUserLow = totalUserLow;
-    lastTotalSys = totalSys;
-    lastTotalIdle = totalIdle;
+   return all_locked;
 
-    return percent;
 }
 
 int UHD_SAFE_MAIN(int argc, char *argv[]){
-    // example usage:
-    // ./usrp_driver --antenna 1 --host usrp1 
-    // spawn a usrp_server for each usrp
     
     uhd::set_thread_priority_safe(); 
    
@@ -411,7 +376,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     unsigned int iSide, iSwing; // often used loop variables
 
-    int32_t verbose = 1; 
     int32_t rx_worker_status = 0; 
     int32_t clrfreq_rx_worker_status = 0; 
     int32_t mute_output = 0; // used if rx_worker error happends
@@ -690,9 +654,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 break;
             }
 
-          //  double cpuUsage = getCurrentCPUValue();
-          //  DEBUG_PRINT("CPU usage: %f \n",cpuUsage );
- 
             connect_retrys = MAX_SOCKET_RETRYS;
             switch(command) {
                 case USRP_SETUP: {
@@ -736,20 +697,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                            
                        }
                     }
-                /*    // DEGUG
-                    for(iSide = 0; iSide < nSides; iSide++) {
-                        DEBUG_PRINT("rx_data_buffer after init:\n  side %d", iSide);
-                        for (int iSample=0; iSample<200; iSample++) {
-                             DEBUG_PRINT("%lu, ", rx_data_buffer[iSide][iSample]);
-                        }
-                        DEBUG_PRINT("\n");
-                    }
-                 */
 
-               /*     for (iSide=0; iSide<nSides;iSide++) {
-                        DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
-                    }
-                 */   
                     // TODO use return argument of set_xx to save new rate/freq                    
    
                     // if necessary, retune USRP frequency and sampling rate
