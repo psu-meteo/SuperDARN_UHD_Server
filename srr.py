@@ -329,7 +329,7 @@ def stop_usrp_driver_soft():
         myPrint("   No usrp_driver processes")
         return 1
     else:
-	myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
+        myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
         return -1
 
 def stop_usrp_driver_hard():
@@ -343,7 +343,7 @@ def stop_usrp_driver():
         driver_status = stop_usrp_driver_soft()
     except:
         myPrint("Soft USRP stop failed...")
-    if driver_status = -1
+    if driver_status == -1:
         stop_usrp_driver_hard()
 
     return abs(driver_status)
@@ -785,7 +785,7 @@ def main():
             restart_all()
 
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-    	    usrp_driver_was_running = stop_usrp_driver()
+            usrp_driver_was_running = stop_usrp_driver()
             if usrp_driver_was_running:
                 waitFor(nSecs_restart_pause) 
             start_usrp_driver()
