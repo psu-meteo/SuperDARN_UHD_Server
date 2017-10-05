@@ -209,47 +209,31 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         if channel.channelScalingFactor == 0:
             self.logger.warning("ChannelScalingFactor is zero for channel {} (tfreq={} MHz). Channel is muted! ".format(channel.ctrlprm['channel'],channel.ctrlprm['tfreq'] / 1000 ))
 
-        for iAntenna in range(nAntennas):
-            for iPulse in range(nPulses):
-                # compute pulse compression 
-
-                # apply phase shifting to pulse using phase_mask
-                psamp = np.copy(pulsesamps)
-             #   print("orig data: {}".format(len(psamp[len(padding):-len(padding)])))
-             #   print("phase mask size: {}".format(channel.phase_masks[iPulse] ))
-                psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse % channel.npulses ])
-                # TODO: support non-1us resolution phase masks
+        for iPulse in range(nPulses):
+             # apply phase shifting to pulse using phase_mask
+             psamp = np.copy(pulsesamps)
+             psamp[len(padding):-len(padding)] *=  np.exp(1j * np.pi * channel.phase_masks[iPulse % channel.npulses ])
+             # TODO: support non-1us resolution phase masks
         
-                # apply filtering function
-                if shapefilter != None:
-                    psamp = shapefilter(psamp, trise, self.gpu.tx_bb_samplingRate)
-                
+             # apply filtering function
+             if shapefilter != None:
+                 psamp = shapefilter(psamp, trise, self.gpu.tx_bb_samplingRate)
+
+             # apply gain control
+             psamp *= channel.channelScalingFactor
+
+             # constant phase over complete integration period
+             t = channel.pulse_offsets_vector[iPulse]
+             freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
+             omega = np.float64(2*np.pi*freq)
+             offset_factor = np.exp(-1j*omega*t)
+
+             psamp *= offset_factor 
+              
+             for iAntenna in range(nAntennas):
                 # apply beamforming
-                psamp *= beamforming_shift[iAntenna]
+                bb_signal[iAntenna][iPulse] = psamp * beamforming_shift[iAntenna]
 
-                # constant phase over complete integration period
-                t = channel.pulse_offsets_vector[iPulse ]
-                freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
-              #  print("tx correction freq: {}, time of pulse {}: {} s (sample {})".format(freq, iPulse, t/self.gpu.tx_rf_samplingRate,t))
-                omega = np.float64(2*np.pi*freq)
-           #     import matplotlib.pyplot as plt
-           #     timeVec = np.arange(500000) /10e6
-           #     phase = np.exp(-1j*omega*timeVec)
-           #     plt.plot(timeVec, np.real(phase))
-           #     plt.plot(timeVec, np.imag(phase))
-           #     offset_factor = np.exp(1j*omega*t)
-           #     plt.scatter(t,np.real(offset_factor), label="real")
-           #     plt.scatter(t,np.imag(offset_factor))
-           #     plt.legend()
-           #     plt.show()
-                offset_factor = np.exp(-1j*omega*t)
-                psamp *= offset_factor 
-
-                # apply gain control
-                psamp *= channel.channelScalingFactor
-
-                # update baseband pulse sample array for antenna
-                bb_signal[iAntenna][iPulse] = psamp
 
         return bb_signal
          
