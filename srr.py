@@ -291,10 +291,13 @@ def get_usrp_driver_processes():
     return usrpProcesses
 
 def stop_usrp_driver_soft():
+    """ soft stop: connectin as server and sending quit command
+        output: 0 (no driver processes have been active), 1 (soft stop worked) or -1 (driver still active) 
+    """
     usrpProcesses = get_usrp_driver_processes()
     if len(usrpProcesses) == 0:
         myPrint("  No usrp_driver processes")
-        return
+        return 0
     myPrint("Found {} usrp_driver processes".format(len(usrpProcesses)))
     
     dtype = np.uint8
@@ -319,9 +322,15 @@ def stop_usrp_driver_soft():
     
     
     myPrint("  Done.")
-    myPrint("  Again checking for usrp_driver processes...")
+    waitFor(2)
+    myPrint("   Again checking for usrp_driver processes after soft stop...")
     usrpProcesses = get_usrp_driver_processes()
-    myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
+    if len(usrpProcesses) == 0:
+        myPrint("   No usrp_driver processes")
+        return 1
+    else:
+	myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
+        return -1
 
 def stop_usrp_driver_hard():
   #  myPrint("Stop usrp_driver hard...")
@@ -331,10 +340,14 @@ def stop_usrp_driver_hard():
 def stop_usrp_driver():
     myPrint(" Stopping usrp_driver...")
     try:
-        stop_usrp_driver_soft()
+        driver_status = stop_usrp_driver_soft()
     except:
         myPrint("Soft USRP stop failed...")
-    stop_usrp_driver_hard()
+    if driver_status = -1
+        stop_usrp_driver_hard()
+
+    return abs(driver_status)
+
 
 def get_cuda_driver_processes():
     processList = get_processes()
@@ -420,8 +433,10 @@ def stop_usrp_server():
           myPrint("Error while connecting to server. Killing PID...")
           # terminate processes if they still exis
       terminate_all(serverProcesses)
+      return 1
     else:
        myPrint("  No usrp_server processes found...")
+       return 0
     
 def stop_rtserver():
     myPrint(" Stopping rtserver...")
@@ -669,11 +684,13 @@ def restart_all():
    start_usrp_server()
 
 def restart_driver():
-    stop_usrp_server() # this does not work....
-    waitFor(10)
-    stop_usrp_driver()
+    server_was_running = stop_usrp_server() 
+    if server_was_running:
+        waitFor(5)
+    usrp_driver_was_running = stop_usrp_driver()
     stop_cuda_driver()
-    waitFor(nSecs_restart_pause)
+    if usrp_driver_was_running:
+        waitFor(nSecs_restart_pause)
     start_cuda_driver()
     start_usrp_driver()
 
@@ -768,9 +785,9 @@ def main():
             restart_all()
 
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-            stop_usrp_driver()
-            myPrint("waiting for {} sec".format(nSecs_restart_pause+2))
-            time.sleep(nSecs_restart_pause+2)
+    	    usrp_driver_was_running = stop_usrp_driver()
+            if usrp_driver_was_running:
+                waitFor(nSecs_restart_pause) 
             start_usrp_driver()
    
          elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
@@ -794,11 +811,11 @@ def main():
          if nArguments == 1 or inputArg[1].lower == "all":
             myPrint("Stopping all...")
             stop_watchdog()
-            stop_usrp_server()
-            time.sleep(5)
-            stop_cuda_driver()
-            time.sleep(5)
+            server_was_running = stop_usrp_server() 
+            if server_was_running:
+                waitFor(5)
             stop_usrp_driver()
+            stop_cuda_driver()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             stop_watchdog()
             stop_usrp_driver()
