@@ -1,0 +1,6 @@
+#!/bin/bash
+echo `date +%s`>>$4.log
+NOW=$(date +"%Y%m%d_%H%M%S")
+LOGFILE="usrp_driver_$2__$NOW.log"
+
+./usrp_driver "$@" >/home/radar/SuperDARN_UHD_Server/log/$LOGFILE  2>&1
