@@ -24,6 +24,7 @@
 #include <semaphore.h>
 #include <time.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <argtable2.h>
 #include <uhd/types/tune_request.hpp>
@@ -41,6 +42,7 @@
 #include <boost/format.hpp>
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
+
 
 #include "usrp_utils.h"
 #include "tx_worker.h"
@@ -82,6 +84,27 @@
 #define INIT_SHM 1
 
 #define CAPTURE_ERRORS 0
+
+const char * log_dir = "../log/usrp_driver"; 
+const char * diag_dir = "/data/diagnostic_samples/usrp_driver"; 
+
+// create log and diag_samples dir
+void init_all_dirs() {
+   struct stat st = {0};
+   
+   if (stat(log_dir, &st) == -1) {
+       mkdir(log_dir, 0777);
+   }
+   if (SAVE_RAW_SAMPLES_DEBUG){
+       if (stat(diag_dir, &st) == -1) {
+           mkdir(diag_dir, 0777);
+       }
+   }
+}
+
+
+
+
 
 enum driver_states
 {
@@ -435,6 +458,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
     fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
 
+    init_all_dirs();
+
     // TODO also read usrp_config.ini and get antenna and side information from it. remove antenna input argument. 
 
     // process command line arguments
@@ -636,6 +661,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         driverconn = accept(driversock, (struct sockaddr *) &client_addr, &addr_size);
         fprintf(stderr, "accepted socket connection\n");
 
+
+
         while(true) {
             // wait for transport endpoint to connect?
             
@@ -655,6 +682,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
             }
 
             connect_retrys = MAX_SOCKET_RETRYS;
+
+
             switch(command) {
                 case USRP_SETUP: {
                     // receive infomation about a pulse sequence/integration period
@@ -758,7 +787,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         char raw_dump_name[80];
                        // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
                         for (iSide =0; iSide < nSides; iSide++){
-                            sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
+                            sprintf(raw_dump_name,"%s/raw_samples_tx_ant_%d.cint16", diag_dir, antennaVector[iSide]);
                             raw_dump_fp = fopen(raw_dump_name, "wb");
                             fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
                             fclose(raw_dump_fp);
@@ -815,27 +844,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
                         DEBUG_PRINT("spb %d, pulse length %d samples, pulse with padding %d\n", spb, nSamples_tx_pulse, num_samples_per_pulse_with_padding);
 
-                      //  // TODO unpack and pad tx sample
-                      //  for (iSide = 0; iSide<nSides; iSide++) {
-                      //      tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
-
-                      //      for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
-                      //          shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
-                      //          memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
-                      //      }
-                      //  }
-
-                      //  if(SAVE_RAW_SAMPLES_DEBUG) {
-                      //      FILE *raw_dump_fp;
-                      //      char raw_dump_name[80];
-                      //     // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
-                      //      for (iSide =0; iSide < nSides; iSide++){
-                      //          sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
-                      //          raw_dump_fp = fopen(raw_dump_name, "wb");
-                      //          fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
-                      //          fclose(raw_dump_fp);
-                      //      }
-                      //  }
 
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
@@ -968,7 +976,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
                         for (iSide=0; iSide<nSides; iSide++) {
-                           sprintf(raw_dump_name,"diag/raw_samples_rx_ant_%d.cint16", antennaVector[iSide]);
+                           sprintf(raw_dump_name,"%s/raw_samples_rx_ant_%d.cint16", diag_dir, antennaVector[iSide]);
                            raw_dump_fp = fopen(raw_dump_name, "wb");
                            fwrite(&rx_data_buffer[iSide], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
                            fclose(raw_dump_fp);
@@ -1103,6 +1111,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     exit(1);
                     break;
                 }
+            }
+            if (not check_clock_lock(usrp)) {
+                fprintf(stderr,  "Error: Lost clock for USRP: %s\n ", as_host->sval[0]);
+                exit_driver = 1; 
             }
 
             // clean exit
