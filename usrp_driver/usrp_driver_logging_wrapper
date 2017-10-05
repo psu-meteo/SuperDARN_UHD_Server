@@ -1,0 +1,3 @@
+#!/bin/bash
+echo `date +%s`>>$4.log
+./usrp_driver_program "$@" >/home/radar/SuperDARN_UHD_Server/log/usrp_$4.log
