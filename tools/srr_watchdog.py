@@ -117,15 +117,19 @@ class usrpClass():
       self.pid = None
 
    def get_start_arguments(self):
-      start_arg = ["./usrp_driver", "--host", self.host]
-      for iSide, side in enumerate(self.side):
-         if side.lower() == 'a':
-            start_arg += [ "--antennaA", self.ant[iSide]]
-         elif side.lower() == 'b':
-             start_arg += [ "--antennaB", self.ant[iSide]] 
-         else:
-            log("unknown usrp side: {}".format(side))
-      return start_arg
+       if srr.USE_USRP_DRIVER_WRAPPER:
+           start_arg = ["./usrp_driver_logging_wrapper", "--host", self.host]
+       else:
+           start_arg = ["./usrp_driver", "--host", self.host]
+
+       for iSide, side in enumerate(self.side):
+          if side.lower() == 'a':
+             start_arg += [ "--antennaA", self.ant[iSide]]
+          elif side.lower() == 'b':
+              start_arg += [ "--antennaB", self.ant[iSide]] 
+          else:
+             log("unknown usrp side: {}".format(side))
+       return start_arg
 
 
 

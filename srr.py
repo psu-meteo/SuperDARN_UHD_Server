@@ -82,6 +82,8 @@ UHD_EXIT = ord('e')
 USRP_SERVER_PORT = 45000
 USRP_SERVER_QUIT  = ',' # '.'
 
+USE_USRP_DRIVER_WRAPPER = True
+
 
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
@@ -551,7 +553,12 @@ def start_usrps_from_config(usrp_sleep = False):
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
 ###    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
-    baseStartArg = ['./usrp_driver',  '--host' ]
+
+    if USE_USRP_DRIVER_WRAPPER:
+        baseStartArg = ['./usrp_driver_logging_wrapper',  '--host' ]
+    else:
+        baseStartArg = ['./usrp_driver',  '--host' ]
+
     
     for start_arg in start_arg_list:
        all_start_arg = baseStartArg + start_arg 
