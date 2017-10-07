@@ -119,7 +119,7 @@ void usrp_tx_worker(
     md.end_of_burst = true;
     tx_stream->send(&pulse_samples[0], 0, md, timeout);
 
-    if (DEBUG) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
+    DEBUG_PRINT("Waiting for async burst ACK... ");
     uhd::async_metadata_t async_md;
     bool got_async_burst_ack = false;
 
@@ -127,7 +127,7 @@ void usrp_tx_worker(
         got_async_burst_ack = (async_md.event_code == uhd::async_metadata_t::EVENT_CODE_BURST_ACK);
     }
     
-    if (DEBUG) std::cout << (got_async_burst_ack? "success" : "fail") << std::endl;
+    DEBUG_PRINT((got_async_burst_ack? "success\n" : "fail\n"));
 
     DEBUG_PRINT("TX_WORKER finished pulses\n");
 

@@ -183,7 +183,7 @@ void usrp_rx_worker(
     }
 
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
-    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+//    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
     if (num_acc_samps != num_requested_samps){
         *return_status=-100;

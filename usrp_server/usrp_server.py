@@ -1083,7 +1083,7 @@ class RadarHardwareManager:
      
             # CUDA_ADD_CHANNEL in first period
             cmd = cuda_add_channel_command(RHM.cudasocks, sequence=channel.get_current_sequence(), swing = channel.swingManager.activeSwing)
-            RHM.logger.debug('calling CUDA_ADD_CHANNEL at initialize_channel() (cnum {}, swing {})'.format(channel.cnum, channel.swingManager.activeSwing))
+            RHM.logger.debug('calling CUDA_ADD_CHANNEL at initialize_channel() (cnum {}, swing {}, beam {})'.format(channel.cnum, channel.swingManager.activeSwing, channel.scanManager.current_beam))
             cmd.transmit()
             cmd.client_return()      
             if channel.active_state == CS_INACTIVE: 
@@ -1278,7 +1278,7 @@ class RadarHardwareManager:
         self.trigger_next_function_running = True
         self.logger.debug('running RHM.trigger_next_swing()')
         self.integration_time_manager.started_trigger_next()
-        swingManager = self.swingManager
+ ##       swingManager = self.swingManager
      
         self.gain_control_divide_by_nChannels()
         
@@ -1305,10 +1305,10 @@ class RadarHardwareManager:
         if transmittingChannelAvailable:
            if trigger_next_period:
               # USRP SETUP
-              self.logger.debug('triggering period no {}, swing {}'.format(channel.scanManager.current_period,swingManager.activeSwing))
+              self.logger.debug('triggering period no {}, swing {}'.format(channel.scanManager.current_period + 1 - channel.scanManager.isPrePeriod, self.swingManager.activeSwing))
               self.logger.debug("start USRP_SETUP")
               cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, swingManager.activeSwing)
+                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, self.swingManager.activeSwing)
               cmd.transmit()
               self.usrpManager.eval_client_return(cmd)
               self.logger.debug("end USRP_SETUP")
@@ -1360,8 +1360,8 @@ class RadarHardwareManager:
               # broadcast the start of the next integration period to all usrp
               self.logger.debug('start USRP_TRIGGER')
               trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
-              cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], swingManager.activeSwing) 
-              self.logger.debug('sending trigger pulse command for swing {}'.format(swingManager.activeSwing))
+              cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], self.swingManager.activeSwing) 
+              self.logger.debug('sending trigger pulse command for swing {}'.format(self.swingManager.activeSwing))
               cmd.transmit()
               self.logger.debug('current usrp time: {}, trigger time of: {}'.format(usrp_time, trigger_time))
            else:
@@ -1411,7 +1411,7 @@ class RadarHardwareManager:
            if CS_PROCESSING in allProcessingChannelStates:
                # CUDA_GET_DATA
                self.logger.debug('start CUDA_GET_DATA')
-               cmd = cuda_get_data_command(self.cudasocks, swingManager.processingSwing)
+               cmd = cuda_get_data_command(self.cudasocks, self.swingManager.processingSwing)
                cmd.transmit()
 
                nMainAntennas = len(self.antenna_idx_list_main)
@@ -1565,8 +1565,8 @@ class RadarHardwareManager:
         for channel in self.channels:
             if channel.scanManager.isLastPeriod: # or channel.scanManager.isForelastPeriod:
                self.logger.debug("start CUDA_REMOVE_CHANNEL")
-               cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = swingManager.processingSwing) 
-               self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+               cmd = cuda_remove_channel_command(self.cudasocks, sequence=channel.get_current_sequence(), swing = self.swingManager.processingSwing) 
+               self.logger.debug('send CUDA_REMOVE_CHANNEL (cnum {}, swing {})'.format(channel.cnum, self.swingManager.processingSwing))
                cmd.transmit()
                cmd.client_return()      
                self.logger.debug("end CUDA_REMOVE_CHANNEL")
@@ -1580,15 +1580,15 @@ class RadarHardwareManager:
             else:
                if channel.active:
                   self.logger.debug("start CUDA_ADD_CHANNEL")
-                  cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = swingManager.processingSwing) 
-                  self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {})'.format(channel.cnum, swingManager.processingSwing))
+                  cmd = cuda_add_channel_command(self.cudasocks, sequence=channel.get_next_sequence(), swing = self.swingManager.processingSwing) 
+                  self.logger.debug('send CUDA_ADD_CHANNEL (cnum {}, swing {}, beam {})'.format(channel.cnum, self.swingManager.processingSwing, channel.scanManager.current_beam))
                   cmd.transmit()
                   cmd.client_return()      
                   self.logger.debug("end CUDA_ADD_CHANNEL")
    
                   if channel.processing_state == CS_INACTIVE: # first use of swing 1
                       channel.processing_state = CS_READY
-                      channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing 1)".format(self.swingManager.processingSwing, channel.cnum )) 
+                      channel.logger.debug("Switching processing state (swing {}) state of cnum {} to CS_READY (first use of swing)".format(self.swingManager.processingSwing, channel.cnum )) 
                else:
                   self.logger.debug("ch {}: channel not active => not calling CUDA_ADD".format(channel.cnum))
                   self.logger.error("When is this happening and is this okay???")
@@ -1596,7 +1596,7 @@ class RadarHardwareManager:
 
         # CUDA_GENERATE for next period
         self.logger.debug('start CUDA_GENERATE_PULSE')
-        cmd = cuda_generate_pulse_command(self.cudasocks, swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq*1000)
+        cmd = cuda_generate_pulse_command(self.cudasocks, self.swingManager.processingSwing, self.mixingFreqManager.current_mixing_freq*1000)
         cmd.transmit()
         cmd.client_return()
         self.logger.debug('end CUDA_GENERATE_PULSE')
@@ -1604,7 +1604,7 @@ class RadarHardwareManager:
         if transmittingChannelAvailable and trigger_next_period: 
            # USRP_READY_DATA for activeSwing 
            self.logger.debug('start USRP_READY_DATA')
-           cmd = usrp_ready_data_command(self.usrpManager.socks, swingManager.activeSwing)
+           cmd = usrp_ready_data_command(self.usrpManager.socks, self.swingManager.activeSwing)
            cmd.transmit()
     
            # check status of usrp drivers
@@ -1613,10 +1613,12 @@ class RadarHardwareManager:
            self.logger.debug('end receiving all USRP status')
        
            all_usrps_report_failure = True
+           antenna_list_offset = 0
            for iUSRP, ready_return in enumerate(payloadList):
                if ready_return == CONNECTION_ERROR:
                   self.usrpManager.fault_status[iUSRP] = True
                   self.logger.error('connection to USRP broke in GET_DATA')
+                  antenna_list_offset += 1
                else: 
                   rx_status                = ready_return['status']
                   if rx_status < 0:
@@ -1632,7 +1634,7 @@ class RadarHardwareManager:
                      # out of sequence flag adds (-) 1000 to error code
                      if error_code >= 1000:  
                          print_name += " and out_of_sequence=1"
-                     self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP]))
+                     self.logger.error("Error: {}  (code {}) occurred in rx_worker for antennas {}. ".format(print_name, rx_status, self.usrpManager.antennaList_active[iUSRP-antenna_list_offset]))
 
                   else:
                      all_usrps_report_failure = False
@@ -1653,14 +1655,14 @@ class RadarHardwareManager:
 
 
         # SWITCH SWINGS
-        swingManager.switch_swings()
+        self.swingManager.switch_swings()
         self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
   
         if transmittingChannelAvailable:
            if trigger_next_period:
               # CUDA_PROCESS for processingSwing
               self.logger.debug('start CUDA_PROCESS')
-              cmd = cuda_process_command(self.cudasocks, swing=swingManager.processingSwing, nSamples=nSamples_rx_requested_of_last_trigger)
+              cmd = cuda_process_command(self.cudasocks, swing=self.swingManager.processingSwing, nSamples=nSamples_rx_requested_of_last_trigger)
               cmd.transmit()
               cmd.client_return()
               self.logger.debug('end CUDA_PROCESS')
@@ -2393,10 +2395,12 @@ class RadarChannelHandler:
         if self.scanManager.isInitSetParameter:
            self.scanManager.isInitSetParameter = False
            self.ctrlprm_struct.receive(self.conn)
-           self.logger.debug("ch {}: Received from ROS (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+           self.logger.debug("ch {}: Received from ROS for swing {} (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.swingManager.nextSwingToTrigger, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
            RHM.n_SetParameterHandlers_active -= 1
            return RMSG_SUCCESS
-       
+
+        self.logger.debug("ch {}: Received from ROS SetParameter for swing {} : tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.swingManager.nextSwingToTrigger, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+
         # wait if RHM.trigger_next_swing() is slower... 
         self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
 

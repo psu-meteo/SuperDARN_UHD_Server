@@ -209,6 +209,9 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         if channel.channelScalingFactor == 0:
             self.logger.warning("ChannelScalingFactor is zero for channel {} (tfreq={} MHz). Channel is muted! ".format(channel.ctrlprm['channel'],channel.ctrlprm['tfreq'] / 1000 ))
 
+        freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
+        omega = np.float64(2*np.pi*freq)
+
         for iPulse in range(nPulses):
              # apply phase shifting to pulse using phase_mask
              psamp = np.copy(pulsesamps)
@@ -224,8 +227,6 @@ class cuda_generate_pulse_handler(cudamsg_handler):
 
              # constant phase over complete integration period
              t = channel.pulse_offsets_vector[iPulse]
-             freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
-             omega = np.float64(2*np.pi*freq)
              offset_factor = np.exp(-1j*omega*t)
 
              psamp *= offset_factor 
