@@ -35,7 +35,6 @@ from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
-import utils
 
 
 RMSG_PORT = 45000
@@ -994,6 +993,12 @@ class RadarHardwareManager:
         cmd.transmit()
         self.usrpManager.eval_client_return(cmd)
 
+        cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, False, 0) # *2 since LSB is 0.5 dB 
+        cmd.transmit()
+        self.usrpManager.eval_client_return(cmd)
+
+        self.test_rxfe_control()
+
 
     def test_rxfe_control(self):
         """ Function that steps through all amp and att stages of the rxfe board """
@@ -1003,18 +1008,26 @@ class RadarHardwareManager:
         testParSet = [[False, False, 0], [True, False, 0], [True, True, 0], [False, True, 0], [True, True, 31.5]] + [[False, False, 2**i/2] for i in range(6) ]
         
         nSets = len(testParSet)
-        while True:
 
+        while True:
+            for i in range(63):
+                cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, False, i) # *2 since LSB is 0.5 dB 
+                cmd.transmit()
+                cmd.client_return()
+                time.sleep(.05)
+
+        while True:
             print("flasing wax off")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 0) # *2 since LSB is 0.5 dB 
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 63) # *2 since LSB is 0.5 dB 
             cmd.transmit()
             cmd.client_return()
-            time.sleep(1)
+            time.sleep(2)
             print("flasing wax on")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 63) # *2 since LSB is 0.5 dB 
+            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 0) # *2 since LSB is 0.5 dB 
             cmd.transmit()
             cmd.client_return()
-            time.sleep(1)
+            time.sleep(2)
+
 
         for iSet in range(nSets):
             amp1 = testParSet[iSet][0]

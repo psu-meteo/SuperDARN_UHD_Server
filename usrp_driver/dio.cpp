@@ -487,7 +487,8 @@ void mcm_set_rxfe(
     struct RXFESettings rf_settings)
 {
     uint16_t rxfe_dio = 0;
-    
+    uint16_t rxfe_dio_mask = MCM_AMP_A1 + MCM_AMP_B1 + MCM_AMP_A2 + MCM_AMP_B2;
+
     if (rf_settings.amp1) {
         rxfe_dio |= MCM_AMP_A1;
         rxfe_dio |= MCM_AMP_B1;
@@ -497,6 +498,7 @@ void mcm_set_rxfe(
         rxfe_dio |= MCM_AMP_A2;
         rxfe_dio |= MCM_AMP_B2;
     }
+    
 
     uint8_t att_payload = rf_settings.att_05_dB | \
                           rf_settings.att_1_dB << 1 | \
@@ -535,6 +537,26 @@ void mcm_set_rxfe(
     // TODO: check if delay is needed, LE pulse must be at least 30 nanoseconds
     usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_A_LE);
     usrp->set_gpio_attr("FP0", "OUT", 0, MCM_ATT_B_LE);
+
+    usrp->set_gpio_attr("FP0", "OUT", rxfe_dio, rxfe_dio_mask);
+
+    if(rf_settings.att_16_dB) {
+        usrp->set_gpio_attr("FP0", "OUT", MCM_TR, MCM_TR);
+    }
+    else {
+        usrp->set_gpio_attr("FP0", "OUT", 0, MCM_TR);
+    }
+
+    if(rf_settings.att_05_dB) {
+        usrp->set_gpio_attr("FP0", "OUT", 0, MCM_SYNC);
+    }
+    else {
+        usrp->set_gpio_attr("FP0", "OUT", MCM_SYNC, MCM_SYNC);
+    }
+
+
+    
+    
 
 }
 

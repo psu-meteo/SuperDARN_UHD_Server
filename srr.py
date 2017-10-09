@@ -543,8 +543,8 @@ def start_usrps_from_config(usrp_sleep = False):
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
-###    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
-    baseStartArg = ['./usrp_driver',  '--host' ]
+    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
+#    baseStartArg = ['./usrp_driver',  '--host' ]
     
     for start_arg in start_arg_list:
        all_start_arg = baseStartArg + start_arg 
