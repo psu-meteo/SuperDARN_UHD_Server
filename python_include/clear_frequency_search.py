@@ -48,7 +48,7 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle):
+def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle, smsep):
     # unpack meta data 
     antennas = sample_meta_data['antenna_list']
     num_samples = sample_meta_data['number_of_samples']
@@ -81,7 +81,8 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     fstart = clear_freq_range[0] * 1e3
     fstop =  clear_freq_range[1] * 1e3
 
-    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
+    clear_bw = 4e6/smsep
+    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = clear_bw)
     
     if SAVE_CLEAR_FREQUENCY_SEARCH:
         import pickle
