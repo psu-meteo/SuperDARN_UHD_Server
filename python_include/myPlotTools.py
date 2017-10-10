@@ -54,16 +54,24 @@ def plot_freq(timeData, samplingRate, iqInterleaved=False, show=True, ax=None, d
    sortIdx = np.argsort(freqVec)
    
    if dB:
-     plotData_real = 20*np.log10(np.absolute(np.real(spk[sortIdx])))
-     plotData_imag = 20*np.log10(np.absolute(np.imag(spk[sortIdx])))
+  #   plotData_real = 20*np.log10(np.absolute(np.real(spk[sortIdx])))
+  #   plotData_imag = 20*np.log10(np.absolute(np.imag(spk[sortIdx])))
+  #   plt.plot(freqVec[sortIdx], plotData_real , label='real', marker=".")
+  #   plt.plot(freqVec[sortIdx], plotData_imag , label='imag', marker=".")
+
+     plotData = 20*np.log10(np.absolute(np.abs(spk[sortIdx])))
+     plt.plot(freqVec[sortIdx], plotData , label='abs', marker=".")
+
+
      yLabelString  = 'magintude in dB'
+
    else:
      plotData_real = np.real(spk[sortIdx])
      plotData_imag = np.imag(spk[sortIdx])
      yLabelString  = 'magnitude'
 
-   plt.plot(freqVec[sortIdx], plotData_real , label='real', marker=".")
-   plt.plot(freqVec[sortIdx], plotData_imag , label='imag', marker=".")
+     plt.plot(freqVec[sortIdx], plotData_real , label='real', marker=".")
+     plt.plot(freqVec[sortIdx], plotData_imag , label='imag', marker=".")
 
    plt.grid(True)
    ax.set_xlim([freqVec[sortIdx[1]], freqVec[sortIdx[-1]]])

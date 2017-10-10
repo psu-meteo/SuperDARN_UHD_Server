@@ -51,7 +51,7 @@
 
 #define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
-//#define DEBUG 1
+#define DEBUG 1
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); } while( false )
@@ -382,7 +382,7 @@ bool check_clock_lock(uhd::usrp::multi_usrp::sptr usrp) {
 
         if(ref_locked != "true") all_locked = false;
     }
-    if(not all_locked) std::cout << std::endl << "WARNING: One or more devices not locked." << std::endl;
+    if(not all_locked) std::cout << std::endl << "ERROR: USRP not locked to clock." << std::endl;
 
    return all_locked;
 

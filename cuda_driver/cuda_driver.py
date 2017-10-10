@@ -104,7 +104,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         cmd.receive(self.sock)
         swing = cmd.payload['swing']
         self.gpu.usrp_mixing_freq[swing] = cmd.payload['mixing_freq']
-        self.logger.debug("cuda_generate: received usrp_mixing_freq: {} MHz".format(cmd.payload['mixing_freq']))
+        self.logger.debug("cuda_generate: received usrp_mixing_freq: {} MHz".format(cmd.payload['mixing_freq']/1e6))
         self.logger.debug('cuda_generate_pulse_handler waiting for semaphores...')
         acquire_sem( tx_sem_list[swing])
         self.logger.debug('cuda_generate_pulse_handler acquired semaphores')

@@ -88,6 +88,7 @@ USE_USRP_DRIVER_WRAPPER = True
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
+delay_between_driver_and_server = 25
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -224,6 +225,12 @@ def print_status():
        for line in srrProcesses:
           myPrint("  {}".format(line))
 
+def remote_stop_all():
+    remote_pc_list = get_remote_driver_host()
+    for remote_pc in remote_pc_list:
+        myPrint(" calling srr stop for {}".format(remote_pc))
+        respond = remote_command_echo("radar", remote_pc, "srr stop", verbose=False)
+        print(respond)
 
 def get_known_processes(processList):
     kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
@@ -679,7 +686,7 @@ def restart_all():
    myPrint("Restarting all processes")
    restart_driver()
    myPrint("done starting usrps.. waiting....")
-   waitFor(25)
+   waitFor(delay_between_driver_and_server)
    myPrint("done  waiting.... starting server")
    start_usrp_server()
 
@@ -705,6 +712,7 @@ def remote_command_echo(user, radar, command, verbose = True, port = 22):
         failed = True
         out = ''
         cmdlist = ["ssh", '-T', user + '@' + radar, '-p', str(port)]
+        cmdlist = ["ssh", user + '@' + radar, '-p', str(port)]
         s = subprocess.Popen(cmdlist, stdin = commandecho.stdout, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
         commandecho.stdout.close()
         if verbose:
@@ -747,7 +755,7 @@ def main():
             myPrint("Starting all...")
             start_cuda_driver()
             start_usrp_driver()
-            waitFor(10)
+            waitFor(delay_between_driver_and_server)
             start_usrp_server()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             start_usrp_driver()
@@ -810,6 +818,7 @@ def main():
       elif firstArg == "stop":
          if nArguments == 1 or inputArg[1].lower == "all":
             myPrint("Stopping all...")
+            remote_stop_all()
             stop_watchdog()
             server_was_running = stop_usrp_server() 
             if server_was_running:

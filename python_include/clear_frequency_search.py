@@ -127,6 +127,7 @@ def fft_clrfreq_samples(samples):
 
 def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested):
     dbPrint("enter record_clrfreq_raw_samples")
+    num_clrfreq_samples = int(num_clrfreq_samples)
     output_samples_list     = []
     output_antenna_idx_list = []
     clrfreq_rate_actual = 0
