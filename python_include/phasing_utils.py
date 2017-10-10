@@ -43,7 +43,7 @@ def calc_beamforming_phase_rect(antenna, pshift):
     return beamforming_phase
 
 def beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas, pack_uint32):
-    beamformed_samples = np.ones(n_samples, dtype=np.complex_)
+    beamformed_samples = np.ones(int(n_samples), dtype=np.complex_)
 
     for i in range(int(n_samples)):
         itemp = 0
