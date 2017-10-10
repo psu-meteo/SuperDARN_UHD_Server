@@ -689,7 +689,7 @@ def restart_driver():
         waitFor(5)
     usrp_driver_was_running = stop_usrp_driver()
     stop_cuda_driver()
-    if usrp_driver_was_running:
+    if usrp_driver_was_running or server_was_running:
         waitFor(nSecs_restart_pause)
     start_cuda_driver()
     start_usrp_driver()
