@@ -603,11 +603,6 @@ class scanManager():
         self.isFirstPeriod          = True
 
 
-    def switch_swings(self):
-        # switch swings
-        self.activeSwing     = 1 - self.activeSwing
-        self.processingSwing = 1 - self.processingSwing
-    
     # XXX store current freqencies in clrfreq manager,
     # add to restricted
     def period_finished(self):
@@ -938,7 +933,7 @@ class RadarHardwareManager:
          self.logger.debug("Skipping call of cuda_setup because up/down samplingRates are unknown.")
       else:
          self.logger.debug("start CUDA_SETUP")
-         cmd = cuda_setup_command(self.cudasocks, self.commonChannelParameter['upsample_rate'],self.commonChannelParameter['downsample_rates'][0],self.commonChannelParameter['downsample_rates'][1], self.mixingFreqManager.current_mixing_freq )
+         cmd = cuda_setup_command(self.cudasocks, self.commonChannelParameter['upsample_rate'],self.commonChannelParameter['downsample_rates'][0],self.commonChannelParameter['downsample_rates'][1], self.mixingFreqManager.current_mixing_freq*1000 )
          cmd.transmit()
          cmd.client_return() 
          self.logger.debug("end CUDA_SETUP")
@@ -2392,29 +2387,35 @@ class RadarChannelHandler:
         RHM = self.parent_RadarHardwareManager
         RHM.n_SetParameterHandlers_active += 1
 
+        if self.scanManager.isPrePeriod:
+            current_swing = self.swingManager.nextSwingToTrigger
+        else:
+            # swing with this parameters has already been triggered, just compare parameter
+            current_swing = 1 - self.swingManager.nextSwingToTrigger
+
         if self.scanManager.isInitSetParameter:
            self.scanManager.isInitSetParameter = False
            self.ctrlprm_struct.receive(self.conn)
-           self.logger.debug("ch {}: Received from ROS for swing {} (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.swingManager.nextSwingToTrigger, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+           self.logger.debug("ch {}: Received from ROS for swing {} (init SetPar is only stored): tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, current_swing, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
            RHM.n_SetParameterHandlers_active -= 1
            return RMSG_SUCCESS
 
-        self.logger.debug("ch {}: Received from ROS SetParameter for swing {} : tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.swingManager.nextSwingToTrigger, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-
+        self.logger.debug("ch {}: Received from ROS SetParameter for swing {} : tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, current_swing, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
+        self.logger.debug("swing state {}".format(self.state[current_swing]))
         # wait if RHM.trigger_next_swing() is slower... 
-        self._waitForState(self.swingManager.nextSwingToTrigger, [CS_INACTIVE, CS_READY, CS_LAST_SWING])   
+        self._waitForState(current_swing, [CS_INACTIVE, CS_PROCESSING, CS_LAST_SWING])   
 
 
         # period not jet triggered
-        if self.state[self.swingManager.nextSwingToTrigger] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
+        if self.state[current_swing] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
            
            self.logger.debug("Ch {} waiting for Parameter semaphore...".format(self.cnum)) 
            RHM.set_par_semaphore.acquire()
            self.logger.debug("Ch {} acquired semaphore, setting parameter".format(self.cnum)) 
 
-           if self.state[self.swingManager.nextSwingToTrigger] == CS_READY:
+           if self.state[current_swing] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
-              self.state[self.swingManager.nextSwingToTrigger] = CS_INACTIVE
+              self.state[current_swing] = CS_INACTIVE
 
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
@@ -2432,7 +2433,7 @@ class RadarChannelHandler:
            self.logger.debug("Ch {} released semaphore".format(self.cnum)) 
  
         # in middle of scan, period already triggerd. only compare with prediction
-        elif self.state[self.swingManager.nextSwingToTrigger] == CS_READY or self.state[self.swingManager.nextSwingToTrigger] == CS_LAST_SWING: 
+        elif self.state[current_swing] == CS_PROCESSING or self.state[current_swing] == CS_LAST_SWING: 
          # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
@@ -2446,7 +2447,7 @@ class RadarChannelHandler:
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
-           self.logger.error("ROS:SetParameter: Active state is {} (nextSwingToTrigger={}, activeSwing={} ). Dont know what to do...".format(self.state[self.swingManager.nextSwingToTrigger], self.swingManager.activeSwing,  self.active_state))
+           self.logger.error("ROS:SetParameter: Active state is {} (current_swing={}, activeSwing={} ). Dont know what to do...".format(self.state[current_swing], self.swingManager.activeSwing,  self.active_state))
            self.logger.error("ROS:SetParameter: Exit usrp_server...")
            RHM.n_SetParameterHandlers_active -= 1
            return RMSG_FAILURE
