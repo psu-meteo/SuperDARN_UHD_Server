@@ -104,6 +104,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         cmd.receive(self.sock)
         swing = cmd.payload['swing']
         self.gpu.usrp_mixing_freq[swing] = cmd.payload['mixing_freq']
+        self.logger.debug("cuda_generate: received usrp_mixing_freq: {} MHz".format(cmd.payload['mixing_freq']))
         self.logger.debug('cuda_generate_pulse_handler waiting for semaphores...')
         acquire_sem( tx_sem_list[swing])
         self.logger.debug('cuda_generate_pulse_handler acquired semaphores')
@@ -122,7 +123,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         bb_signal    = [None for c in range(nChannels)] 
         for chIndex, currentSequence in enumerate(self.gpu.sequences[swing]):
             if currentSequence != None:
-                bb_signal[chIndex] = self.generate_bb_signal(currentSequence, shapefilter = dsp_filters.gaussian_pulse)
+                bb_signal[chIndex] = self.generate_bb_signal(currentSequence,swing,  shapefilter = dsp_filters.gaussian_pulse)
                 
         # synthesize rf waveform (up mixing in cuda)
         self.logger.warning('TODO: refactor cuda_generate_pulse_handler to fix accessing rx bb samples per integration period by hardcoded first sequence')
@@ -146,7 +147,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
              self.logger.info('Wrote raw tx samples to /data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl')
 
     # generate baseband sample vectors for a transmit pulse from sequence information
-    def generate_bb_signal(self, channel, shapefilter = None):
+    def generate_bb_signal(self, channel,swing,  shapefilter = None):
         self.logger.debug('entering generate_bb_signal')
         # tpulse is the pulse time in seconds
         # bbrate is the transmit baseband sample rate 
@@ -209,7 +210,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         if channel.channelScalingFactor == 0:
             self.logger.warning("ChannelScalingFactor is zero for channel {} (tfreq={} MHz). Channel is muted! ".format(channel.ctrlprm['channel'],channel.ctrlprm['tfreq'] / 1000 ))
 
-        freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[0]) / self.gpu.tx_rf_samplingRate
+        freq =(channel.ctrlprm["rfreq"]*1000 - self.gpu.usrp_mixing_freq[swing]) / self.gpu.tx_rf_samplingRate
         omega = np.float64(2*np.pi*freq)
 
         for iPulse in range(nPulses):
@@ -400,8 +401,8 @@ class cuda_process_handler(cudamsg_handler):
         self.gpu.rx_init(swing, cmd.payload['nSamples'])
         #self.gpu._plot_filter()
 
-        self.gpu.rxsamples_shm_to_gpu(rx_shm_list[swing])
         self.gpu._set_rx_phaseIncrement(swing) 
+        self.gpu.rxsamples_shm_to_gpu(rx_shm_list[swing])
         self.logger.debug("end copy data, start rx process")
  
         self.gpu.rxsamples_process(swing) 
@@ -594,7 +595,7 @@ class ProcessingGPU(object):
 
     def init_conversionRates_and_mixingFreq(self, upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq):
        
-        self.logger.debug("CUDA_SETUP: upRate: {}x, downRates: {}x and {}x, usrp_mixing_freq: {} MHz".format(upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq))
+        self.logger.debug("CUDA_SETUP: upRate: {}x, downRates: {}x and {}x, usrp_mixing_freq: {} MHz".format(upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq/1e6))
         self.tx_upsamplingRate         = int(upRate) 
         self.rx_rf2if_downsamplingRate = int(downRate_rf2if)
         self.rx_if2bb_downsamplingRate = int(downRate_if2bb)
@@ -612,7 +613,7 @@ class ProcessingGPU(object):
 
 
     
-    # generate tx rf samples from sequence
+    # ge
     def synth_tx_rf_pulses(self, bb_signal, tx_bb_nSamples_per_pulse, swing):
         for iChannel in range(self.nChannels):
             if self.sequences[swing][iChannel] != None:  # if channel is defined
@@ -937,17 +938,17 @@ class ProcessingGPU(object):
                                            
 
         # for testing RX: plot RF, IF and BB
-        if False:
+        if False and self.sequences[swing][0].ctrlprm['tbeam'] == 0:
             import myPlotTools as mpt
             import matplotlib.pyplot as plt
             #samplingRate_rx_bb =  self.gpu.sequence[0].ctrlprm['baseband_samplerate']
        #     plt.figure()        
             cuda.memcpy_dtoh(self.rx_if_samples, self.cu_rx_if_samples) 
             cuda.memcpy_dtoh(self.rx_bb_samples, self.cu_rx_bb_samples) 
-            iAntenna = 0
+            iAntenna = 1
 
             start_time = 0e-3
-            stop_time =  1e-3
+            stop_time =  3e-3
             
             plot_only_rf_and_bb = False
             plot_freq = True
