@@ -55,7 +55,7 @@ nSwings = 2
 
 debug = True 
 
-USRP_DEFAULT_CFREQ = 13000
+DEFAULT_USRP_MIXING_FREQ = 13000
 
 # channel states (CS) for each channel
 CS_INACTIVE      = 'CS_INACTIVE'
@@ -463,8 +463,9 @@ class clearFrequencyRawDataManager():
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
 
-        self.logger.debug('grabbing new data')
+        self.logger.debug('start record_clrfreq_raw_samples')
         self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
+        self.logger.debug('end record_clrfreq_raw_samples')
 
         self.metaData['antenna_list'] = self.antennaList
 
@@ -645,7 +646,7 @@ class scanManager():
 
     def get_current_clearFreq_result(self):
         if self.current_clrFreq_result is None:
-           if self.fixFreq <= 0: # it looks like control program could use -1 and 0 to disable it
+           if self.fixFreq > 0: # it looks like control program could use -1 and 0 to disable it
                self.current_clrFreq_result = [self.fixFreq, 0, 0]
                self.logger.debug("Using fixed frequency of {} kHz for current period".format(self.fixFreq))
            else:
@@ -680,7 +681,9 @@ class scanManager():
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
    
         all_restricted_freq = self.restricted_frequency_list + RHM.clearFreqRawDataManager.freq_occupied_by_other_channels
+        self.logger.debug('start calc_clear_freq_on_raw_samples')
         clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, all_restricted_freq, self.clear_freq_range_list[iPeriod], beam_angle, self.channel.raw_export_data['smsep'])
+        self.logger.debug('end calc_clear_freq_on_raw_samples')
         if 'baseband_samplerate' in RHM.commonChannelParameter: 
            bandwidth = RHM.commonChannelParameter['baseband_samplerate'] 
         else:    # first call before channel details are known
@@ -735,11 +738,11 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
-        self.clearFreqRawDataManager.set_clrfreq_search_span(USRP_DEFAULT_CFREQ, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+        self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
         self.active_channels     = []   # list of channels where ROS called SET_ACTIVE
         self.channels            = []   # all channels that are really transmitting
         self.newChannelList      = []   # waiting list for channels to be added at the right time (between two trigger_next() calls)
-        self.record_new_data     = self.clearFreqRawDataManager.record_new_data
+###        self.record_new_data     = self.clearFreqRawDataManager.record_new_data
         self.swingManager        = swingManager()
 
         self.set_par_semaphore = threading.BoundedSemaphore()
@@ -922,12 +925,12 @@ class RadarHardwareManager:
         self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
 
     def usrp_init(self):
-      self.usrpManager = usrpSockManager(self)
-      self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
-      self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
-      self.mixingFreqManager = usrpMixingFreqManager(USRP_DEFAULT_CFREQ, self.usrp_rf_tx_rate/1000)
+        self.usrpManager = usrpSockManager(self)
+        self.usrp_rf_tx_rate   = int(self.ini_cuda_settings['FSampTX'])
+        self.usrp_rf_rx_rate   = int(self.ini_cuda_settings['FSampRX'])
+        self.mixingFreqManager = usrpMixingFreqManager(DEFAULT_USRP_MIXING_FREQ, self.usrp_rf_tx_rate/1000)
 
-      self._resync_usrps()
+        self._resync_usrps(first_sync = True)
 
 
     def send_cuda_setup_command(self):
@@ -940,7 +943,7 @@ class RadarHardwareManager:
          cmd.client_return() 
          self.logger.debug("end CUDA_SETUP")
 
-    def _resync_usrps(self):
+    def _resync_usrps(self, first_sync = False):
         usrps_synced = False
         iResync = 1
         
@@ -977,7 +980,8 @@ class RadarHardwareManager:
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again ({}) ...'.format(iResync))
                 iResync += 1 
                 time.sleep(0.2)
-        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) 
+        if not first_sync:        
+            self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) 
 
 
     #@timeit
@@ -2070,10 +2074,12 @@ class RadarChannelHandler:
     #@timeit
     def RequestClearFreqSearchHandler(self, rmsg):
         self.clrfreq_struct.receive(self.conn)
-
-        # set request flat from RadarHardwareManager:clearFreqRawDatamanager
-        self.parent_RadarHardwareManager.clearFreqRawDataManager.outstanding_request = True
-        self.logger.debug("RequestClearFreqSearchHandler: setting request CLR_FREQ flag in clearFreqRawDataManager (caused by ch {})".format(self.cnum))
+        if self.scanManager.fixFreq <= 0:
+            # set request flat from RadarHardwareManager:clearFreqRawDatamanager
+            self.parent_RadarHardwareManager.clearFreqRawDataManager.outstanding_request = True
+            self.logger.debug("RequestClearFreqSearchHandler: setting request CLR_FREQ flag in clearFreqRawDataManager (caused by ch {})".format(self.cnum))
+        else:
+            self.logger.debug("RequestClearFreqSearchHandler: ignoring because of fixfreq ( ch {})".format(self.cnum))
 
         return RMSG_SUCCESS
 
