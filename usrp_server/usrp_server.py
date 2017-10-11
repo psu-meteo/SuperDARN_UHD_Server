@@ -224,6 +224,8 @@ class usrpSockManager():
 
        del self.socks[iSock]
 
+       self.RHM.clearFreqRawDataManager.set_usrp_driver_connections(self.socks) 
+
 
    def eval_client_return(self, cmd, fcn=None):
       if fcn is None: # default receive function
@@ -643,7 +645,7 @@ class scanManager():
 
     def get_current_clearFreq_result(self):
         if self.current_clrFreq_result is None:
-           if self.fixFreq != -1 and self.fixFreq != 0: # it looks like control program could use -1 and 0 to disable it
+           if self.fixFreq <= 0: # it looks like control program could use -1 and 0 to disable it
                self.current_clrFreq_result = [self.fixFreq, 0, 0]
                self.logger.debug("Using fixed frequency of {} kHz for current period".format(self.fixFreq))
            else:
@@ -975,6 +977,8 @@ class RadarHardwareManager:
                 self.logger.warning('_resync_USRP USRP syncronization failed, trying again ({}) ...'.format(iResync))
                 iResync += 1 
                 time.sleep(0.2)
+        self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) 
+
 
     #@timeit
     def rxfe_init(self):
