@@ -59,7 +59,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
 
     # calculate phasing matrix 
-    phase_increment = calc_phase_increment(beam_angle, tfreq, x_spacing)
+    phase_increment = calc_phase_increment(beam_angle, tfreq*1000, x_spacing)
     phasing_matrix = [rad_to_rect(ant * phase_increment) for ant in antennas]
 
     # apply beamforming 
