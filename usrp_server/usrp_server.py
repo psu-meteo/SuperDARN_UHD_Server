@@ -913,7 +913,12 @@ class RadarHardwareManager:
         self.scaling_factor_rx_bb    = float(array_config['gain_control']['scaling_factor_rx_bb'])
         self.scaling_factor_rx_if    = float(array_config['gain_control']['scaling_factor_rx_if'])
         self.apply_normalization     = array_config.getboolean('gain_control','use_var_normalization')
-        self.mute_antenna_list = [int(x) for x in array_config['gain_control']['mute_antenna_idx'].split(",")]
+        mute_antenna_str = array_config['gain_control']['mute_antenna_idx'] 
+        if len(mute_antenna_str):
+            self.mute_antenna_list = [int(x) for x in mute_antenna_str.split(",")]
+        else:
+            self.mute_antenna_list = []
+
         if self.apply_normalization:
             self.logger.info("Normalizing is active.")
         if len(self.mute_antenna_list):
