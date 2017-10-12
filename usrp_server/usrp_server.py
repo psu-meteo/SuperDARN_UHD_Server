@@ -83,11 +83,11 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.5
-      if int_time == 2.9:
-         overhead_time = 0.5
+         overhead_time = 0.175
+      elif int_time == 2.9:
+         overhead_time = 0.05
       elif int_time == 1:
-         overhead_time = 0.2
+         overhead_time = 0.2 # TODO adjust and test
       else:
          error_str = "No overhead time defined for {} s, please add it...".format(int_time)
          self.RHM.logger.error(error_str)
