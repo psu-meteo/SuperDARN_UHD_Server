@@ -120,7 +120,7 @@ class driver_command(object):
                
                returns.append(r)
             except:
-               self.logger.error("Error receiving client_return for command {} from  client {}:{}".format(self.command, client.getsockname()[0], client.getsockname()[1] ))
+               self.logger.error("Error receiving client_return for command '{}'({}) from  client {}:{}".format(chr(self.command), self.command, client.getsockname()[0], client.getsockname()[1] ))
               # pdb.set_trace()
                returns.append(CONNECTION_ERROR)
 

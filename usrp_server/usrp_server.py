@@ -956,7 +956,7 @@ class RadarHardwareManager:
         while not usrps_synced:
             cmd = usrp_sync_time_command(self.usrpManager.socks)
             cmd.transmit()
-            cmd.client_return()
+            self.usrpManager.eval_client_return(cmd)
 
             # once USRPs are connected, synchronize clocks/timers 
             cmd = usrp_get_time_command(self.usrpManager.socks)
@@ -970,7 +970,7 @@ class RadarHardwareManager:
                     self.logger.error("Error in sync USRPs for {}. Removing it...".format(self.usrpManager.hostnameList_active[iUSRP]))
                     self.usrpManager.remove_sock(usrpsock)
            
-            cmd.client_return()
+            self.usrpManager.eval_client_return(cmd)
      
             # check if sync succeeded..
             if max(np.abs(np.array(usrptimes) - usrptimes[0])) < .5:
