@@ -480,7 +480,7 @@ class clearFrequencyRawDataManager():
 
     def get_raw_data(self):
         self.get_raw_data_semaphore.acquire()
-        if self.rawData is None # DEL? or not self.raw_data_available_from_this_period:
+        if self.rawData is None: # DEL? or not self.raw_data_available_from_this_period:
            self.record_new_data()
         else:
            print("clearFreqDataManager: provide raw data (age {}), setting raw_rec request ".format(time.time() - self.recordTime))
