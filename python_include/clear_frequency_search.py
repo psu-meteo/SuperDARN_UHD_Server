@@ -62,6 +62,11 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     phase_increment = calc_phase_increment(beam_angle, tfreq*1000, x_spacing)
     phasing_matrix = [rad_to_rect(ant * phase_increment) for ant in antennas]
 
+    # mute back array antennas
+    antennas = np.array(antennas)
+    phasing_matrix = np.array(phasing_matrix)
+    phasing_matrix[np.logical_and(antennas > 15, antennas < 20)] = 0
+
     # apply beamforming 
     beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
 
