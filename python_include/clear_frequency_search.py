@@ -65,8 +65,8 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     # apply beamforming 
     beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
 
-    # apply spectral estimation (takes about 20-40 ms) TODO: why [0]?
-    spectrum_power = fft_clrfreq_samples(raw_samples)[0]
+    # apply spectral estimation 
+    spectrum_power = fft_clrfreq_samples(beamformed_samples)
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
     fstart_actual = usrp_center_freq * 1e3 - usrp_sampling_rate / 2.0 
