@@ -420,7 +420,6 @@ class clearFrequencyRawDataManager():
         self.rawData    = None
         self.recordTime = None
 
-        self.raw_data_available_from_this_period = False
         self.outstanding_request = False     # Flag set by the RadarChannelHandlers 
         self.repeat_request_for_2nd_period = False
 
@@ -455,8 +454,7 @@ class clearFrequencyRawDataManager():
         self.metaData['number_of_samples'] = self.number_of_samples 
         self.metaData['usrp_rf_rate'] = self.sampling_rate 
 
-    def period_finished(self):
-        self.raw_data_available_from_this_period = False
+    def reset_occupied_freqs(self):
         self.freq_occupied_by_other_channels = []
    
     def record_new_data(self):
@@ -473,14 +471,13 @@ class clearFrequencyRawDataManager():
 
         # so, self.rawData is np.array(complex(nantennas, nsamples)
         self.recordTime = time.time()
-        self.raw_data_available_from_this_period = True
         self.outstanding_request = False
 
         self.logger.debug("clrfreq record time: {}".format(self.recordTime))
 
     def get_raw_data(self):
         self.get_raw_data_semaphore.acquire()
-        if self.rawData is None: # DEL? or not self.raw_data_available_from_this_period:
+        if self.rawData is None: 
            self.record_new_data()
         else:
            print("clearFreqDataManager: provide raw data (age {}), setting raw_rec request ".format(time.time() - self.recordTime))
@@ -1668,6 +1665,7 @@ class RadarHardwareManager:
         # SWITCH SWINGS
         self.swingManager.switch_swings()
         self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
+        self.clearFreqRawDataManager.reset_occupied_freqs()
   
         if transmittingChannelAvailable:
            if trigger_next_period:
@@ -1706,8 +1704,6 @@ class RadarHardwareManager:
             if ch is not None:
                   ch_do_not_increase_period.append(ch.scanManager.isPrePeriod or ch.scanManager.isLastPeriod)
                   ch.scanManager.period_finished()
-        if not all(ch_do_not_increase_period):
-           self.clearFreqRawDataManager.period_finished()
    
 
 
