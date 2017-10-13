@@ -1548,6 +1548,7 @@ class RadarHardwareManager:
 
         # PERIOD FINISHED        
         self.next_period_RHM()
+        self.clearFreqRawDataManager.reset_occupied_freqs()
 
         # update (next) states
         for iChannel, channel in enumerate(self.channels):
@@ -1665,7 +1666,6 @@ class RadarHardwareManager:
         # SWITCH SWINGS
         self.swingManager.switch_swings()
         self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
-        self.clearFreqRawDataManager.reset_occupied_freqs()
   
         if transmittingChannelAvailable:
            if trigger_next_period:

@@ -83,7 +83,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
         import pickle
         import time
         clr_time = time.time()
-        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freq_vector':freq_vector,  'power':spectrum_power, 'clear_freq_range':clear_freq_range, 'phasing_vector':phasing_vector}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
+        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freq_vector':freq_vector,  'power':spectrum_power, 'clear_freq_range':clear_freq_range, 'phasing_vector':phasing_vector, 'beam_angle':beam_angle}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
     return tfreq, noise
 
