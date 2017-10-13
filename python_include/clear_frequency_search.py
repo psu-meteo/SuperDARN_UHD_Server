@@ -50,45 +50,44 @@ def read_restrict_file(restrict_file):
 
 def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle, smsep):
     # unpack meta data 
-    antennas = sample_meta_data['antenna_list']
-    num_samples = sample_meta_data['number_of_samples']
-    tfreq = np.mean(clear_freq_range)
+    antennas = np.array(sample_meta_data['antenna_list'])
+    num_samples = int(sample_meta_data['number_of_samples'])
+    beamform_freq = np.mean(clear_freq_range) * 1000
     x_spacing = sample_meta_data['x_spacing']
 
     usrp_center_freq = sample_meta_data['usrp_fcenter'] # center frequency, in kHz..
     usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
 
-    # calculate phasing matrix 
-    phase_increment = calc_phase_increment(beam_angle, tfreq*1000, x_spacing)
-    phasing_matrix = [rad_to_rect(ant * phase_increment) for ant in antennas]
+    # calculate phasing vector 
+    phase_increment = calc_phase_increment(beam_angle, beamform_freq, x_spacing)
+    phasing_vector =np.array([rad_to_rect(ant * phase_increment) for ant in antennas])
+
+    # mute back array antennas
+    phasing_matrix[np.logical_and(antennas > 15, antennas < 20)] = 0
 
     # apply beamforming 
-    beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
+    #beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
+    beamformed_samples = phasing_vector * np.matrix(raw_samples)
 
     # apply spectral estimation 
     spectrum_power = fft_clrfreq_samples(beamformed_samples)
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
-    fstart_actual = usrp_center_freq * 1e3 - usrp_sampling_rate / 2.0 
-    fstop_actual = usrp_center_freq * 1e3 + usrp_sampling_rate / 2.0 
-    spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
+    freq_vector = np.fft.fftshift(np.fft.fftfreq(num_samples, 1/usrp_rf_rate)) + usrp_fcenter*1000
  
     # mask restricted frequencies
     if restricted_frequencies:
-        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, freq_vector, restricted_frequencies)
    
     # search for a clear frequency within the given frequency range
-    fstart = clear_freq_range[0] * 1e3
-    fstop =  clear_freq_range[1] * 1e3
-
     clear_bw = 4e6/smsep
-    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, clear_bw = clear_bw)
+    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, freq_vector, clear_freq_range[0] * 1e3, clear_freq_range[1] * 1e3, clear_bw = clear_bw)
     
     if SAVE_CLEAR_FREQUENCY_SEARCH:
         import pickle
         import time
         clr_time = time.time()
-        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freqs':spectrum_freqs,  'power':spectrum_power, 'fstart':fstart, 'fstop':fstop}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
+        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freq_vector':freq_vector,  'power':spectrum_power, 'clear_freq_range':clear_freq_range, 'phasing_vector':phasing_vector}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
     return tfreq, noise
 
