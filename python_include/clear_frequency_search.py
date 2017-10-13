@@ -52,28 +52,24 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
     # unpack meta data 
     antennas = np.array(sample_meta_data['antenna_list'])
     num_samples = int(sample_meta_data['number_of_samples'])
-    beamform_freq = np.mean(clear_freq_range) * 1000
-    x_spacing = sample_meta_data['x_spacing']
-
-    usrp_center_freq = sample_meta_data['usrp_fcenter'] # center frequency, in kHz..
-    usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
 
     # calculate phasing vector 
-    phase_increment = calc_phase_increment(beam_angle, beamform_freq, x_spacing)
+    phase_increment = calc_phase_increment(beam_angle, np.mean(clear_freq_range) * 1000, sample_meta_data['x_spacing'])
     phasing_vector =np.array([rad_to_rect(ant * phase_increment) for ant in antennas])
 
     # mute back array antennas
-    phasing_matrix[np.logical_and(antennas > 15, antennas < 20)] = 0
+    phasing_vector[np.logical_and(antennas > 15, antennas < 20)] = 0
 
     # apply beamforming 
     #beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
-    beamformed_samples = phasing_vector * np.matrix(raw_samples)
+    beamformed_samples = np.array(phasing_vector * np.matrix(raw_samples))[0]
 
     # apply spectral estimation 
     spectrum_power = fft_clrfreq_samples(beamformed_samples)
+
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
-    freq_vector = np.fft.fftshift(np.fft.fftfreq(num_samples, 1/usrp_rf_rate)) + usrp_fcenter*1000
+    freq_vector = np.fft.fftshift(np.fft.fftfreq(num_samples, 1/sample_meta_data['usrp_rf_rate'])) + sample_meta_data['usrp_fcenter']*1000
  
     # mask restricted frequencies
     if restricted_frequencies:
