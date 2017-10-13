@@ -1,5 +1,13 @@
 #!/usr/bin/python3
 """
+Function parses usrp_server log file and plots timing of main function calls.
+Therefore logger level has to be set to DEBUG (in python_include/logging_usrp.py).
+Function call:
+
+ - no argument:         looks for newest file in ../log/
+ - only filename:       looks for that file in ../log/
+ - filename with path:  takes this file
+
 Created on Thu Nov 17 18:42:45 2016
 
 @author: mguski
@@ -8,7 +16,7 @@ Created on Thu Nov 17 18:42:45 2016
 # %%
 from datetime import datetime
 import matplotlib.pyplot as plt
-
+import sys
 # %% class stuff
 
 class logEntries:
@@ -96,7 +104,25 @@ class timeSpans():
         
 # %% parse log files
 
-server = logEntries('../log/server.log')          
+
+# %% try input arguments ...
+raw_path = "../log/"
+
+if len(sys.argv) == 1:
+    import glob
+    print('No input. Looking for newest file in {} ...'.format(raw_path))
+    file_with_path = max(glob.iglob('{}*server__*.log'.format(raw_path)), key=os.path.getctime)
+    fileName = file_with_path[len(raw_path):]
+    print('found :{}'.format(fileName))
+else:
+    fileName = sys.argv[1]
+    if fileName.find("/") == -1: # no path defined => assume raw_path
+        print('Only filename without path. looking for file in {} ...'.format(raw_path))
+        file_with_path = os.path.join(raw_path, fileName)
+    else:
+        file_with_path = fileName
+
+server = logEntries(file_with_path)          
 timSpansServer = timeSpans(server)
 
 # %% plot data
