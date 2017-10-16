@@ -1443,7 +1443,7 @@ class RadarHardwareManager:
                                   back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
 
                                samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
-                               samples = samples[0::2] + 1j * samples[1::2] # unpacked interleaved i/q
+                               samples = samples[0::2] + 1j * samples[1::2] * self.scaling_factor_rx_bb # unpacked interleaved i/q
                                
                                if antIdx in self.antenna_idx_list_main:
                                    iAntenna = self.antenna_idx_list_main.index(antIdx)
@@ -1492,8 +1492,8 @@ class RadarHardwareManager:
                            self.logger.info("Saving raw bb data to disk.")
              #            for iChannel, channel in enumerate(self.channels):
                            channel.bb_export = dict()
-                           channel.bb_export["main_samples"] = main_samples[iChannel] * self.scaling_factor_rx_bb
-                           channel.bb_export["back_samples"] = back_samples[iChannel] * self.scaling_factor_rx_bb
+                           channel.bb_export["main_samples"] = main_samples[iChannel] 
+                           channel.bb_export["back_samples"] = back_samples[iChannel] 
                            channel.bb_export["nMainAntennas"] = nMainAntennas 
                            channel.bb_export["nBackAntennas"] = nBackAntennas 
                            channel.bb_export['number_of_samples'] = channel.resultDict_list[-1]['number_of_samples']  
@@ -1520,20 +1520,6 @@ class RadarHardwareManager:
                   os.rename("tmpRawData.pkl", "liveRawData.pkl")
                   os.remove("./bufferLiveData.flag")
 
-               # save BB samples as pickle (no meta data)
-            ##   if os.path.isfile("./save.raw.bb"):
-            ##      self.logger.info("Buffering raw data to disk.")
-            ##      chResExportList = [ copy.deepcopy(ch.resultDict_list[-1]) for ch in self.channels if ch.processing_state == CS_PROCESSING]
-            ##      for chEx in chResExportList:
-            ##          chEx['ctrlprm_dataqueue'] = []
-            ##      savePath = "/data/image_samples/bb_data/"
-            ##      if not os.path.isdir(savePath):
-            ##          os.mkdir(savePath)
-            ##      time_now = datetime.datetime.now()             
-            ##      fileName = '{:04d}{:02d}{:02d}{:02d}{:02d}{:02d}.{:d}.iraw.{:c}'.format(time_now.year, time_now.month, time_now.day, time_now.hour, time_now.minute,time_now.second,  channel.rnum, 96+channel.cnum)
-            ##      
-            ##      with open(savePath + fileName, 'wb') as f:
-            ##         pickle.dump([main_samples, back_samples,chResExportList, self.antenna_idx_list_main, self.antenna_idx_list_back],f,  pickle.HIGHEST_PROTOCOL)
 
                # save IF raw data
                for channel in self.channels:
@@ -1754,6 +1740,14 @@ class RadarHardwareManager:
                         plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
                         plt.title("var = {:2.3f}".format(curr_variance))
 
+                # back array
+                for iAntenna in range(nAntennas_back):
+                    if antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]:
+                        curr_variance =   np.var(np.real(back_samples[iChannel][iAntenna][rx_idx]))
+                    else: # don't calculated if antenna is muted 
+                        curr_variance = 1
+                    var_list.append(curr_variance)
+
                 max_var= max(var_list)
                 var_threshold = max_var * 10 ** (-30/10)
                 RHM.logger.info("max var = {:2.3f} = {:2.3f} **2, var_threshold = {} (-30 dB) ".format(max_var,  np.sqrt(max_var), var_threshold))
@@ -1762,7 +1756,6 @@ class RadarHardwareManager:
                         if var_list[iAntenna] > var_threshold:
                             scale_factor = np.sqrt(max_var/var_list[iAntenna]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]
                             antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]  =  scale_factor
-
                             RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
                         else:
                             RHM.logger.info("not scaling antenna {} because of small variance: {} (< threshold)".format(RHM.antenna_idx_list_main[iAntenna], var_list[iAntenna]))
@@ -1775,7 +1768,20 @@ class RadarHardwareManager:
                         plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
                         plt.title("factor: {:2.3f}".format(scale_factor))
                 if debugPlot:
-                   plt.show()       
+                   plt.show()      
+
+                # back array
+                for iAntenna in range(nAntennas_back):
+                    if antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]:
+                        if var_list[iAntenna+nAntennas_main] > var_threshold:
+                            scale_factor = np.sqrt(max_var/var_list[iAntenna+nAntennas_main]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]
+                            antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]  =  scale_factor
+                            RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_back[iAntenna], scale_factor))
+                        else:
+                            RHM.logger.info("not scaling antenna {} because of small variance: {} (< threshold)".format(RHM.antenna_idx_list_back[iAntenna], var_list[iAntenna+nAntennas_main]))
+                            scale_factor = 1
+                    else:
+                        RHM.logger.info("muting antenna {} (defined in array_config.ini)".format(RHM.antenna_idx_list_back[iAntenna], var_list[iAntenna+nAntennas_main]))
 
 
 #                print("list var: {}".format(np.sqrt(var_list)))
@@ -1806,7 +1812,7 @@ class RadarHardwareManager:
                 first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
                 first_pol_matrix_idx = [RHM.antenna_idx_list_main.index(ant_idx) for ant_idx in first_pol_ant_idx] 
                 phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift)*antenna_scale_factors[iChannel][ant_idx] for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
-                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel])[first_pol_matrix_idx,:]  * RHM.scaling_factor_rx_bb 
+                complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel])[first_pol_matrix_idx,:] 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
                 abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
