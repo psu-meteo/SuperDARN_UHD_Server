@@ -647,6 +647,10 @@ def start_rtserver():
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
+    commandList = 'rtserver -rp 43104 -ep 41000 -tp 1402'.split(" ")
+    myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
 def start_fitacf_write():
     commandList = 'fitacfwrite -r kod.d -lp 41103 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
