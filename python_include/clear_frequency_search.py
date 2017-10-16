@@ -49,7 +49,7 @@ def read_restrict_file(restrict_file):
     return restricted_frequencies; 
 
 def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle, smsep):
-    # unpack meta data 
+    # unpack meta data
     antennas = np.array(sample_meta_data['antenna_list'])
     num_samples = int(sample_meta_data['number_of_samples'])
 
@@ -170,8 +170,7 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
             output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
             output_antenna_idx_list.append(antenna_no_tmp)
         except:
-            dbPrint("CLRFREQ response from {} failed, stuffing with zeros".format(usrpsock))
-            output_samples_list.append(1j * np.zeros(num_clrfreq_samples))
+            dbPrint("CLRFREQ response from {} failed.".format(usrpsock))
 
     
     try:
