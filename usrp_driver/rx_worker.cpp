@@ -82,6 +82,13 @@ void usrp_rx_worker(
     max_samples_per_stream = max_samples_per_stream - (max_samples_per_stream % max_samples_per_packet);
     double timeout = 5.0;
 
+    // DEBUG to check timing
+    double time_to_start;
+    rx_usrp_pre_stream_time = usrp->get_time_now();
+    time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs();
+    DEBUG_PRINT("#timing: time left for rx_worker  %f ms\n", time_to_start*1000);
+
+
 
     if(samples_remaining_to_stream > max_samples_per_stream) {
         // each stream command should request the around the maximum number of samples possible that is a multiple of the recv stream packet size

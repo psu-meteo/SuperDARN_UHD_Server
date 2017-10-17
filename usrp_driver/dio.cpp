@@ -318,6 +318,16 @@ void send_timing_for_sequence(
     std::cout << "GPIO command issue start time is: "<< to_iso_extended_string(now)<< std::endl;
 
 
+
+    // DEBUG to check timing
+    double time_to_start;
+    uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
+    time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs() - SYNC_OFFSET_START;
+    DEBUG_PRINT("#timing: time left for dio_worker %f ms\n", time_to_start*1000);
+
+
+
+
     DEBUG_PRINT("DIO: pushed gpio commands at usrp_time %2.4f\n", debugt);
     // issue gpio commands in time sorted order 
     // set_command_time must be sent in temporal order, they are sent into a fifo queue on the usrp and will block until executed
