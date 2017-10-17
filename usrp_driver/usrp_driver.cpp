@@ -118,7 +118,7 @@ enum driver_states
 namespace po = boost::program_options;
 int32_t driversock = 0;
 int32_t driverconn = 0;
-int32_t verbose = 1;
+int32_t verbose = 0;
 
 void uhd_term_message_handler(uhd::msg::type_t type, const std::string &msg){
     ;
@@ -430,7 +430,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uint32_t tx_worker_active;
 
     uhd::time_spec_t start_time, rx_start_time;
-    
+
     // vector of all pulse start times over an integration period
     std::vector<uhd::time_spec_t> pulse_time_offsets;
     // vector of the sample index of pulse start times over an integration period
@@ -692,6 +692,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // transmit/receive center frequenies and sampling rates
                     // number of tx/rx samples
                     // number of pulse sequences per integration period, and pulse start times
+                    
                     swing      = sock_get_int16(  driverconn); 
                     
                     DEBUG_PRINT("entering USRP_SETUP command (swing %d)\n", swing);
@@ -722,7 +723,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     }
 
-                    if(rx_data_buffer[0].size() != nSamples_rx) {
+
+                    if(rx_data_buffer[0].size() < nSamples_rx) {
                        for(iSide = 0; iSide < nSides; iSide++) {
                            rx_data_buffer[iSide].resize(nSamples_rx);
                            
@@ -776,13 +778,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     // TODO unpack and pad tx sample
                     for (iSide = 0; iSide<nSides; iSide++) {
-                        tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
+                        tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                   
 
                         for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
                             shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
                             memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
                         }
                     }
+
 
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
@@ -822,6 +825,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     }
 
                 case TRIGGER_PULSE: {
+
                     swing      = sock_get_int16(  driverconn); 
                     DEBUG_PRINT("entering TRIGGER_PULSE command (swing %d)\n", swing );
 
@@ -830,6 +834,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE busy in state_vec[swing] %d, returning\n", state_vec[swing]);
                     }
                     else {
+
                         DEBUG_PRINT("TRIGGER_PULSE ready\n");
                         state_vec[swing] = ST_PULSE;
 
@@ -853,7 +858,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         start_time = uhd::time_spec_t(pulse_time_full, pulse_time_frac);
                         double tr_to_pulse_delay = sock_get_float64(driverconn);
 
-
                         
                         // calculate usrp clock time of the start of each pulse over the integration period
                         // so we can schedule the io (perhaps we will have to move io off of the usrp if it can't keep up)
@@ -868,7 +872,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
 
-       
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = nSamples_tx_pulse / txrate;
                         
@@ -878,10 +881,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d\n", swing,(int) nSamples_rx);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status));
+
+
+
+
                         if (tx_worker_active) { 
-                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
+                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
                         }
+
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
+
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
 
@@ -1056,8 +1065,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
 
                     // TODO: only set rate if it is different!
-                    usrp->set_rx_rate(clrfreq_rate);
-                    clrfreq_rate = usrp->get_rx_rate(); // read back actual rate
+                    if(rxrate != clrfreq_rate) {
+                       usrp->set_rx_rate(clrfreq_rate);
+                       rxrate = usrp->get_rx_rate();
+                       clrfreq_rate = rxrate;
+                    }
                     DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
                     //clrfreq_cfreq = usrp->get_rx_freq(); 
                     //DEBUG_PRINT("CLRFREQ actual freq: %.2f\n", clrfreq_cfreq);

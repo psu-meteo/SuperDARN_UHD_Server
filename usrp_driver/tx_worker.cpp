@@ -31,7 +31,7 @@ extern int verbose;
  **********************************************************************/
 void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
-    std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
+    std::vector<std::vector<std::complex<int16_t>>> *pulse_samples,
     size_t padded_num_samples_per_pulse,
 //    size_t pulses_per_sequence,
     uhd::time_spec_t burst_start_time,
@@ -56,7 +56,7 @@ void usrp_tx_worker(
     int32_t samples_per_pulse = padded_num_samples_per_pulse - 2*spb; 
     DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     int iSide;
-    int nSides = pulse_samples.size();
+    int nSides = (*pulse_samples).size();
     std::vector<std::complex<int16_t>*> buffer(nSides); 
 
     // assume at least spb length zero padding before first pulse
@@ -67,8 +67,20 @@ void usrp_tx_worker(
  
 
     for (iSide =0; iSide<nSides; iSide++) {
-        buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+        buffer[iSide] = &((*pulse_samples)[iSide][sample_idx]); 
     }
+
+
+    // DEBUG to check timing
+  //  double time_to_start;
+  //  uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
+  //  time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs();
+  //  DEBUG_PRINT("#timing: time left for tx_worker  %f ms", time_to_start*1000);
+
+
+
+
+
     nacc_samples += tx_stream->send(buffer, spb, md, timeout);
 
     md.start_of_burst = false;
@@ -102,7 +114,7 @@ void usrp_tx_worker(
 
         //DEBUG_PRINT("sending buffer with sample_idx: %d\n", sample_idx);
         for (iSide =0; iSide<nSides; iSide++) {
-            buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+            buffer[iSide] = &((*pulse_samples)[iSide][sample_idx]); 
         }
 
 
@@ -117,7 +129,7 @@ void usrp_tx_worker(
     }
 
     md.end_of_burst = true;
-    tx_stream->send(&pulse_samples[0], 0, md, timeout);
+    tx_stream->send(buffer, 0, md, timeout);
 
     DEBUG_PRINT("Waiting for async burst ACK... ");
     uhd::async_metadata_t async_md;
