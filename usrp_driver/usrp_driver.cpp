@@ -53,6 +53,8 @@
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
+#define MAX_STREAM_RESETS 120
+
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); } while( false )
 #else
@@ -914,7 +916,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                       mute_output = 1;
                       rx_stream_error_count++;
                        
-                      if (rx_stream_reset_count >= 120) {
+                      if (rx_stream_reset_count >= MAX_STREAM_RESETS) {
                           fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
                           // send all data to server, clean up and exit after that
                           exit_driver = 1;
@@ -1066,10 +1068,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(clrfreq_rx_worker_status){
                         fprintf(stderr, "Error in clrfreq_rx_worker, resetting rx_stream: %d.\n", clrfreq_rx_worker_status);
                         rx_stream_reset_count++;
-                        fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
+                        fprintf(stderr, "CLRFREQ: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
                         rx_stream.reset();
                         rx_stream = usrp->get_rx_stream(stream_args);
                     }
+
+                    if (rx_stream_reset_count >= MAX_STREAM_RESETS) {
+                        fprintf(stderr, "CLRFREQ: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
+                        // finish clrfreq command, then clean up and exit to avoid buffer overflow
+                        exit_driver = 1;
+                    }
+
+
 
                     DEBUG_PRINT("CLRFREQ received samples, relaying %d samples back...\n", num_clrfreq_samples);
                     sock_send_int32(driverconn, (int32_t) antennaVector[0]); // TODO both sides?
