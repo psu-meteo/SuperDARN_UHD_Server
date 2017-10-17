@@ -129,6 +129,9 @@ class usrpClass():
               start_arg += [ "--antennaB", self.ant[iSide]] 
           else:
              log("unknown usrp side: {}".format(side))
+
+       if self.mainarray.lower() in ["false", "0", "off"]:
+            start_arg += ["--interferometer"]
        return start_arg
 
 
