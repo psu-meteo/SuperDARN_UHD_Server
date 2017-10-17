@@ -1443,7 +1443,7 @@ class RadarHardwareManager:
                                   back_samples = np.zeros((len(self.channels), nBackAntennas, nSamples_bb), dtype=np.complex64)
 
                                samples = recv_dtype(cudasock, np.float32, nSamples_bb * 2)
-                               samples = samples[0::2] + 1j * samples[1::2] * self.scaling_factor_rx_bb # unpacked interleaved i/q
+                               samples = (samples[0::2] + 1j * samples[1::2]) * self.scaling_factor_rx_bb # unpacked interleaved i/q
                                
                                if antIdx in self.antenna_idx_list_main:
                                    iAntenna = self.antenna_idx_list_main.index(antIdx)
