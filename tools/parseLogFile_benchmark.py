@@ -17,19 +17,22 @@ Created on Thu Nov 17 18:42:45 2016
 from datetime import datetime
 import matplotlib.pyplot as plt
 import sys
+import os
+
 # %% class stuff
 
 class logEntries:
-    def __init__(self,fileName=None):
+    def __init__(self,fileName=None, line_limit=10000):
         self.time  = []
         self.name  = []
         self.level = []
         self.msg   = []
         self.fileName = fileName
         if self.fileName != None:
-            self.parseFile()
+            self.parseFile(line_limit)
         
-    def parseFile(self):
+    def parseFile(self, line_limit):
+        nLines = 0
         with open(self.fileName) as f:
             for line in f:
                 dateStr = line[:23]
@@ -41,6 +44,10 @@ class logEntries:
                 self.name.append(line[24:37].strip())
                 self.level.append(line[37:46].strip())
                 self.msg.append(line[46:-1].strip())
+                nLines += 1
+                if nLines > line_limit:
+                    break
+
                         
     def copy(self):
         output = logEntries()
