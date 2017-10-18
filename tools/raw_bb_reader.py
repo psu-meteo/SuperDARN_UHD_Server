@@ -22,23 +22,6 @@ import matplotlib.cm as cm
 
 
 
-# %% try input arguments ...
-raw_path = "/data/image_samples/bb_data/"
-
-if len(sys.argv) == 1:
-    import glob
-    print('No input. Looking for newest file in {} ...'.format(raw_path))
-    file_with_path = max(glob.iglob('{}*.iraw.*'.format(raw_path)), key=os.path.getctime)
-    fileName = file_with_path[len(raw_path):]
-    print('found :{}'.format(fileName))
-else:
-    fileName = sys.argv[1]
-    if fileName.find("/") == -1: # no path defined => assume /data/diagnostic_samples/
-        print('Only filename without path. looking for file in {} ...'.format(raw_path))
-        file_with_path = os.path.join(raw_path, fileName)
-    else:
-        file_with_path = fileName
-
 
 # %% read file
 
@@ -297,5 +280,22 @@ class RawDataGUI:
 
 # %% 
 if __name__ == '__main__':
+   # %% try input arguments ...
+   raw_path = "/data/image_samples/bb_data/"
+   
+   if len(sys.argv) == 1:
+       import glob
+       print('No input. Looking for newest file in {} ...'.format(raw_path))
+       file_with_path = max(glob.iglob('{}*.iraw.*'.format(raw_path)), key=os.path.getctime)
+       fileName = file_with_path[len(raw_path):]
+       print('found :{}'.format(fileName))
+   else:
+       fileName = sys.argv[1]
+       if fileName.find("/") == -1: # no path defined => assume /data/diagnostic_samples/
+           print('Only filename without path. looking for file in {} ...'.format(raw_path))
+           file_with_path = os.path.join(raw_path, fileName)
+       else:
+           file_with_path = fileName
+   
    x = RawDataGUI(file_with_path)
    x.open()
