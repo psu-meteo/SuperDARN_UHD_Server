@@ -64,18 +64,19 @@ void usrp_tx_worker(
     // assume at least spb length zero padding before first pulse
     size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + samples_per_pulse -1;
     size_t nacc_samples = 0;
+    size_t ntx_samples;
     size_t sample_idx = 0;
     uint32_t pulse_idx = 0;
+    int32_t nsamples_to_send, samples_to_pulse;
  
 
-    for (iSide =0; iSide<nSides; iSide++) {
-        buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
-    }
-    nacc_samples += tx_stream->send(buffer, spb, md, timeout);
+ //   for (iSide =0; iSide<nSides; iSide++) {
+ //       buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+ //   }
+ //   nacc_samples += tx_stream->send(buffer, spb, md, timeout);
 
-    md.start_of_burst = false;
-    md.has_time_spec = false;
-    int32_t nsamples_to_send, samples_to_pulse;
+ //   md.start_of_burst = false;
+ //   md.has_time_spec = false;
 
 
     while(nacc_samples < tx_burst_length_samples) {
@@ -87,7 +88,7 @@ void usrp_tx_worker(
         
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {
-//            DEBUG_PRINT("pulse_idx=%i, nacc_samples=%i, nsamples_to_send=%d, samples_to_pulse=%d \n", pulse_idx, nacc_samples, nsamples_to_send, samples_to_pulse);
+            //  DEBUG_PRINT("pulse_idx=%i, nacc_samples=%i, nsamples_to_send=%d, samples_to_pulse=%d \n", pulse_idx, nacc_samples, nsamples_to_send, samples_to_pulse);
             if(samples_to_pulse * -1 < samples_per_pulse) {
                 sample_idx = spb - samples_to_pulse + (pulse_idx) * padded_num_samples_per_pulse;
             } else {
@@ -114,7 +115,7 @@ void usrp_tx_worker(
         }
 
 
-      size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
+      ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
 
         md.start_of_burst = false;
         md.has_time_spec = false;
