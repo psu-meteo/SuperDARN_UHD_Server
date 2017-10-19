@@ -54,7 +54,7 @@ void usrp_rx_worker(
 
     uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
     if(offset_time_spec(start_time, RX_OFFSET) - rx_usrp_pre_stream_time.get_real_secs() < RX_STREAM_EXEC_TIME) {
-        DEBUG_PRINT("not enough time before start of stream, skipping this integration period..");
+        fprintf(stderr, "Error in rx_worker: not enough time before start of stream, skipping this integration period..");
         *return_status= RX_WORKER_STREAM_TIME_ERROR;
         return;
     }
@@ -86,7 +86,7 @@ void usrp_rx_worker(
     double time_to_start;
     rx_usrp_pre_stream_time = usrp->get_time_now();
     time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs();
-    DEBUG_PRINT("#timing: time left for rx_worker  %f ms\n", time_to_start*1000);
+    fprintf(stderr,"#timing: time left for rx_worker  %f ms\n", time_to_start*1000);
 
 
 
