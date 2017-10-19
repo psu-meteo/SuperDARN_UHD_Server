@@ -18,7 +18,7 @@ from rosmsg import *
 from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, beamform_uhd_samples
 from radar_config_constants import *
 
-MIN_CLRFREQ_DELAY = .50 # TODO: lower this?
+MIN_CLRFREQ_DELAY = .30 # TODO: lower this?
 CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
 CLRFREQ_RES = 2e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
