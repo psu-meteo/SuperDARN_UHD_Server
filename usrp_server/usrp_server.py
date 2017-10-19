@@ -2642,7 +2642,19 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, num_transmitters, np.int32)
         transmit_dtype(self.conn, txstatus_agc,     np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr,  np.int32) # length num_transmitters
-        
+       
+
+        # transmitt trigger time
+        time_struct = time.gmtime(resultDict['sequence_start_time_secs'][0])
+        transmit_dtype(self.conn, time_struct.tm_year, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_mon, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_mday, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_hour, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_min, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_sec, np.int32)
+        transmit_dtype(self.conn, resultDict['sequence_start_time_usecs'][0], np.int32)
+
+
         # print main info of sequence
         for item in resultDict['ctrlprm_dataqueue']:
             item.transmit(self.ctrlprm_struct.clients[0])
