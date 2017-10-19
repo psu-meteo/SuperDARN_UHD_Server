@@ -1059,6 +1059,8 @@ class RadarHardwareManager:
                 cuda_driver_socks.append(cudasock)
            except ConnectionRefusedError:
                 self.logger.error("cuda server connection failed on {}".format(c))
+                sys.exit(1)
+
         if len(cuda_driver_socks) == 0:
            self.logger.error("No cuda connection available. Exiting usrp_server")
            sys.exit(1)
