@@ -1016,18 +1016,6 @@ class RadarHardwareManager:
                 cmd.client_return()
                 time.sleep(.05)
 
-        while True:
-            print("flasing wax off")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 63) # *2 since LSB is 0.5 dB 
-            cmd.transmit()
-            cmd.client_return()
-            time.sleep(2)
-            print("flasing wax on")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 0) # *2 since LSB is 0.5 dB 
-            cmd.transmit()
-            cmd.client_return()
-            time.sleep(2)
-
 
         for iSet in range(nSets):
             amp1 = testParSet[iSet][0]
