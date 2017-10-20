@@ -1336,38 +1336,38 @@ class RadarHardwareManager:
              
               # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
               # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
-              usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
               usrp_time = cmd.recv_time(self.usrpManager.socks[0])
               cmd.client_return()
               self.logger.debug("end USRP_GET_TIME")
 
-              nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
+           usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
+           nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
 
-              # calculate sequence times for control program
-              n_sequence_times = max(self.nSequences_per_period,1) # at least one time to transmit to control program
-              sequence_start_time_secs  = np.zeros(n_sequence_times, dtype=np.uint64)
-              sequence_start_time_usecs = np.zeros(n_sequence_times, dtype=np.uint32)
-              for iSequence in range(n_sequence_times):
-                  pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
-                  sequence_start_time_secs[iSequence]  = int(pulse_start_time) 
-                  sequence_start_time_usecs[iSequence] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
+           # calculate sequence times for control program
+           n_sequence_times = max(self.nSequences_per_period,1) # at least one time to transmit to control program
+           sequence_start_time_secs  = np.zeros(n_sequence_times, dtype=np.uint64)
+           sequence_start_time_usecs = np.zeros(n_sequence_times, dtype=np.uint32)
+           for iSequence in range(n_sequence_times):
+               pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
+               sequence_start_time_secs[iSequence]  = int(pulse_start_time) 
+               sequence_start_time_usecs[iSequence] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
 
-              # save data for returning results to control program
-              resultDict = {}
-              resultDict['sequence_start_time_secs']      = sequence_start_time_secs
-              resultDict['sequence_start_time_usecs']     = sequence_start_time_usecs
-              resultDict['number_of_samples']             = self.commonChannelParameter['number_of_samples']
-              resultDict['nSequences_per_period']         = self.nSequences_per_period       
-              resultDict['pulse_sequence_offsets_vector'] = self.commonChannelParameter['pulse_sequence_offsets_vector'] 
-              resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
-              resultDict['results_are_valid']             = True
-              for channel in self.channels: 
-                 if (channel is not None) and (not channel.scanManager.isLastPeriod): 
-                     resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
-                     resultDict['pulse_lens']                  = channel.pulse_lens    
-                     channel.resultDict_list.insert(0,resultDict.copy())
+           # save data for returning results to control program
+           resultDict = {}
+           resultDict['sequence_start_time_secs']      = sequence_start_time_secs
+           resultDict['sequence_start_time_usecs']     = sequence_start_time_usecs
+           resultDict['number_of_samples']             = self.commonChannelParameter['number_of_samples']
+           resultDict['nSequences_per_period']         = self.nSequences_per_period       
+           resultDict['pulse_sequence_offsets_vector'] = self.commonChannelParameter['pulse_sequence_offsets_vector'] 
+           resultDict['npulses_per_sequence']          = self.commonChannelParameter['npulses_per_sequence']
+           resultDict['results_are_valid']             = True
+           for channel in self.channels: 
+              if (channel is not None) and (not channel.scanManager.isLastPeriod): 
+                  resultDict['nbb_rx_samples_per_sequence'] = channel.nbb_rx_samples_per_sequence
+                  resultDict['pulse_lens']                  = channel.pulse_lens    
+                  channel.resultDict_list.insert(0,resultDict.copy())
 
-         #  if trigger_next_period: 
+           if trigger_next_period: 
               # broadcast the start of the next integration period to all usrp
               self.logger.debug('start USRP_TRIGGER')
               trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
