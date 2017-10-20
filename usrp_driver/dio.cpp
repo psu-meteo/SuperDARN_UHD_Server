@@ -96,14 +96,16 @@
 
 // TIMING: LFTX to control board (agc) 
 // mapping timing TX RX signals pins
-#define TR_TX     IO_PIN_03
-#define TR_RX     IO_PIN_04
+#define TR_TX     IO_PIN_05
+#define TR_RX     IO_PIN_09
 #define TR_PINS   (TR_TX +TR_RX) 
 
 #define NOT_FAULT_PIN  IO_PIN_01
 
 // SYNC
-#define SYNC_PINS IO_PIN_08 
+//#define SYNC_PINS IO_PIN_08, for kodiak
+#define SYNC_PINS IO_PIN_06
+
 #define SYNC_OFFSET_START (-500e-6) // start of sync pulse
 #define SYNC_OFFSET_END   (-400e-6) // start of sync pulse
 #define SYNC_FOR_EACH_SEQUENCE 1
@@ -257,6 +259,7 @@ void send_timing_for_sequence(
 ) {
 
     char bank_name[4];
+    sprintf(bank_name, "FP0");
     int iSide;
 
 
@@ -268,25 +271,14 @@ void send_timing_for_sequence(
     c.mask     = SYNC_PINS;
     c.value    = SYNC_PINS;
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_START);
-    
-    if(MCM_STYLE) {
-        nSides = 1;
-    }
-
-    for (iSide=0; iSide<nSides; iSide++) {
-       sprintf(bank_name, TX_PORT, 65 + iSide);
-       c.port     = bank_name;
-       cmdq.push(c);
-    }
+    c.port     = bank_name;
+    cmdq.push(c);
 
     // lower SYNC pin
     c.value = 0;
     c.cmd_time = offset_time_spec(start_time, SYNC_OFFSET_END);
-    for (iSide=0; iSide<nSides; iSide++) {
-       sprintf(bank_name, TX_PORT, 65 + iSide);
-       c.port     = bank_name;
-       cmdq.push(c);
-    }
+    c.port     = bank_name;
+    cmdq.push(c);
     
     //debug
     fprintf( stderr, "DIO setting start of SYNC to %2.11f\n", offset_time_spec(start_time, SYNC_OFFSET_START).get_real_secs() ); 
@@ -299,21 +291,14 @@ void send_timing_for_sequence(
         c.mask     = TR_PINS;
         c.value    = TR_TX;   
         c.cmd_time = pulse_times[iPulse];
-        for (iSide=0; iSide<nSides; iSide++) {
-           sprintf(bank_name, TX_PORT, 65 + iSide);
-           c.port     = bank_name;
-           cmdq.push(c);
-        }
-    
+        c.port     = bank_name;
+        cmdq.push(c);
 
         // set RX high and TX low
         c.value    = TR_RX;
         c.cmd_time = offset_time_spec(pulse_times[iPulse], pulseLength);
-        for (iSide=0; iSide<nSides; iSide++) {
-           sprintf(bank_name, TX_PORT ,65 + iSide);
-           c.port     = bank_name;
-           cmdq.push(c);
-        }
+        c.port     = bank_name;
+        cmdq.push(c);
 
         if (mimic_active) {
            // DEBUG_PRINT("DIO.cpp: using mimic target with %2.4f ms delay\n", mimic_delay*1000);
