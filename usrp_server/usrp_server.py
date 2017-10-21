@@ -226,6 +226,14 @@ class usrpSockManager():
 
        self.RHM.clearFreqRawDataManager.set_usrp_driver_connections(self.socks) 
 
+   def get_all_main_antenna_socks(self):
+       main_ant_sock_list = []
+       for sock, ant in zip(self.socks, self.antennaList_active):
+           if ant not in [16, 17, 18, 19]:
+               main_ant_sock_list.append(sock)
+       return main_ant_sock_list
+
+
 
    def eval_client_return(self, cmd, fcn=None):
       if fcn is None: # default receive function
@@ -416,13 +424,14 @@ class usrpMixingFreqManager():
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
-    def __init__(self, antenna_spacing):
+    def __init__(self, antenna_spacing, usrpManager):
         self.rawData    = None
         self.recordTime = None
 
         self.outstanding_request = False     # Flag set by the RadarChannelHandlers 
         self.repeat_request_for_2nd_period = False
 
+        self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
@@ -462,7 +471,7 @@ class clearFrequencyRawDataManager():
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
 
         self.logger.debug('start record_clrfreq_raw_samples')
-        self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
+        self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
         self.logger.debug('end record_clrfreq_raw_samples')
 
         self.metaData['antenna_list'] = self.antennaList
@@ -734,7 +743,7 @@ class RadarHardwareManager:
         self.nControlPrograms  = 0  # number of control programs, also include unregistered channels
         self.channel_manager_consecutive_number = 10 # serial number shown in logger of channel_manager
 
-        self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
+        self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing, self.usrpManager)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
         self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
