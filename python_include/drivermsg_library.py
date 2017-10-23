@@ -15,6 +15,7 @@ UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
 UHD_CLRFREQ = ord('c')
+UHD_AUTOCLRFREQ = ord('a')
 UHD_GETTIME = ord('m')
 UHD_SYNC = ord('S')
 UHD_EXIT = ord('e')
@@ -284,7 +285,7 @@ class cuda_generate_pulse_command(driver_command):
 
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector, swing):
+    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_pause_samples, num_auto_clear_freq, num_requested_tx_samples, pulse_offsets_vector, swing):
         driver_command.__init__(self, usrps, UHD_SETUP)
         
         self.queue(swing , np.int16,   'swing' )
@@ -294,6 +295,8 @@ class usrp_setup_command(driver_command):
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
+        self.queue(num_pause_samples, np.uint64, 'num_pause_samples')
+        self.queue(num_auto_clear_freq, np.uint64, 'num_auto_clear_freq')
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
         self.queue(pulse_offsets_vector, np.uint64, 'pulse_offsets_vector')
 

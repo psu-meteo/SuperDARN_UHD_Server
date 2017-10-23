@@ -1326,8 +1326,10 @@ class RadarHardwareManager:
               # USRP SETUP
               self.logger.debug('triggering period no {}, swing {}'.format(channel.scanManager.current_period + 1 - channel.scanManager.isPrePeriod, self.swingManager.activeSwing))
               self.logger.debug("start USRP_SETUP")
+              nSamples_clear_freq = 0
+              nSamples_pause_before_autoclearfreq = 0
               cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, self.swingManager.activeSwing)
+                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_pause_before_autoclearfreq, nSamples_clear_freq, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, self.swingManager.activeSwing)
               cmd.transmit()
               self.usrpManager.eval_client_return(cmd)
               self.logger.debug("end USRP_SETUP")
