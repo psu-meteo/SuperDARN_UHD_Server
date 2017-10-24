@@ -1,5 +1,6 @@
 #!/bin/bash
 
+ssh radar@kodiak-aux '/home/radar/SuperDARN_UHD_Server/srr.py stop &' &
 pkill -KILL -f srr_watchdog.py
 /home/radar/repos/usrp/srr.py stop
 
