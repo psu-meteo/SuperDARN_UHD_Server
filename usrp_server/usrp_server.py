@@ -31,7 +31,7 @@ from phasing_utils import *
 from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
-from radar_config_constants import *
+from radar_config_constants import * 
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
@@ -40,9 +40,6 @@ import utils
 
 RMSG_PORT = 45000
 MAX_CHANNELS = 4
-CLRFREQ_RES_HZ = 2000
-PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ = 0.005
-MAX_AGE_OF_AUTO_CLEAR_FREQ = 10 # in sec, if data is older a new clear freq record if triggered
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
 USRP_SOCK_TIMEOUT = 7 # sec
 
@@ -491,7 +488,7 @@ class clearFrequencyRawDataManager():
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
         
         if self.recordTime == None:
-            data_age = None
+            data_age = np.inf
             rec_new_samples = True
         else:
             data_age =  time.time() - self.recordTime 
@@ -511,7 +508,7 @@ class clearFrequencyRawDataManager():
     
             self.logger.debug("clrfreq record time: {}".format(self.recordTime))
         else:
-            self.logger.debug("clearFreqRawData: age of data is {} s. No need to record new data...".format(data_age))
+            self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. No need to record new data...".format(data_age))
 
         self.outstanding_request = False
 
@@ -778,7 +775,7 @@ class RadarHardwareManager:
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing, self.usrpManager)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
-        self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+        self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES)
         self.active_channels     = []   # list of channels where ROS called SET_ACTIVE
         self.channels            = []   # all channels that are really transmitting
         self.newChannelList      = []   # waiting list for channels to be added at the right time (between two trigger_next() calls)

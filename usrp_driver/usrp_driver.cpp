@@ -415,6 +415,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uint32_t swing; // = SWING0;
     
     size_t nSamples_rx, nSamples_tx_pulse, nSamples_pause_after_rx, nSamples_auto_clear_freq, nSamples_rx_total;
+    size_t auto_clear_freq_available = 0;
 
 
     uint32_t npulses, nerrors;
@@ -950,10 +951,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                           rx_stream.reset();
                           rx_stream = usrp->get_rx_stream(stream_args);
                       }
+                      auto_clear_freq_available = 0;
                     }
-
                     else {
-                        rx_stream_error_count = 0;
+                      rx_stream_error_count = 0;
+                      auto_clear_freq_available = 1;
                     }
     
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
@@ -1060,15 +1062,19 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     DEBUG_PRINT("entering getting auto clear freq command\n");
 //                    uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
 
-                    iSide = 0;// TODO both sides?
-                    sock_send_int32(driverconn, (int32_t) antennaVector[iSide]); 
-                    sock_send_uint32(driverconn, (uint32_t) rx_auto_clear_freq[iSide].size());
+                    iSide = 0;// TODO both sides!
+                    if (auto_clear_freq_available) {
+                        sock_send_int32(driverconn, (int32_t) antennaVector[iSide]); 
+                        sock_send_uint32(driverconn, (uint32_t) rx_auto_clear_freq[iSide].size());
 
-                    // send samples                   
-                    send(driverconn, &rx_auto_clear_freq[iSide][0], sizeof(std::complex<short int>) * rx_auto_clear_freq[iSide].size() , 0);
-
-
-                    DEBUG_PRINT("AUTOCLRFREQ samples sent for antenna %d...\n", antennaVector[iSide]);
+                        // send samples                   
+                        send(driverconn, &rx_auto_clear_freq[iSide][0], sizeof(std::complex<short int>) * rx_auto_clear_freq[iSide].size() , 0);
+                        DEBUG_PRINT("AUTOCLRFREQ samples sent for antenna %d...\n", antennaVector[iSide]);
+                    }
+                    else {
+                        sock_send_int32(driverconn, (int32_t) -1); 
+                        
+                    }
 
                     sock_send_uint8(driverconn, AUTOCLRFREQ);
 

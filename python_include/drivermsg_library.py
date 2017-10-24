@@ -374,9 +374,12 @@ class usrp_get_auto_clear_freq_command(driver_command):
     
     def recv_samples_from_one_usrp(self, sock):
         antenna_no = recv_dtype(sock, np.int32)
-        nSamples = recv_dtype(sock, np.uint32)
-        sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
-        sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
+        if antenna_no == -1:
+            sample_buf = []
+        else:
+            nSamples = recv_dtype(sock, np.uint32)
+            sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
+            sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
         return antenna_no, sample_buf
 
     def recv_all(self):
@@ -384,8 +387,9 @@ class usrp_get_auto_clear_freq_command(driver_command):
         all_samples = []
         for sock in self.clients:
             tmp_ant, tmp_samples = self.recv_samples_from_one_usrp(sock)
-            antenna_list.append(tmp_ant)
-            all_samples.append(tmp_samples)
+            if tmp_ant != -1:
+                antenna_list.append(tmp_ant)
+                all_samples.append(tmp_samples)
         return antenna_list, all_samples
  
  
