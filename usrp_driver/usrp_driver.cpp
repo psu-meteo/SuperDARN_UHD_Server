@@ -1062,11 +1062,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     iSide = 0;// TODO both sides?
                     sock_send_int32(driverconn, (int32_t) antennaVector[iSide]); 
-                    sock_send_float64(driverconn, rxrate);
-                    sock_send_float64(driverconn, rxfreq);
-                    sock_send_float64(driverconn, rx_auto_clear_freq[iSide].size());
+                    sock_send_uint32(driverconn, (uint32_t) rx_auto_clear_freq[iSide].size());
 
-                    // send back samples                   
+                    // send samples                   
                     send(driverconn, &rx_auto_clear_freq[iSide][0], sizeof(std::complex<short int>) * rx_auto_clear_freq[iSide].size() , 0);
 
 

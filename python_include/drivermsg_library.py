@@ -366,6 +366,28 @@ class usrp_get_time_command(driver_command):
         self.full_sec = recv_dtype(sock, np.uint32)
         self.frac_sec = recv_dtype(sock, np.float64)
         return self.full_sec + self.frac_sec
+
+# command get auto clear freq samples
+class usrp_get_auto_clear_freq_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_AUTOCLRFREQ)
+    
+    def recv_samples_from_one_usrp(self, sock):
+        antenna_no = recv_dtype(sock, np.int32)
+        nSamples = recv_dtype(sock, np.uint32)
+        sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
+        sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
+        return antenna_no, sample_buf
+
+    def recv_all(self):
+        antenna_list = []
+        all_samples = []
+        for sock in self.clients:
+            tmp_ant, tmp_samples = self.recv_samples_from_one_usrp(sock)
+            antenna_list.append(tmp_ant)
+            all_samples.append(tmp_samples)
+        return antenna_list, all_samples
+ 
  
 # command to query usrp time
 class usrp_sync_time_command(driver_command):
