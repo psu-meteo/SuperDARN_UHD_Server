@@ -140,7 +140,8 @@ uniqueMessages = list(set(timSpansServer.msg))
 uniqueMessages.sort(reverse=True)
 
 t0 = timSpansServer.startTime[0]
-
+trigger_idx = uniqueMessages.index("USRP_SETUP")
+all_trigger_time_list = []
 for idx in range(len(timSpansServer.startTime)):
 
     # nameIdx = uniqueNames.index(timSpansServer.startName[idx])
@@ -150,6 +151,15 @@ for idx in range(len(timSpansServer.startTime)):
     duration = (timSpansServer.stopTime[idx] - timSpansServer.startTime[idx]).total_seconds()
     ax.barh(nameIdx, duration, left= startSec, align='center')
     ax.text(startSec+duration/2, nameIdx, "{:3.0f} ms".format(duration*1000), rotation=45, backgroundcolor='gray', alpha=0.5, ha='center', va='center' )
+    if nameIdx == trigger_idx:
+        all_trigger_time_list.append(startSec)
+
+# plot time between trigger
+for iTrigger in range(len(all_trigger_time_list)-1):
+    delta_t = all_trigger_time_list[iTrigger+1] - all_trigger_time_list[iTrigger]
+    plot_position =all_trigger_time_list[iTrigger] + delta_t /2
+    ax.text(plot_position, trigger_idx, "{:3.0f} ms".format(delta_t*1000), rotation=0, backgroundcolor='red', alpha=0.85, ha='center', va='center' )
+
 
 plt.xlabel('Time in s')
 

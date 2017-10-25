@@ -31,7 +31,7 @@ from phasing_utils import *
 from socket_utils import *
 from rosmsg import *
 from drivermsg_library import *
-from radar_config_constants import *
+from radar_config_constants import * 
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
@@ -40,7 +40,6 @@ import utils
 
 RMSG_PORT = 45000
 MAX_CHANNELS = 4
-CLRFREQ_RES_HZ = 2000
 USRP_BANDWIDTH_RESTRICTION = 5000 # in Hz. No channels allowed on both edges of the URSP bandwidth to avoid aliasing 
 USRP_SOCK_TIMEOUT = 7 # sec
 
@@ -225,6 +224,14 @@ class usrpSockManager():
        del self.socks[iSock]
 
        self.RHM.clearFreqRawDataManager.set_usrp_driver_connections(self.socks) 
+
+   def get_all_main_antenna_socks(self):
+       main_ant_sock_list = []
+       for sock, ant in zip(self.socks, self.antennaList_active):
+           if ant not in [16, 17, 18, 19]:
+               main_ant_sock_list.append(sock)
+       return main_ant_sock_list
+
 
 
    def eval_client_return(self, cmd, fcn=None):
@@ -416,13 +423,14 @@ class usrpMixingFreqManager():
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
-    def __init__(self, antenna_spacing):
+    def __init__(self, antenna_spacing, usrpManager):
         self.rawData    = None
         self.recordTime = None
 
         self.outstanding_request = False     # Flag set by the RadarChannelHandlers 
         self.repeat_request_for_2nd_period = False
 
+        self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
@@ -456,24 +464,54 @@ class clearFrequencyRawDataManager():
 
     def reset_occupied_freqs(self):
         self.freq_occupied_by_other_channels = []
-   
+
+
+    def update_auto_clear_freq_data(self, antenna_list, raw_data, meta_data_dict):
+        """ Take the auto clear freq data collected at the end of tranmitting and update the clear freq class"""
+        self.rawData = raw_data
+        self.recordTime = meta_data_dict['record_time']
+        self.antennaList = antenna_list
+        self.sampling_rate = meta_data_dict['sampling_rate']
+        self.center_freq = meta_data_dict['center_freq'] /1000
+        self.logger.debug("Updated clear freq raw data with auto_clear_freq data")
+
+        # TODO get rid of two different meta_data dicts
+        self.metaData['usrp_fcenter'] = self.center_freq 
+        self.metaData['number_of_samples'] = len(self.rawData[0])
+        self.metaData['usrp_rf_rate'] = self.sampling_rate 
+        self.metaData['antenna_list'] = self.antennaList
+
+
+
     def record_new_data(self):
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
         assert self.center_freq != None, "no center frequency assigned to clear frequency search manager"
+        
+        if self.recordTime == None:
+            data_age = np.inf
+            rec_new_samples = True
+        else:
+            data_age =  time.time() - self.recordTime 
+            rec_new_samples = data_age > MAX_AGE_OF_AUTO_CLEAR_FREQ
 
-        self.logger.debug('start record_clrfreq_raw_samples')
-        self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrp_socks, self.number_of_samples, self.center_freq, self.sampling_rate)
-        self.logger.debug('end record_clrfreq_raw_samples')
+        if rec_new_samples:
+            self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. Recoring new data ".format(data_age))
+            self.logger.debug('start record_clrfreq_raw_samples')
+            self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
+            self.logger.debug('end record_clrfreq_raw_samples')
+    
+            self.metaData['antenna_list'] = self.antennaList
+            self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
+    
+            # so, self.rawData is np.array(complex(nantennas, nsamples)
+            self.recordTime = time.time()
+    
+            self.logger.debug("clrfreq record time: {}".format(self.recordTime))
+        else:
+            self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. No need to record new data...".format(data_age))
 
-        self.metaData['antenna_list'] = self.antennaList
-
-        self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
-
-        # so, self.rawData is np.array(complex(nantennas, nsamples)
-        self.recordTime = time.time()
         self.outstanding_request = False
 
-        self.logger.debug("clrfreq record time: {}".format(self.recordTime))
 
     def get_raw_data(self):
         self.get_raw_data_semaphore.acquire()
@@ -690,7 +728,7 @@ class scanManager():
 
         RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
-        self.logger.debug("clear freq result for channel {}: selected {} , noise level {}".format(self.channel.cnum, clearFreq, noise))
+        self.logger.debug("clear freq result for channel {}: selected {} , noise level {:2.1f}".format(self.channel.cnum, clearFreq, noise))
         RHM.clearFreqRawDataManager.select_clear_freq.release()
 
         return (clearFreq, noise, recordTime)
@@ -734,10 +772,10 @@ class RadarHardwareManager:
         self.nControlPrograms  = 0  # number of control programs, also include unregistered channels
         self.channel_manager_consecutive_number = 10 # serial number shown in logger of channel_manager
 
-        self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing)
+        self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing, self.usrpManager)
         self.clearFreqRawDataManager.set_usrp_driver_connections(self.usrpManager.socks) # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
-        self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES_HZ)
+        self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq, self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES)
         self.active_channels     = []   # list of channels where ROS called SET_ACTIVE
         self.channels            = []   # all channels that are really transmitting
         self.newChannelList      = []   # waiting list for channels to be added at the right time (between two trigger_next() calls)
@@ -751,7 +789,7 @@ class RadarHardwareManager:
         self.integration_time_manager = integrationTimeManager(self)
         self.nSequences_per_period = 0
 
-
+        self.auto_collect_clrfrq_after_rx = True
     def run(self):
         def spawn_channel(conn):
             # start new radar channel handler
@@ -1059,6 +1097,8 @@ class RadarHardwareManager:
                 cuda_driver_socks.append(cudasock)
            except ConnectionRefusedError:
                 self.logger.error("cuda server connection failed on {}".format(c))
+                sys.exit(1)
+
         if len(cuda_driver_socks) == 0:
            self.logger.error("No cuda connection available. Exiting usrp_server")
            sys.exit(1)
@@ -1315,8 +1355,19 @@ class RadarHardwareManager:
               # USRP SETUP
               self.logger.debug('triggering period no {}, swing {}'.format(channel.scanManager.current_period + 1 - channel.scanManager.isPrePeriod, self.swingManager.activeSwing))
               self.logger.debug("start USRP_SETUP")
+              if self.auto_collect_clrfrq_after_rx:
+                  nSamples_clear_freq = self.clearFreqRawDataManager.number_of_samples 
+                  nSamples_pause_before_autoclearfreq = int(PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ * self.usrp_rf_rx_rate)
+                  collect_auto_clear_freq_samples = True
+                  auto_clear_freq_meta_data = dict(sampling_rate=self.usrp_rf_rx_rate, center_freq=self.mixingFreqManager.current_mixing_freq*1000)
+              else:
+                  nSamples_clear_freq = 0
+                  nSamples_pause_before_autoclearfreq = 0
+                  collect_auto_clear_freq_samples = False
+                  auto_clear_freq_meta_data = None
+
               cmd = usrp_setup_command(self.usrpManager.socks, self.mixingFreqManager.current_mixing_freq*1000, self.mixingFreqManager.current_mixing_freq*1000, self.usrp_rf_tx_rate, self.usrp_rf_rx_rate, \
-                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, self.swingManager.activeSwing)
+                                       self.nPulses_per_integration_period,  channel.nrf_rx_samples_per_integration_period, nSamples_pause_before_autoclearfreq, nSamples_clear_freq, nSamples_per_pulse, channel.integration_period_pulse_sample_offsets, self.swingManager.activeSwing)
               cmd.transmit()
               self.usrpManager.eval_client_return(cmd)
               self.logger.debug("end USRP_SETUP")
@@ -1334,17 +1385,20 @@ class RadarHardwareManager:
              
               # TODO: tag time using a better source? this will have a few hundred microseconds of uncertainty
               # maybe measure offset between usrp time and computer clock time somewhere, then calculate from there
-              usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
               usrp_time = cmd.recv_time(self.usrpManager.socks[0])
               cmd.client_return()
               self.logger.debug("end USRP_GET_TIME")
 
+           usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
+           if self.auto_collect_clrfrq_after_rx:
+              auto_clear_freq_meta_data['record_time'] = usrp_integration_period_start_clock_time + (nSamples_rx_requested_of_last_trigger / self.usrp_rf_rx_rate)
 
            # calculate sequence times for control program
-           sequence_start_time_secs  = np.zeros(self.nSequences_per_period, dtype=np.uint64)
-           sequence_start_time_usecs = np.zeros(self.nSequences_per_period, dtype=np.uint32)
-           for iSequence in range(self.nSequences_per_period):
+           n_sequence_times = max(self.nSequences_per_period,1) # at least one time to transmit to control program
+           sequence_start_time_secs  = np.zeros(n_sequence_times, dtype=np.uint64)
+           sequence_start_time_usecs = np.zeros(n_sequence_times, dtype=np.uint32)
+           for iSequence in range(n_sequence_times):
                pulse_start_time = usrp_integration_period_start_clock_time + iSequence * self.nsamples_per_sequence / self.usrp_rf_rx_rate
                sequence_start_time_secs[iSequence]  = int(pulse_start_time) 
                sequence_start_time_usecs[iSequence] = int(( pulse_start_time - int(pulse_start_time) ) *1e6)
@@ -1652,7 +1706,8 @@ class RadarHardwareManager:
         # SWITCH SWINGS
         self.swingManager.switch_swings()
         self.logger.debug('switching swings to: active={}, processing={}'.format(self.swingManager.activeSwing, self.swingManager.processingSwing))
-  
+ 
+        # START CUDA_PROCESS
         if transmittingChannelAvailable:
            if trigger_next_period:
               # CUDA_PROCESS for processingSwing
@@ -1676,7 +1731,16 @@ class RadarHardwareManager:
                  channel.triggered_swing_list.insert(0, self.swingManager.nextSwingToTrigger)
 
                  channel.scanManager.isFirstPeriod = False
- 
+
+        # GET AUTO CLEAR FREQ DATA
+        if transmittingChannelAvailable and trigger_next_period and self.auto_collect_clrfrq_after_rx:
+            cmd = usrp_get_auto_clear_freq_command(self.usrpManager.socks)
+            cmd.transmit()
+            antenna_list, clr_samples = cmd.recv_all()
+            self.clearFreqRawDataManager.update_auto_clear_freq_data(antenna_list, clr_samples, auto_clear_freq_meta_data)
+            cmd.client_return()
+
+
         if not trigger_next_period:
            self.logger.info("This swing has not been triggered, setting processing_swing_invalid.")
            self.processing_swing_invalid = True # set for next call of trigger_next_period 
@@ -1714,7 +1778,7 @@ class RadarHardwareManager:
             bb_samplingRate = RHM.commonChannelParameter['baseband_samplerate'] 
             offset = int(np.round(900e-6*bb_samplingRate))
             channel = RHM.channels[0]
-            pulse_offsets = RHM.all_possible_integration_period_pulse_sample_offsets[:channel.resultDict_list[-1]['npulses_per_sequence'] *  channel.resultDict_list[-1]['nSequences_per_period']]
+            pulse_offsets = RHM.all_possible_integration_period_pulse_sample_offsets
             pulse_offsets = np.array(np.round(pulse_offsets/RHM.usrp_rf_rx_rate*bb_samplingRate), dtype=np.int)
             pulse_offsets -= pulse_offsets[0]
             rx_idx = []
@@ -1722,6 +1786,7 @@ class RadarHardwareManager:
                 rx_idx += range(pulse_offsets[iPulse]+offset, pulse_offsets[iPulse+1]-offset)
             rx_idx += range(pulse_offsets[iPulse+1]+offset, nSamples)
             rx_idx = np.array(rx_idx, dtype=np.int)
+            rx_idx = rx_idx[rx_idx<nSamples-1]
             if debugPlot:
                 import matplotlib.pyplot as plt
 
@@ -1887,6 +1952,8 @@ class RadarChannelHandler:
   ###      self.scanManager.get_clr_freq_raw_data = self.parent_RadarHardwareManager.clearFreqRawDataManager.get_raw_data
         self.swingManager = parent_RadarHardwareManager.swingManager # reference to global swingManager of RadarHardwareManager
         self.triggered_swing_list = []
+
+        self.received_first_SETPAR = False # to handle first GET_PAR before SET_PAR
         
 
 # QUICK ACCESS TO CURRENT/NEXT ACTIVE/PROCESSING STATE
@@ -2406,7 +2473,7 @@ class RadarChannelHandler:
         # TODO: check if new freq is possible with usrp_centerFreq
         # TODO divide compatibiliti check in sequence and ctrlprm check?
         # TODO add compatibility check in parameter prediction function
-
+        self.received_first_SETPAR = True
         RHM = self.parent_RadarHardwareManager
         RHM.n_SetParameterHandlers_active += 1
 
@@ -2465,8 +2532,11 @@ class RadarChannelHandler:
            self.ctrlprm_struct.receive(self.conn)
            for key in ctrlprm_old.keys():
               if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
-                 self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
-                 # TODO return RMSG_FAILURE
+                  if key == "tfreq" and self.ctrlprm_struct.payload[key] == 12000: # control program always sends 2 SET_PAR. 1st one with tfreq 12MHz
+                      continue
+
+                  self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
+                  # TODO return RMSG_FAILURE
               #else:
                #  self.logger.debug("ch {}: received ctrlprm_struct for {} ({}) IS     equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
         else:
@@ -2580,6 +2650,7 @@ class RadarChannelHandler:
     #@timeit
     def GetParametersHandler(self, rmsg):
         # TODO: return bad status if negative radar or channel
+#        if self.received_first_SETPAR:
         self.update_ctrlprm_class("current")
         self.ctrlprm_struct.transmit()
         self.logger.debug("ch {}: sending current ctrlprm_struct (tfreq={}, rfreq={},tbeam={},rbeam={})".format(self.cnum, self.ctrlprm_struct.get_data('tfreq'), self.ctrlprm_struct.get_data('rfreq'), self.ctrlprm_struct.get_data('tbeam'), self.ctrlprm_struct.get_data('rbeam') ))
@@ -2642,7 +2713,19 @@ class RadarChannelHandler:
         transmit_dtype(self.conn, num_transmitters, np.int32)
         transmit_dtype(self.conn, txstatus_agc,     np.int32) # length num_transmitters
         transmit_dtype(self.conn, txstatus_lowpwr,  np.int32) # length num_transmitters
-        
+       
+
+        # transmitt trigger time
+        time_struct = time.gmtime(resultDict['sequence_start_time_secs'][0])
+        transmit_dtype(self.conn, time_struct.tm_year, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_mon, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_mday, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_hour, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_min, np.int32)
+        transmit_dtype(self.conn, time_struct.tm_sec, np.int32)
+        transmit_dtype(self.conn, resultDict['sequence_start_time_usecs'][0], np.int32)
+
+
         # print main info of sequence
         for item in resultDict['ctrlprm_dataqueue']:
             item.transmit(self.ctrlprm_struct.clients[0])
@@ -2739,7 +2822,7 @@ class RadarChannelHandler:
            self.parent_RadarHardwareManager.active_channels.append(self)
            self.logger.debug("Added ch {} to RHM.active_channels list".format(self.cnum))
            
-
+        self.received_first_SETPAR = False
         self.logger.debug('SetActiveHandler starting')
 
         # receive all data from control program        

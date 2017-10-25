@@ -233,7 +233,7 @@ def remote_stop_all():
         print(respond)
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py","/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -372,7 +372,7 @@ def get_process_ids(processShortName):
        processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
        nWords = 2 
     elif processShortName == "srr_watchdog":
-       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py"]
+       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py", "python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py"]
        nWords = 1
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]

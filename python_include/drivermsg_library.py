@@ -4,6 +4,7 @@ import uuid
 import collections
 import pdb
 import logging
+import time
 from socket_utils import *
 from termcolor import cprint
 
@@ -15,6 +16,7 @@ UHD_RXFE_SET = ord('r')
 UHD_READY_DATA = ord('d')
 UHD_TRIGGER_PULSE = ord('t')
 UHD_CLRFREQ = ord('c')
+UHD_AUTOCLRFREQ = ord('a')
 UHD_GETTIME = ord('m')
 UHD_SYNC = ord('S')
 UHD_EXIT = ord('e')
@@ -284,7 +286,7 @@ class cuda_generate_pulse_command(driver_command):
 
 # re-initialize the usrp driver for a new pulse sequence
 class usrp_setup_command(driver_command):
-    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_requested_tx_samples, pulse_offsets_vector, swing):
+    def __init__(self, usrps, txfreq, rxfreq, txrate, rxrate, npulses, num_requested_rx_samples, num_pause_samples, num_auto_clear_freq, num_requested_tx_samples, pulse_offsets_vector, swing):
         driver_command.__init__(self, usrps, UHD_SETUP)
         
         self.queue(swing , np.int16,   'swing' )
@@ -294,6 +296,8 @@ class usrp_setup_command(driver_command):
         self.queue(rxrate, np.float64, 'rxrate')
         self.queue(npulses, np.uint32, 'npulses')
         self.queue(num_requested_rx_samples, np.uint64, 'num_requested_rx_samples')
+        self.queue(num_pause_samples, np.uint64, 'num_pause_samples')
+        self.queue(num_auto_clear_freq, np.uint64, 'num_auto_clear_freq')
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
         self.queue(pulse_offsets_vector, np.uint64, 'pulse_offsets_vector')
 
@@ -363,6 +367,34 @@ class usrp_get_time_command(driver_command):
         self.full_sec = recv_dtype(sock, np.uint32)
         self.frac_sec = recv_dtype(sock, np.float64)
         return self.full_sec + self.frac_sec
+
+# command get auto clear freq samples
+class usrp_get_auto_clear_freq_command(driver_command):
+    def __init__(self, usrps):
+        driver_command.__init__(self, usrps, UHD_AUTOCLRFREQ)
+    
+    def recv_samples_from_one_usrp(self, sock):
+        antenna_no = recv_dtype(sock, np.int32)
+        if antenna_no == -1:
+            sample_buf = []
+        else:
+            nSamples = recv_dtype(sock, np.uint32)
+            print("receive ant {}: {} samples".format(antenna_no, nSamples))
+            time.sleep(0.001)
+            sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
+            sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
+        return antenna_no, sample_buf
+
+    def recv_all(self):
+        antenna_list = []
+        all_samples = []
+        for sock in self.clients:
+            tmp_ant, tmp_samples = self.recv_samples_from_one_usrp(sock)
+            if tmp_ant != -1:
+                antenna_list.append(tmp_ant)
+                all_samples.append(tmp_samples)
+        return antenna_list, all_samples
+ 
  
 # command to query usrp time
 class usrp_sync_time_command(driver_command):

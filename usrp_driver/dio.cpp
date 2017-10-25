@@ -323,7 +323,7 @@ void send_timing_for_sequence(
     double time_to_start;
     uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
     time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs() - SYNC_OFFSET_START;
-    DEBUG_PRINT("#timing: time left for dio_worker %f ms\n", time_to_start*1000);
+    fprintf(stderr, "#timing: time left for dio_worker %f ms\n", time_to_start*1000);
 
 
 

@@ -6,6 +6,15 @@ USRP_MASTER_CLOCK_FREQ = 200e6 # not all values are supported by the ettus UHD d
 # to allow for the usrp_drivers receive a command..
 INTEGRATION_PERIOD_SYNC_TIME = .6 
 
+# DELAY before clear freq record
+MIN_CLRFREQ_DELAY = .50
+
+
+CLRFREQ_RES = 2e3 # fft frequency resolution for clear freq in Hz
+MAX_AGE_OF_AUTO_CLEAR_FREQ = 10 # in sec, if data is older a new clear freq record if triggered
+PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ = 0.0 # is seconds
+
+
 # padding in seconds between pulse sequences
 # starting from the last transmit pulse within a sequence
 # so, this needs to be long enough to avoid any ambiguity between pulse sequences
