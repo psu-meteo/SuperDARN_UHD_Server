@@ -155,6 +155,7 @@ while True:
 
    if restart_server:
        log("Age of usrp_server status file is {} seconds. Restarting all processes (with srr.py) ...".format(file_age))
+       time.sleep(10) # in case USRP_driver just shut down
        srr.restart_all()
        time.sleep(wait_after_restart_all)
        usrp_driver_watcher.last_restart = time.mktime(time.localtime())
@@ -168,7 +169,8 @@ while True:
                srr.restart_all()
                time.sleep(wait_after_restart_all)
            else:
-               log("No cuda driver found. Restarting all driver...")
+               log("No cuda driver found. Restarting all driver in 10 s ...")
+               time.sleep(10) # in case USRP_driver just shut down
                srr.restart_driver()
                time.sleep(wait_after_restart_driver)
            usrp_driver_watcher.last_restart = time.mktime(time.localtime())
