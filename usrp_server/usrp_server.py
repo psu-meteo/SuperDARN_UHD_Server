@@ -86,7 +86,7 @@ class integrationTimeManager():
       elif int_time == 2.9:
          overhead_time = 0.05
       elif int_time == 1:
-         overhead_time = 0.2 # TODO adjust and test
+         overhead_time = 0.05 # TODO adjust and test
       else:
          error_str = "No overhead time defined for {} s, please add it...".format(int_time)
          self.RHM.logger.error(error_str)
@@ -1391,7 +1391,7 @@ class RadarHardwareManager:
 
            usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
-           if self.auto_collect_clrfrq_after_rx:
+           if transmittingChannelAvailable and trigger_next_period and self.auto_collect_clrfrq_after_rx:
               auto_clear_freq_meta_data['record_time'] = usrp_integration_period_start_clock_time + (nSamples_rx_requested_of_last_trigger / self.usrp_rf_rx_rate)
 
            # calculate sequence times for control program
