@@ -1123,7 +1123,7 @@ class RadarHardwareManager:
         for ch2add in newChannelList:
            if ch2add not in RHM.channels:
               nChannelsNew += 1
-        RHM.gain_control_divide_by_nChannels(nChannelsWillBeAdded=nChannelsNew)
+        RHM.apply_channel_scaling(nChannelsWillBeAdded=nChannelsNew)
 
         RHM._calc_period_details(newChannels=newChannelList) # TODO only if this is first channel?
         for channel in newChannelList:
@@ -1328,7 +1328,7 @@ class RadarHardwareManager:
         self.integration_time_manager.started_trigger_next()
  ##       swingManager = self.swingManager
      
-        self.gain_control_divide_by_nChannels()
+        self.apply_channel_scaling()
         
         self._calc_period_details()
         trigger_next_period = self.nSequences_per_period != 0 # don't triger if no time left
@@ -1755,6 +1755,16 @@ class RadarHardwareManager:
                   ch_do_not_increase_period.append(ch.scanManager.isPrePeriod or ch.scanManager.isLastPeriod)
                   ch.scanManager.period_finished()
    
+    def apply_channel_scaling(self, nChannelsWillBeAdded=0):
+
+        # self.gain_control_divide_by_nChannels(self, nChannelsWillBeAdded)
+        self.no_channel_gain_control()
+
+
+    def no_channel_gain_control(self, nChannelsWillBeAdded=0):
+        self.logger.debug("No channel scaling. Global factor for all channels is: totalScaligFactor  = {} ".format(self.scaling_factor_tx_total ))
+        for ch in self.channels + self.newChannelList:
+            ch.channelScalingFactor = self.scaling_factor_tx_total
 
 
     def gain_control_divide_by_nChannels(self, nChannelsWillBeAdded=0):
