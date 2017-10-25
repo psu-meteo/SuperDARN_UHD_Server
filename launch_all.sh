@@ -17,6 +17,7 @@ ssh radar@kodiak-aux 'python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdo
 python3 /home/radar/repos/usrp/tools/srr_watchdog.py server &
 
 sleep 15
-schedule -l /data/ros/scdlog -f /data/ros/scd/kod.d.scd & #TODO add channel c
+schedule -l /data/ros/scdlog/kod.d.scdlog -f /data/ros/scd/kod.d.scd & 
+schedule -l /data/ros/scdlog/kod.c.scdlog -f /data/ros/scd/kod.c.scd & 
 
 #gdb -ex run --args uafscan --stid mcm -c 1 --debug # control program connects to usrp server
