@@ -78,6 +78,17 @@ class integrationTimeManager():
          self.RHM.logger.info("Time with overhead for last integration period: {} s".format(nSeconds))
       self.last_start = now
 
+   def get_usrp_delay_time(self): 
+      int_time = self.RHM.commonChannelParameter['integration_period_duration']  
+      if int_time <= 1:
+         delay_time = INTEGRATION_PERIOD_SYNC_TIME_ONESEC
+      else:
+         delay_time = INTEGRATION_PERIOD_SYNC_TIME
+
+      return delay_time
+
+
+
    def estimate_calc_time(self):
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
@@ -608,12 +619,12 @@ class scanManager():
 
     def wait_for_next_trigger(self):
         if self.syncBeams:
-           time_to_wait = self.beam_times[self.current_period] - self.get_time_in_scan() - INTEGRATION_PERIOD_SYNC_TIME
+           time_to_wait = self.beam_times[self.current_period] - self.get_time_in_scan() - self.integration_time_manager.get_usrp_delay_time()
            if time_to_wait > 0:
               self.logger.debug("Waiting for {} s".format(time_to_wait))
               time.sleep(time_to_wait)
            else:
-              self.logger.debug("No waiting. ({} + {}) s too late.".format(time_to_wait + INTEGRATION_PERIOD_SYNC_TIME, INTEGRATION_PERIOD_SYNC_TIME))
+              self.logger.debug("No waiting. ({} + {}) s too late.".format(time_to_wait + self.integration_time_manager.get_usrp_delay_time(), self.integration_time_manager.get_usrp_delay_time()))
             
            
     def init_new_scan(self, freq_range_list, scan_beam_list, fixFreq, scan_times_list, scan_duration, integration_duration, start_period):
@@ -1259,7 +1270,7 @@ class RadarHardwareManager:
         self.logger.debug("time.time(): {}".format(time.time()))
 
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - INTEGRATION_PERIOD_SYNC_TIME - self.integration_time_manager.estimate_calc_time()
+        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - self.integration_time_manager.get_usrp_delay_time() - self.integration_time_manager.estimate_calc_time()
         if transmitting_time_left <= 0:
             transmitting_time_left = 0
             self.logger.warning("no time is left in integration period for sampling!")
@@ -1267,7 +1278,7 @@ class RadarHardwareManager:
 
         # calculate the number of pulse sequences that fit in the available time within an integration period
         nSequences_per_period = int(transmitting_time_left / pulse_sequence_period)
-        nSequences_per_period_max = int((self.commonChannelParameter['integration_period_duration']  - INTEGRATION_PERIOD_SYNC_TIME - self.integration_time_manager.estimate_calc_time() ) / pulse_sequence_period)
+        nSequences_per_period_max = int((self.commonChannelParameter['integration_period_duration']  - self.integration_time_manager.get_usrp_delay_time() - self.integration_time_manager.estimate_calc_time() ) / pulse_sequence_period)
         ### sampling_duration = pulse_sequence_period * nSequences_per_period   # just record full number of sequences
 
 
@@ -1389,7 +1400,7 @@ class RadarHardwareManager:
               cmd.client_return()
               self.logger.debug("end USRP_GET_TIME")
 
-           usrp_integration_period_start_clock_time = time.time() + INTEGRATION_PERIOD_SYNC_TIME
+           usrp_integration_period_start_clock_time = time.time() + self.integration_time_manager.get_usrp_delay_time()
            nSamples_rx_requested_of_last_trigger = channel.nrf_rx_samples_per_integration_period
            if transmittingChannelAvailable and trigger_next_period and self.auto_collect_clrfrq_after_rx:
               auto_clear_freq_meta_data['record_time'] = usrp_integration_period_start_clock_time + (nSamples_rx_requested_of_last_trigger / self.usrp_rf_rx_rate)
@@ -1421,7 +1432,7 @@ class RadarHardwareManager:
            if trigger_next_period: 
               # broadcast the start of the next integration period to all usrp
               self.logger.debug('start USRP_TRIGGER')
-              trigger_time = usrp_time + INTEGRATION_PERIOD_SYNC_TIME 
+              trigger_time = usrp_time + self.integration_time_manager.get_usrp_delay_time()
               cmd = usrp_trigger_pulse_command(self.usrpManager.socks, trigger_time, self.commonChannelParameter['tr_to_pulse_delay'], self.swingManager.activeSwing) 
               self.logger.debug('sending trigger pulse command for swing {}'.format(self.swingManager.activeSwing))
               cmd.transmit()
