@@ -2618,16 +2618,19 @@ class RadarChannelHandler:
 
             # determine downsample rates
             #   bb_samplinRate = 3e8/2/rsep
-            #    resp=45km => 3.333 kHz  (default)
-            #    resp=15km => 10 kHz     (used in pcodescan_15km)
-            #    resp=6km  => 25 kHz     (used in pcodescan)
-            # TODO add 10M
+            #    rsep=45km => 3.333 kHz  (default)
+            #    rsep=15km => 10 kHz    
+            #    rsep=9km  => 16.667 kHz    
+            #    rsep=6km  => 25 kHz     
+
             goodDownsampleRates = [[20, 75],  # 5M => 3.333k
                                    [20, 25],  # 5M => 10k 
+                                   [15 ,20],  # 5M => 16.67k 
                                    [10 ,20],  # 5M => 25k 
                                    [10 ,75],  # 2.5M => 3.333k 
                                    [30 ,100], # 10M => 3.333k 
                                    [20, 50],  # 10M => 10k 
+                                   [20, 30],  # 10M => 16.67k 
                                    [20 ,20],  # 10M => 25k 
             ]
          
