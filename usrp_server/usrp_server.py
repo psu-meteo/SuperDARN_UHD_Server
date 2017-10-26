@@ -656,7 +656,7 @@ class scanManager():
     def get_nSec_to_scan_boundary(self, time_now):
         if self.scan_duration != 60:
            ERRROR
-        nSec_left = self.scan_duration - (time.gmtime(time_now) + time_now % 1)
+        nSec_left = self.scan_duration - (time.gmtime(time_now).tm_sec + time_now % 1)
         return nSec_left
 
 
@@ -1281,7 +1281,7 @@ class RadarHardwareManager:
         nSec_to_end_of_period =  self.commonChannelParameter['integration_period_duration']  - time_now  + self.starttime_period
         # reduce time if there is a scan boundary
         for ch in self.channels+newChannels:
-            nSec_to_end_of_period = min(nSec_to_end_of_period, ch.scanManager.get_nSec_to_scan_boundary(time_notime_now))
+            nSec_to_end_of_period = min(nSec_to_end_of_period, ch.scanManager.get_nSec_to_scan_boundary(time_now))
         
         transmitting_time_left = nSec_to_end_of_period  - self.integration_time_manager.estimate_calc_time()  - self.integration_time_manager.get_usrp_delay_time()
 
