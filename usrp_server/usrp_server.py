@@ -597,7 +597,7 @@ class scanManager():
         self.isFirstPeriod = True
 
     def get_time_in_scan(self):
-        """ Returns the time in seconds from the scheduled start of the scan. """
+        """ Returns the time in seconds from the scheduled start of the scan. Used to set start period. """
 
         current_time = datetime.datetime.now().time()
         nSeconds_in_this_hour = current_time.minute*60 + current_time.second + current_time.microsecond/1e6
@@ -654,9 +654,8 @@ class scanManager():
         self.isFirstPeriod          = True
 
     def get_nSec_to_scan_boundary(self, time_now):
-        if self.scan_duration != 60:
-           ERRROR
-        nSec_left = self.scan_duration - (time.gmtime(time_now).tm_sec + time_now % 1)
+        """ To limit the time of integration periods  """
+        nSec_left = self.scan_duration - ((time.gmtime(time_now).tm_min*60 + time.gmtime(time_now).tm_sec + time_now % 1) % self.scan_duration )
         return nSec_left
 
 
