@@ -653,6 +653,12 @@ class scanManager():
         self.isInitSetParameter     = True
         self.isFirstPeriod          = True
 
+    def get_nSec_to_scan_boundary(self, time_now):
+        if self.scan_duration != 60:
+           ERRROR
+        nSec_left = self.scan_duration - (time.gmtime(time_now) + time_now % 1)
+        return nSec_left
+
 
     # XXX store current freqencies in clrfreq manager,
     # add to restricted
@@ -1267,10 +1273,19 @@ class RadarHardwareManager:
 
         self.logger.debug("self.starttime_period: {}".format(self.starttime_period))
         self.logger.debug("self.commonChannelParameter['integration_period_duration: {}".format(self.commonChannelParameter['integration_period_duration']))
-        self.logger.debug("time.time(): {}".format(time.time()))
 
         # to find out how much time is available in an integration period for pulse sequences, subtract out startup delay
-        transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - self.integration_time_manager.get_usrp_delay_time() - self.integration_time_manager.estimate_calc_time()
+       # transmitting_time_left = self.starttime_period + self.commonChannelParameter['integration_period_duration'] - time.time() - self.integration_time_manager.get_usrp_delay_time() - self.integration_time_manager.estimate_calc_time()
+
+        time_now = time.time()
+        nSec_to_end_of_period =  self.commonChannelParameter['integration_period_duration']  - time_now  + self.starttime_period
+        # reduce time if there is a scan boundary
+        for ch in self.channels+newChannels:
+            nSec_to_end_of_period = min(nSec_to_end_of_period, ch.scanManager.get_nSec_to_scan_boundary(time_notime_now))
+        
+        transmitting_time_left = nSec_to_end_of_period  - self.integration_time_manager.estimate_calc_time()  - self.integration_time_manager.get_usrp_delay_time()
+
+
         if transmitting_time_left <= 0:
             transmitting_time_left = 0
             self.logger.warning("no time is left in integration period for sampling!")
