@@ -2894,7 +2894,7 @@ class RadarChannelHandler:
         if self.parent_RadarHardwareManager.trigger_next_function_running:
            self.logger.debug('start SetActiveHandler: waiting for trigger_next() to finish')
            while self.parent_RadarHardwareManager.trigger_next_function_running:
-              time.sleep(0.01)
+              time.sleep(0.0005)
            self.logger.debug('end SetActiveHandler: waiting for trigger_next() to finish')
 
         freq_range_list = [[clrfreq_start_list[i], clrfreq_start_list[i] + clrfreq_bandwidth_list[i]] for i in range(scan_num_beams)]
