@@ -7,7 +7,7 @@ network config: master, slave or single
 
 For usrp_config.ini single and slave is the same and called single and 
 driver_confi.ini is not changing for type of polarization.
-The files in the config dir are liked into main path. This can be done 
+The files in the config dir are linked into main path. This can be done 
 automatically by calling 
  >> "srr init main master singlePol " on main and 
  >> "srr init aux slave singlePol " on aux

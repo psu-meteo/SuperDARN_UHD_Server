@@ -13,7 +13,13 @@ fitacfwrite -r kod.c -lp 43103 -ep 43000 &
 rtserver -rp 41104 -ep 41000 -tp 1401 & # ch 4
 rtserver -rp 43104 -ep 43000 -tp 1402 & # ch 3
 
+
+# don't start remote watchdog on bootup
+if [ "$1" != "boot" ]
+then
 ssh radar@kodiak-aux 'python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py &' &
+fi
+
 python3 /home/radar/repos/usrp/tools/srr_watchdog.py server &
 
 sleep 15
