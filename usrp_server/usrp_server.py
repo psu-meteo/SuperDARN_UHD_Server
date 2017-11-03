@@ -687,7 +687,6 @@ class scanManager():
            bandwidth = RHM.commonChannelParameter['baseband_samplerate'] 
         else:    # first call before channel details are known
            bandwidth = 3333
-        print(bandwidth)
 
         RHM.clearFreqRawDataManager.add_channel(clearFreq, bandwidth)
 
@@ -1450,6 +1449,8 @@ class RadarHardwareManager:
 
                # BEAMFORMING
                self.logger.debug('start rx beamforming')
+             ##  main_samples, back_samples = self.normalize_antennas( main_samples, back_samples)
+               
                beamformed_main_samples, beamformed_back_samples = self.calc_beamforming( main_samples, back_samples)
                for iChannel, channel in enumerate(self.channels):
                   if channel.processing_state == CS_PROCESSING:
@@ -1695,10 +1696,78 @@ class RadarHardwareManager:
         self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.scaling_factor_tx_total, nChannels))
         for ch in self.channels + self.newChannelList:
             ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
+
+    # normalize
+    def normalize_antennas(RHM, main_samples, back_samples):
+        RHM.logger.info("start normalizing rx samples")
+        debugPlot = True
+        nChannels, nAntennas_main, nSamples = main_samples.shape
+        nAntennas_back = back_samples.shape[1]
+        bb_samplingRate = RHM.commonChannelParameter['baseband_samplerate'] 
+        offset = int(np.round(900e-6*bb_samplingRate))
+#       pulse_offsets =  [ int((ti - RHM.commonChannelParameter['pulse_sequence_offsets_vector'][0] * bb_samplingRate) for ti in RHM.commonChannelParameter['pulse_sequence_offsets_vector']]
+#        pulse_offsets = np.array( RHM.commonChannelParameter['pulse_sequence_offsets_vector'])
+#        pulse_offsets = np.round((pulse_offsets - pulse_offsets[0])*bb_samplingRate)
+        channel = RHM.channels[0]
+        pulse_offsets = RHM.all_possible_integration_period_pulse_sample_offsets[:channel.resultDict_list[-1]['npulses_per_sequence'] *  channel.resultDict_list[-1]['nSequences_per_period']]
+        pulse_offsets = np.array(np.round(pulse_offsets/RHM.usrp_rf_rx_rate*bb_samplingRate), dtype=np.int)
+        pulse_offsets -= pulse_offsets[0]
+        rx_idx = []
+        for iPulse in range(len(pulse_offsets)-1):
+            rx_idx += range(pulse_offsets[iPulse]+offset, pulse_offsets[iPulse+1]-offset)
+        rx_idx += range(pulse_offsets[iPulse+1]+offset, nSamples)
+        rx_idx = np.array(rx_idx, dtype=np.int)
+        if debugPlot:
+            import matplotlib.pyplot as plt
+
+ 
+        for iChannel,channel in enumerate(RHM.channels):
+ #           all_var = np.var(np.real(main_samples[iChannel,:,rx_idx]), axis=1)
+ #           print("all var: {}".format(10*np.log10(all_var)))
+            var_list = []
+            for iAntenna in range(nAntennas_main):
+                curr_variance =   np.var(np.real(main_samples[iChannel][iAntenna][rx_idx]))
+                var_list.append(curr_variance)
+                main_samples[iChannel][iAntenna] /= np.sqrt(curr_variance)
+                if debugPlot and iAntenna < 8:
+                    plt.subplot(8,2,iAntenna*2+1)
+                    plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
+                    plt.title("var = {}".format(curr_variance))
+                   # plot_var = np.zeros(rx_idx[-1]+1)
+                   # plot_var[rx_idx] = 100
+                   # plt.plot(plot_var-90)
+
+      #      for iAntenna in range(nAntennas_back):
+      #          curr_variance =   np.var(np.real(back_samples[iChannel][iAntenna][rx_idx]))
+      #          var_list.append(curr_variance)
+            max_var= max(var_list)
+            var_threshold = 0.1
+            RHM.logger.info("max var = {} = {} **2, var_threshold = {}".format(max_var,  np.sqrt(max_var), var_threshold))
+            for iAntenna in range(nAntennas_main):
+                if var_list[iAntenna] > var_threshold:
+                    scale_factor = np.sqrt(max_var/var_list[iAntenna])
+                    main_samples[iChannel][iAntenna] *= scale_factor 
+                    RHM.logger.info("scaling antenna {} with factor {}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
+                else:
+                    RHM.logger.info("not scaling antenna {} because of small variance: {} (< threshold)".format(RHM.antenna_idx_list_main[iAntenna], var_list[iAntenna]))
+                    scale_factor = 1
+                if debugPlot and iAntenna < 8:
+                    plt.subplot(8,2,iAntenna*2+2)
+                    plt.plot(20*np.log10(np.abs(main_samples[iChannel][iAntenna])/2**0))
+                    plt.title("factor: {}".format(scale_factor))
+            if debugPlot:
+               plt.show()       
+
+
+#            print("list var: {}".format(np.sqrt(var_list)))
+        RHM.logger.info("end normalizing rx samples")
+
+        return main_samples, back_samples
+
+
  
     # BEAMFORMING
     def calc_beamforming(RHM, main_samples, back_samples):
-        RHM.logger.warning("TODO process back array! where to split from main array??")
         nSamples = main_samples.shape[2]
         beamformed_main_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
         beamformed_back_samples = np.zeros((len(RHM.channels), nSamples), dtype=np.uint32)
@@ -1726,7 +1795,7 @@ class RadarHardwareManager:
 
                 # check for clipping
                 if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
-                   RHM.logger.error("Overflow error while casting beamformed rx samples to complex int16s.")
+                   RHM.logger.info("Overflow error while casting beamformed rx samples to complex int16s.")
         
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
                    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
