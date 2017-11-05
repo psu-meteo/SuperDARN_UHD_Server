@@ -996,7 +996,7 @@ class RadarHardwareManager:
         cmd.transmit()
         self.usrpManager.eval_client_return(cmd)
 
-        self.test_rxfe_control()
+       # self.test_rxfe_control()
 
 
     def test_rxfe_control(self):
