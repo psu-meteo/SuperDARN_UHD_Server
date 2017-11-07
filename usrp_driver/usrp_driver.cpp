@@ -24,6 +24,7 @@
 #include <semaphore.h>
 #include <time.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <argtable2.h>
 #include <uhd/types/tune_request.hpp>
@@ -42,6 +43,7 @@
 #include <boost/thread.hpp>
 #include <boost/cstdint.hpp>
 
+
 #include "usrp_utils.h"
 #include "tx_worker.h"
 #include "rx_worker.h"
@@ -49,7 +51,9 @@
 
 #define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
-#define DEBUG 0
+#define DEBUG 1
+
+#define MAX_STREAM_RESETS 120
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); } while( false )
@@ -58,12 +62,6 @@
 #endif
 
 #define SETUP_WAIT 1 // in seconds
-// DEL
-//#define SWING0 0
-//#define SWING1 1
-//#define NSIDES 2 // sides are halves of the usrp x300, eg. rxa and txa slots form side a
-//#define VERBOSE 1
-
 #define nSwings 2 // swings are slots in the swing buffer
 
 
@@ -78,6 +76,7 @@
 #define UHD_SYNC 'S'
 #define RXFE_SET 'r'
 #define CLRFREQ 'c'
+#define AUTOCLRFREQ 'a'
 #define READY_DATA 'd'
 #define TRIGGER_PULSE 't'
 #define UHD_GETTIME 'm'
@@ -89,6 +88,27 @@
 
 #define CAPTURE_ERRORS 0
 
+const char * log_dir = "../log/usrp_driver"; 
+const char * diag_dir = "/data/diagnostic_samples/usrp_driver"; 
+
+// create log and diag_samples dir
+void init_all_dirs() {
+   struct stat st = {0};
+   
+   if (stat(log_dir, &st) == -1) {
+       mkdir(log_dir, 0777);
+   }
+   if (SAVE_RAW_SAMPLES_DEBUG){
+       if (stat(diag_dir, &st) == -1) {
+           mkdir(diag_dir, 0777);
+       }
+   }
+}
+
+
+
+
+
 enum driver_states
 {
     ST_INIT,
@@ -99,7 +119,7 @@ enum driver_states
 namespace po = boost::program_options;
 int32_t driversock = 0;
 int32_t driverconn = 0;
-int32_t verbose = 1;
+int32_t verbose = 0;
 
 void uhd_term_message_handler(uhd::msg::type_t type, const std::string &msg){
     ;
@@ -356,51 +376,22 @@ void siginthandler(int sigint)
 }
 
 
-static unsigned long long lastTotalUser, lastTotalUserLow, lastTotalSys, lastTotalIdle;
 
-void init(){
-    FILE* file = fopen("/proc/stat", "r");
-    fscanf(file, "cpu %llu %llu %llu %llu", &lastTotalUser, &lastTotalUserLow,
-        &lastTotalSys, &lastTotalIdle);
-    fclose(file);
-}
+bool check_clock_lock(uhd::usrp::multi_usrp::sptr usrp) {
+    std::cout << std::endl << "Checking USRP devices for lock." << std::endl;
+    bool all_locked = true;
+    for(size_t ch = 0; ch < usrp->get_num_mboards(); ch++){
+        std::string ref_locked = usrp->get_mboard_sensor("ref_locked",ch).value;
 
-double getCurrentCPUValue(){
-    double percent;
-    FILE* file;
-    unsigned long long totalUser, totalUserLow, totalSys, totalIdle, total;
-
-    file = fopen("/proc/stat", "r");
-    fscanf(file, "cpu %llu %llu %llu %llu", &totalUser, &totalUserLow,
-        &totalSys, &totalIdle);
-    fclose(file);
-
-    if (totalUser < lastTotalUser || totalUserLow < lastTotalUserLow ||
-        totalSys < lastTotalSys || totalIdle < lastTotalIdle){
-        //Overflow detection. Just skip this value.
-        percent = -1.0;
+        if(ref_locked != "true") all_locked = false;
     }
-    else{
-        total = (totalUser - lastTotalUser) + (totalUserLow - lastTotalUserLow) +
-            (totalSys - lastTotalSys);
-        percent = total;
-        total += (totalIdle - lastTotalIdle);
-        percent /= total;
-        percent *= 100;
-    }
+    if(not all_locked) std::cout << std::endl << "ERROR: USRP not locked to clock." << std::endl;
 
-    lastTotalUser = totalUser;
-    lastTotalUserLow = totalUserLow;
-    lastTotalSys = totalSys;
-    lastTotalIdle = totalIdle;
+   return all_locked;
 
-    return percent;
 }
 
 int UHD_SAFE_MAIN(int argc, char *argv[]){
-    // example usage:
-    // ./usrp_driver --antenna 1 --host usrp1 
-    // spawn a usrp_server for each usrp
     
     uhd::set_thread_priority_safe(); 
    
@@ -411,7 +402,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     unsigned int iSide, iSwing; // often used loop variables
 
-    int32_t verbose = 1; 
     int32_t rx_worker_status = 0; 
     int32_t clrfreq_rx_worker_status = 0; 
     int32_t mute_output = 0; // used if rx_worker error happends
@@ -424,7 +414,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::vector<uint32_t> state_vec(nSwings, ST_INIT);
     uint32_t swing; // = SWING0;
     
-    size_t nSamples_rx, nSamples_tx_pulse;
+    size_t nSamples_rx, nSamples_tx_pulse, nSamples_pause_after_rx, nSamples_auto_clear_freq, nSamples_rx_total;
+    size_t auto_clear_freq_available = 0;
 
 
     uint32_t npulses, nerrors;
@@ -441,7 +432,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     uint32_t tx_worker_active;
 
     uhd::time_spec_t start_time, rx_start_time;
-    
+
     // vector of all pulse start times over an integration period
     std::vector<uhd::time_spec_t> pulse_time_offsets;
     // vector of the sample index of pulse start times over an integration period
@@ -470,6 +461,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
     fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
+
+    init_all_dirs();
 
     // TODO also read usrp_config.ini and get antenna and side information from it. remove antenna input argument. 
 
@@ -555,8 +548,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     std::vector<std::vector<void *>> shm_tx_vec(nSides, std::vector<void *>( nSwings));
 
     // local buffers for tx and rx
-    std::vector<std::vector<std::complex<int16_t>>> tx_samples(nSides, std::vector<std::complex<int16_t>>(MAX_PULSE_LENGTH,0));
-    std::vector<std::vector<std::complex<int16_t>>> rx_data_buffer(nSides, std::vector<std::complex<int16_t>>(0));
+    std::vector<std::vector<std::complex<int16_t>>> tx_samples(nSides,         std::vector<std::complex<int16_t>>(MAX_PULSE_LENGTH,0));
+    std::vector<std::vector<std::complex<int16_t>>> rx_data_buffer(nSides,     std::vector<std::complex<int16_t>>(0));
+    std::vector<std::vector<std::complex<int16_t>>> rx_auto_clear_freq(nSides, std::vector<std::complex<int16_t>>(0));
      
 
     std::string usrpargs(as_host->sval[0]);
@@ -588,7 +582,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
 
     // initialize rxfe gpio
-    mcm_init_rxfe(usrp);
+    //    kodiak_init_rxfe(usrp, nSides);
+    mcm_initrxfe(usrp);
     // initialize other gpio on usrp
     init_timing_signals(usrp, mimic_active, nSides);
     
@@ -672,6 +667,8 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         driverconn = accept(driversock, (struct sockaddr *) &client_addr, &addr_size);
         fprintf(stderr, "accepted socket connection\n");
 
+
+
         while(true) {
             // wait for transport endpoint to connect?
             
@@ -690,16 +687,16 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 break;
             }
 
-          //  double cpuUsage = getCurrentCPUValue();
-          //  DEBUG_PRINT("CPU usage: %f \n",cpuUsage );
- 
             connect_retrys = MAX_SOCKET_RETRYS;
+
+
             switch(command) {
                 case USRP_SETUP: {
                     // receive infomation about a pulse sequence/integration period
                     // transmit/receive center frequenies and sampling rates
                     // number of tx/rx samples
                     // number of pulse sequences per integration period, and pulse start times
+                    
                     swing      = sock_get_int16(  driverconn); 
                     
                     DEBUG_PRINT("entering USRP_SETUP command (swing %d)\n", swing);
@@ -711,10 +708,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     npulses = sock_get_uint32(driverconn);
 
-                    nSamples_rx       = sock_get_uint64(driverconn);
-                    nSamples_tx_pulse = sock_get_uint64(driverconn);
+                    nSamples_rx              = sock_get_uint64(driverconn);
+                    nSamples_pause_after_rx  = sock_get_uint64(driverconn);
+                    nSamples_auto_clear_freq = sock_get_uint64(driverconn);
+                    nSamples_tx_pulse        = sock_get_uint64(driverconn);
+                    nSamples_rx_total        = nSamples_rx + nSamples_pause_after_rx + nSamples_auto_clear_freq;
 
-                    DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d\n", (uint32_t) nSamples_rx);
+                    DEBUG_PRINT("USRP_SETUP number of requested rx samples: %d + %d pause + %d auto clear freq\n", (uint32_t) nSamples_rx, nSamples_pause_after_rx, nSamples_auto_clear_freq);
                     DEBUG_PRINT("USRP_SETUP number of requested tx samples per pulse: %d\n", (uint32_t) nSamples_tx_pulse);
                     DEBUG_PRINT("USRP_SETUP existing tx rate : %f (swing %d)\n", txrate, swing);
                     DEBUG_PRINT("USRP_SETUP requested tx rate: %f\n", txrate_new);
@@ -729,27 +729,22 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                 //        DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
 
                     }
+                    DEBUG_PRINT("USRP_SETUP resize autoclear freq\n");
 
-                    if(rx_data_buffer[0].size() != nSamples_rx) {
+                    // RESIZE LOCAL BUFFERS
+                    if(rx_data_buffer[0].size() < nSamples_rx_total) {
                        for(iSide = 0; iSide < nSides; iSide++) {
-                           rx_data_buffer[iSide].resize(nSamples_rx);
-                           
+                           rx_data_buffer[iSide].resize(nSamples_rx_total);
                        }
                     }
-                /*    // DEGUG
-                    for(iSide = 0; iSide < nSides; iSide++) {
-                        DEBUG_PRINT("rx_data_buffer after init:\n  side %d", iSide);
-                        for (int iSample=0; iSample<200; iSample++) {
-                             DEBUG_PRINT("%lu, ", rx_data_buffer[iSide][iSample]);
-                        }
-                        DEBUG_PRINT("\n");
-                    }
-                 */
+                    DEBUG_PRINT("USRP_SETUP resize autoclear freq\n");
 
-               /*     for (iSide=0; iSide<nSides;iSide++) {
-                        DEBUG_PRINT("USRP_SETUP tx shm addr: %p \n", shm_tx_vec[iSide][swing]);
+                    if(nSamples_auto_clear_freq != 0 and rx_auto_clear_freq[0].size() < nSamples_auto_clear_freq) {
+                       for(iSide = 0; iSide < nSides; iSide++) {
+                           rx_auto_clear_freq[iSide].resize(nSamples_auto_clear_freq);
+                       }
                     }
-                 */   
+
                     // TODO use return argument of set_xx to save new rate/freq                    
    
                     // if necessary, retune USRP frequency and sampling rate
@@ -797,7 +792,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                     // TODO unpack and pad tx sample
                     for (iSide = 0; iSide<nSides; iSide++) {
-                        tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
+                        tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                   
 
                         for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
                             shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
@@ -805,12 +800,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         }
                     }
 
+
                     if(SAVE_RAW_SAMPLES_DEBUG) {
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
                        // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
                         for (iSide =0; iSide < nSides; iSide++){
-                            sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
+                            sprintf(raw_dump_name,"%s/raw_samples_tx_ant_%d.cint16", diag_dir, antennaVector[iSide]);
                             raw_dump_fp = fopen(raw_dump_name, "wb");
                             fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
                             fclose(raw_dump_fp);
@@ -837,12 +833,14 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     rf_settings.att_8_dB  = ( attTimes2 & 0x10 ) != 0;
                     rf_settings.att_16_dB = ( attTimes2 & 0x20 ) != 0;
                    
-                    mcm_set_rxfe(usrp, rf_settings);
+		    //		    kodiak_set_rxfe(usrp, rf_settings, nSides);
+		    mcm_set_rxfe(usrp,rf_settings);
                     sock_send_uint8(driverconn, RXFE_SET);
                     break;
                     }
 
                 case TRIGGER_PULSE: {
+
                     swing      = sock_get_int16(  driverconn); 
                     DEBUG_PRINT("entering TRIGGER_PULSE command (swing %d)\n", swing );
 
@@ -851,6 +849,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         DEBUG_PRINT("TRIGGER_PULSE busy in state_vec[swing] %d, returning\n", state_vec[swing]);
                     }
                     else {
+
                         DEBUG_PRINT("TRIGGER_PULSE ready\n");
                         state_vec[swing] = ST_PULSE;
 
@@ -867,34 +866,12 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         size_t num_samples_per_pulse_with_padding = nSamples_tx_pulse + 2*spb;
                         DEBUG_PRINT("spb %d, pulse length %d samples, pulse with padding %d\n", spb, nSamples_tx_pulse, num_samples_per_pulse_with_padding);
 
-                      //  // TODO unpack and pad tx sample
-                      //  for (iSide = 0; iSide<nSides; iSide++) {
-                      //      tx_samples[iSide].resize(number_of_pulses * (num_samples_per_pulse_with_padding));                    
-
-                      //      for(uint32_t p_i = 0; p_i < number_of_pulses; p_i++) {
-                      //          shm_pulseaddr = &((std::complex<int16_t> *) shm_tx_vec[iSide][swing])[p_i*nSamples_tx_pulse];
-                      //          memcpy(&tx_samples[iSide][spb + p_i*(num_samples_per_pulse_with_padding)], shm_pulseaddr, pulse_bytes);
-                      //      }
-                      //  }
-
-                      //  if(SAVE_RAW_SAMPLES_DEBUG) {
-                      //      FILE *raw_dump_fp;
-                      //      char raw_dump_name[80];
-                      //     // DEBUG_PRINT("Exporting %i raw tx_samples (%i + 2* %i)\n", num_samples_per_pulse_with_padding, nSamples_tx_pulse, spb);
-                      //      for (iSide =0; iSide < nSides; iSide++){
-                      //          sprintf(raw_dump_name,"diag/raw_samples_tx_ant_%d.cint16", antennaVector[iSide]);
-                      //          raw_dump_fp = fopen(raw_dump_name, "wb");
-                      //          fwrite(&tx_samples[iSide][0], sizeof(std::complex<int16_t>),num_samples_per_pulse_with_padding*number_of_pulses, raw_dump_fp);
-                      //          fclose(raw_dump_fp);
-                      //      }
-                      //  }
 
                         // read in time for start of pulse sequence over socket
                         uint32_t pulse_time_full = sock_get_uint32(driverconn);
                         double pulse_time_frac = sock_get_float64(driverconn);
                         start_time = uhd::time_spec_t(pulse_time_full, pulse_time_frac);
                         double tr_to_pulse_delay = sock_get_float64(driverconn);
-
 
                         
                         // calculate usrp clock time of the start of each pulse over the integration period
@@ -910,20 +887,25 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         rx_start_time = offset_time_spec(start_time, tr_to_pulse_delay/1e6);
                         rx_start_time = offset_time_spec(rx_start_time, pulse_sample_idx_offsets[0]/txrate); 
 
-       
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = nSamples_tx_pulse / txrate;
                         
                         // float debugt = usrp->get_time_now().get_real_secs();
                         // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
-                        DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d\n", swing,(int) nSamples_rx);
+                        DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d + %d pause + %d auto clear freq )\n", swing,(int) nSamples_rx, nSamples_pause_after_rx, nSamples_auto_clear_freq);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
-                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx, rx_start_time, &rx_worker_status));
+                        uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx_total, rx_start_time, &rx_worker_status));
+
+
+
+
                         if (tx_worker_active) { 
-                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
+                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
                         }
+
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
+
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
 
@@ -958,7 +940,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                       mute_output = 1;
                       rx_stream_error_count++;
                        
-                      if (rx_stream_reset_count >= 120) {
+                      if (rx_stream_reset_count >= MAX_STREAM_RESETS) {
                           fprintf(stderr, "READY_DATA: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
                           // send all data to server, clean up and exit after that
                           exit_driver = 1;
@@ -971,10 +953,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                           rx_stream.reset();
                           rx_stream = usrp->get_rx_stream(stream_args);
                       }
+                      auto_clear_freq_available = 0;
                     }
-
                     else {
-                        rx_stream_error_count = 0;
+                      rx_stream_error_count = 0;
+                      auto_clear_freq_available = 1;
                     }
     
                     DEBUG_PRINT("READY_DATA state: %d, ant: %d, num_samples: %zu\n", state_vec[swing], antennaVector[0], nSamples_rx);
@@ -990,29 +973,28 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     // TODO move this in loop as soon as usrp_server receives both sides
                     sock_send_bool(driverconn, fault);     // FAULT status from conrol board
                 
-                /*    // DEGUG
-                    for(iSide = 0; iSide < nSides; iSide++) {
-                        DEBUG_PRINT("rx_data_buffer before copy:\n  side %d", iSide);
-                        for (int iSample=0; iSample<200; iSample++) {
-                             DEBUG_PRINT("%d, ", rx_data_buffer[iSide][iSample]);
-                        }
-                        DEBUG_PRINT("\n");
-                    }
-                  */
   
                     if (mute_output) {
                        DEBUG_PRINT("READY_DATA: Filling SHM with zeros (because of rx_worker error) \n");
+
                        for (iSide = 0; iSide<nSides; iSide++) {
-                      //    std::fill(shm_rx_vec[iSide][swing][0], shm_rx_vec[iSide][swing][rxshm_size/4], 0);
-                          memset(shm_rx_vec[iSide][swing], 0, rxshm_size);
+                          memset(shm_rx_vec[iSide][swing],  0, rxshm_size);
+                          std::fill(rx_auto_clear_freq[iSide].begin(), rx_auto_clear_freq[iSide].end(), 0);
                        }
                        mute_output = 0;
                     }
                     else {
                         DEBUG_PRINT("READY_DATA starting copying rx data buffer to shared memory\n");
+                        // regural rx data
                         for (iSide = 0; iSide<nSides; iSide++) {
                             // DEBUG_PRINT("usrp_drivercopy to rx shm addr: %p iSide: %d iSwing: %d\n", shm_rx_vec[iSide][swing], iSide, iSwing);
                             memcpy(shm_rx_vec[iSide][swing], &rx_data_buffer[iSide][0], sizeof(std::complex<int16_t>) * nSamples_rx);
+                        }
+                        // auto clear freq samples
+                        for (iSide = 0; iSide<nSides; iSide++) {
+                            for (int iSample = 0; iSample < nSamples_auto_clear_freq; iSample++) {
+                                rx_auto_clear_freq[iSide][iSample] = rx_data_buffer[iSide][nSamples_rx+nSamples_pause_after_rx+ iSample];
+                            }
                         }
                     }
 
@@ -1020,9 +1002,9 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         FILE *raw_dump_fp;
                         char raw_dump_name[80];
                         for (iSide=0; iSide<nSides; iSide++) {
-                           sprintf(raw_dump_name,"diag/raw_samples_rx_ant_%d.cint16", antennaVector[iSide]);
+                           sprintf(raw_dump_name,"%s/raw_samples_rx_ant_%d.cint16", diag_dir, antennaVector[iSide]);
                            raw_dump_fp = fopen(raw_dump_name, "wb");
-                           fwrite(&rx_data_buffer[iSide], sizeof(std::complex<int16_t>), nSamples_rx, raw_dump_fp);
+                           fwrite(&rx_data_buffer[iSide], sizeof(std::complex<int16_t>), nSamples_rx_total, raw_dump_fp);
                            fclose(raw_dump_fp);
                         }
 
@@ -1076,6 +1058,31 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     sock_send_uint8(driverconn, UHD_SYNC);
                     break;
                     }
+
+                case AUTOCLRFREQ: {
+                    // has to be called after GET_DATA and before USRP_SETUP
+                    DEBUG_PRINT("entering getting auto clear freq command\n");
+//                    uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
+
+                    iSide = 0;// TODO both sides!
+                    if (auto_clear_freq_available) {
+                        DEBUG_PRINT("AUTOCLRFREQ samples sending %d samples for antenna %d...\n", rx_auto_clear_freq[iSide].size(),antennaVector[iSide]);
+                        sock_send_int32(driverconn, (int32_t) antennaVector[iSide]); 
+                        sock_send_uint32(driverconn, (uint32_t) rx_auto_clear_freq[iSide].size());
+
+                        // send samples                   
+                        send(driverconn, &rx_auto_clear_freq[iSide][0], sizeof(std::complex<short int>) * rx_auto_clear_freq[iSide].size() , 0);
+                    }
+                    else {
+                        sock_send_int32(driverconn, (int32_t) -1); 
+                        
+                    }
+
+                    sock_send_uint8(driverconn, AUTOCLRFREQ);
+
+                    break;
+
+                    }
                 case CLRFREQ: {
                     DEBUG_PRINT("entering CLRFREQ command\n");
                     uint32_t num_clrfreq_samples = sock_get_uint32(driverconn);
@@ -1098,8 +1105,11 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
 
                     // TODO: only set rate if it is different!
-                    usrp->set_rx_rate(clrfreq_rate);
-                    clrfreq_rate = usrp->get_rx_rate(); // read back actual rate
+                    if(rxrate != clrfreq_rate) {
+                       usrp->set_rx_rate(clrfreq_rate);
+                       rxrate = usrp->get_rx_rate();
+                       clrfreq_rate = rxrate;
+                    }
                     DEBUG_PRINT("CLRFREQ actual rate: %.2f\n", clrfreq_rate);
                     //clrfreq_cfreq = usrp->get_rx_freq(); 
                     //DEBUG_PRINT("CLRFREQ actual freq: %.2f\n", clrfreq_cfreq);
@@ -1110,10 +1120,18 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     if(clrfreq_rx_worker_status){
                         fprintf(stderr, "Error in clrfreq_rx_worker, resetting rx_stream: %d.\n", clrfreq_rx_worker_status);
                         rx_stream_reset_count++;
-                        fprintf(stderr, "READY_DATA: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
+                        fprintf(stderr, "CLRFREQ: recreating rx_stream %dth time! (buffer overflow will occur for 126th time)\n", rx_stream_reset_count);
                         rx_stream.reset();
                         rx_stream = usrp->get_rx_stream(stream_args);
                     }
+
+                    if (rx_stream_reset_count >= MAX_STREAM_RESETS) {
+                        fprintf(stderr, "CLRFREQ: shutting down usrp_driver to avoid streamer reset overflow (after %dth reset)\n", rx_stream_reset_count);
+                        // finish clrfreq command, then clean up and exit to avoid buffer overflow
+                        exit_driver = 1;
+                    }
+
+
 
                     DEBUG_PRINT("CLRFREQ received samples, relaying %d samples back...\n", num_clrfreq_samples);
                     sock_send_int32(driverconn, (int32_t) antennaVector[0]); // TODO both sides?
@@ -1155,6 +1173,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     exit(1);
                     break;
                 }
+            }
+            if (not check_clock_lock(usrp)) {
+                fprintf(stderr,  "Error: Lost clock for USRP: %s\n ", as_host->sval[0]);
+                exit_driver = 1; 
             }
 
             // clean exit
