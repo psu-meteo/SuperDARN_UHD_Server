@@ -583,7 +583,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
     // initialize rxfe gpio
     //    kodiak_init_rxfe(usrp, nSides);
-    mcm_initrxfe(usrp);
+    mcm_init_rxfe(usrp);
     // initialize other gpio on usrp
     init_timing_signals(usrp, mimic_active, nSides);
     
