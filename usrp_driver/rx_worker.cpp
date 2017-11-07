@@ -27,7 +27,7 @@
 
 #define RX_STREAM_EXEC_TIME .005
 
-#define DEBUG 0
+//#define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else
@@ -54,7 +54,7 @@ void usrp_rx_worker(
 
     uhd::time_spec_t rx_usrp_pre_stream_time = usrp->get_time_now();
     if(offset_time_spec(start_time, RX_OFFSET) - rx_usrp_pre_stream_time.get_real_secs() < RX_STREAM_EXEC_TIME) {
-        DEBUG_PRINT("not enough time before start of stream, skipping this integration period..");
+        fprintf(stderr, "Error in rx_worker: not enough time before start of stream, skipping this integration period..");
         *return_status= RX_WORKER_STREAM_TIME_ERROR;
         return;
     }
@@ -81,6 +81,13 @@ void usrp_rx_worker(
     size_t max_samples_per_stream = 0x0fffffff / (200e6 / 10e6);
     max_samples_per_stream = max_samples_per_stream - (max_samples_per_stream % max_samples_per_packet);
     double timeout = 5.0;
+
+    // DEBUG to check timing
+    double time_to_start;
+    rx_usrp_pre_stream_time = usrp->get_time_now();
+    time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs();
+    fprintf(stderr,"#timing: time left for rx_worker  %f ms\n", time_to_start*1000);
+
 
 
     if(samples_remaining_to_stream > max_samples_per_stream) {
@@ -183,7 +190,7 @@ void usrp_rx_worker(
     }
 
     DEBUG_PRINT("RX_WORKER fetched samples!\n");
-    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
+//    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
     if (num_acc_samps != num_requested_samps){
         *return_status=-100;
