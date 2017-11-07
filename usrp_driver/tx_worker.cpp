@@ -15,7 +15,7 @@
 
 #define TEST_TXWORKER 0
 #define SAVE_TX_SAMPLES_DEBUG 0
-#define DEBUG 0
+//#define DEBUG 1
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); }  while( false )
@@ -31,7 +31,7 @@ extern int verbose;
  **********************************************************************/
 void usrp_tx_worker(
     uhd::tx_streamer::sptr tx_stream,
-    std::vector<std::vector<std::complex<int16_t>>> pulse_samples,
+    std::vector<std::vector<std::complex<int16_t>>> *pulse_samples_pointer,
     size_t padded_num_samples_per_pulse,
 //    size_t pulses_per_sequence,
     uhd::time_spec_t burst_start_time,
@@ -39,6 +39,7 @@ void usrp_tx_worker(
 ){
     // pulse samples are zero padded with 
     // [ spb * 0 ] [ pulse samples ] [ spb * 0 ]
+    std::vector<std::vector<std::complex<int16_t>>> pulse_samples = (*pulse_samples_pointer);
     struct timeval t0, t1;
     gettimeofday(&t0,NULL);
 
@@ -58,22 +59,24 @@ void usrp_tx_worker(
     int iSide;
     int nSides = pulse_samples.size();
     std::vector<std::complex<int16_t>*> buffer(nSides); 
+    DEBUG_PRINT("TX_WORKER nSides=%i\n", nSides);
 
     // assume at least spb length zero padding before first pulse
-    size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + padded_num_samples_per_pulse; 
+    size_t tx_burst_length_samples = pulse_sample_idx_offsets[number_of_pulses-1] + samples_per_pulse -1;
     size_t nacc_samples = 0;
+    size_t ntx_samples;
     size_t sample_idx = 0;
     uint32_t pulse_idx = 0;
+    int32_t nsamples_to_send, samples_to_pulse;
  
 
-    for (iSide =0; iSide<nSides; iSide++) {
-        buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
-    }
-    nacc_samples += tx_stream->send(buffer, spb, md, timeout);
+ //   for (iSide =0; iSide<nSides; iSide++) {
+ //       buffer[iSide] = &pulse_samples[iSide][sample_idx]; 
+ //   }
+ //   nacc_samples += tx_stream->send(buffer, spb, md, timeout);
 
-    md.start_of_burst = false;
-    md.has_time_spec = false;
-    int32_t nsamples_to_send, samples_to_pulse;
+ //   md.start_of_burst = false;
+ //   md.has_time_spec = false;
 
 
     while(nacc_samples < tx_burst_length_samples) {
@@ -85,13 +88,19 @@ void usrp_tx_worker(
         
         // if the transmit pulse will arrive within the current sample packet, calculate correct sample index into sample vector
         if(nsamples_to_send >= samples_to_pulse) {
+            //  DEBUG_PRINT("pulse_idx=%i, nacc_samples=%i, nsamples_to_send=%d, samples_to_pulse=%d \n", pulse_idx, nacc_samples, nsamples_to_send, samples_to_pulse);
             if(samples_to_pulse * -1 < samples_per_pulse) {
                 sample_idx = spb - samples_to_pulse + (pulse_idx) * padded_num_samples_per_pulse;
             } else {
                 // if we've passed the tail of the pulse, then restart and look for the next one..
                 // DEBUG_PRINT("pulse idx: %d complete\n", pulse_idx);
-                pulse_idx++;
-                continue;
+         //       if (number_of_pulses -1 > pulse_idx){
+                    pulse_idx++;
+                    continue;
+         //       } else {
+         //         sample_idx = 0;
+
+         //       }
             }
         }
 
@@ -106,7 +115,7 @@ void usrp_tx_worker(
         }
 
 
-      size_t ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
+      ntx_samples = tx_stream->send(buffer, nsamples_to_send, md, timeout);
 
         md.start_of_burst = false;
         md.has_time_spec = false;
@@ -115,11 +124,12 @@ void usrp_tx_worker(
     //    if(DEBUG && sample_idx) std::cout << boost::format(" Sent packet:  idx: %i") % sample_idx << std::endl;
         nacc_samples += ntx_samples;
     }
+    DEBUG_PRINT("TX_WORKER tx_burst_length_samples=%i\n", tx_burst_length_samples );
 
     md.end_of_burst = true;
     tx_stream->send(&pulse_samples[0], 0, md, timeout);
 
-    if (DEBUG) std::cout << std::endl << "Waiting for async burst ACK... " << std::flush;
+    DEBUG_PRINT("Waiting for async burst ACK... ");
     uhd::async_metadata_t async_md;
     bool got_async_burst_ack = false;
 
@@ -127,7 +137,7 @@ void usrp_tx_worker(
         got_async_burst_ack = (async_md.event_code == uhd::async_metadata_t::EVENT_CODE_BURST_ACK);
     }
     
-    if (DEBUG) std::cout << (got_async_burst_ack? "success" : "fail") << std::endl;
+    DEBUG_PRINT((got_async_burst_ack? "success\n" : "fail\n"));
 
     DEBUG_PRINT("TX_WORKER finished pulses\n");
 
