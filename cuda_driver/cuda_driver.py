@@ -133,7 +133,7 @@ class cuda_generate_pulse_handler(cudamsg_handler):
         if os.path.isfile('./cuda.dump.tx'):
              name = datetime.now().strftime('%Y-%m-%d_%H%M%S')
              with open('/data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl', 'wb') as f:
-                  pickle.dump(self.gpu.tx_rf_outdata, f, pickle.HIGHEST_PROTOCOL)
+                  pickle.dump([self.gpu.tx_rf_outdata, bb_signal] , f, pickle.HIGHEST_PROTOCOL)
              os.remove('cuda.dump.tx') # only save tx samples once
              self.logger.info('Wrote raw tx samples to /data/diagnostic_samples/cuda_dump_tx_'+ name + '.pkl')
 
@@ -604,7 +604,11 @@ class ProcessingGPU(object):
     def addUSRP(self, usrp_hostname = '', driver_hostname = '', mainarray = True, array_idx = -1, x_position = None, tdelay = 0, side = 'a', phase_offset = None):
         iAntenna =  self.antenna_index_list.tolist().index(int(array_idx))
         self.tdelays[iAntenna] = tdelay
-        self.phase_offsets[iAntenna] = phase_offset
+        if phase_offset == None:
+            self.phase_offsets[iAntenna] = 0
+            self.logger.warning("phase_offset in usrp_config.ini is not defined for antenna array_idx {}. Setting it to zero.".format(array_idx))
+        else:
+            self.phase_offsets[iAntenna] = float(phase_offset)
 
 
     def init_conversionRates_and_mixingFreq(self, upRate, downRate_rf2if, downRate_if2bb, usrp_mixing_freq):
@@ -1075,7 +1079,6 @@ class ProcessingGPU(object):
                fc = self.sequences[swing][channel].ctrlprm['tfreq'] * 1000      
                for iAntenna in range(self.nAntennas):
                    self.phase_delays[channel][iAntenna] = np.float32(np.mod(2 * np.pi  * self.tdelays[iAntenna] * fc +self.phase_offsets[iAntenna]/180*np.pi , 2 * np.pi)) 
-       
                cuda.memcpy_htod(self.cu_txoffsets_rads, self.phase_delays)
    
     # plot filters 
