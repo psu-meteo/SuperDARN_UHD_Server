@@ -117,15 +117,22 @@ class usrpClass():
       self.pid = None
 
    def get_start_arguments(self):
-      start_arg = ["./usrp_driver", "--host", self.host]
-      for iSide, side in enumerate(self.side):
-         if side.lower() == 'a':
-            start_arg += [ "--antennaA", self.ant[iSide]]
-         elif side.lower() == 'b':
-             start_arg += [ "--antennaB", self.ant[iSide]] 
-         else:
-            log("unknown usrp side: {}".format(side))
-      return start_arg
+       if srr.USE_USRP_DRIVER_WRAPPER:
+           start_arg = ["./usrp_driver_logging_wrapper", "--host", self.host]
+       else:
+           start_arg = ["./usrp_driver", "--host", self.host]
+
+       for iSide, side in enumerate(self.side):
+          if side.lower() == 'a':
+             start_arg += [ "--antennaA", self.ant[iSide]]
+          elif side.lower() == 'b':
+              start_arg += [ "--antennaB", self.ant[iSide]] 
+          else:
+             log("unknown usrp side: {}".format(side))
+
+       if self.mainarray.lower() in ["false", "0", "off"]:
+            start_arg += ["--interferometer"]
+       return start_arg
 
 
 
@@ -148,6 +155,7 @@ while True:
 
    if restart_server:
        log("Age of usrp_server status file is {} seconds. Restarting all processes (with srr.py) ...".format(file_age))
+       time.sleep(10) # in case USRP_driver just shut down
        srr.restart_all()
        time.sleep(wait_after_restart_all)
        usrp_driver_watcher.last_restart = time.mktime(time.localtime())
@@ -161,7 +169,8 @@ while True:
                srr.restart_all()
                time.sleep(wait_after_restart_all)
            else:
-               log("No cuda driver found. Restarting all driver...")
+               log("No cuda driver found. Restarting all driver in 10 s ...")
+               time.sleep(10) # in case USRP_driver just shut down
                srr.restart_driver()
                time.sleep(wait_after_restart_driver)
            usrp_driver_watcher.last_restart = time.mktime(time.localtime())

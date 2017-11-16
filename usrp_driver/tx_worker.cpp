@@ -15,7 +15,7 @@
 
 #define TEST_TXWORKER 0
 #define SAVE_TX_SAMPLES_DEBUG 0
-//#define DEBUG 1
+#define DEBUG 1
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stdout, __VA_ARGS__ ); }  while( false )
@@ -43,6 +43,7 @@ void usrp_tx_worker(
     struct timeval t0, t1;
     gettimeofday(&t0,NULL);
 
+    fprintf(stderr,"TX_WORKER starting up\n");
     DEBUG_PRINT("TX_WORKER starting up\n");
 
     uhd::tx_metadata_t md;
@@ -55,6 +56,7 @@ void usrp_tx_worker(
     size_t number_of_pulses = pulse_sample_idx_offsets.size();
     size_t spb = tx_stream->get_max_num_samps();
     int32_t samples_per_pulse = padded_num_samples_per_pulse - 2*spb; 
+    fprintf(stderr,"TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     DEBUG_PRINT("TX_WORKER nSamples_per_pulse=%i + 2*%zu (zero padding)\n", samples_per_pulse, spb);
     int iSide;
     int nSides = pulse_samples.size();
@@ -137,7 +139,7 @@ void usrp_tx_worker(
         got_async_burst_ack = (async_md.event_code == uhd::async_metadata_t::EVENT_CODE_BURST_ACK);
     }
     
-    DEBUG_PRINT((got_async_burst_ack? "success\n" : "fail\n"));
+    DEBUG_PRINT((got_async_burst_ack ? "success\n" : "fail\n"));
 
     DEBUG_PRINT("TX_WORKER finished pulses\n");
 

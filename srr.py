@@ -82,10 +82,13 @@ UHD_EXIT = ord('e')
 USRP_SERVER_PORT = 45000
 USRP_SERVER_QUIT  = ',' # '.'
 
+USE_USRP_DRIVER_WRAPPER = True
+
 
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
+delay_between_driver_and_server = 26
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -222,9 +225,15 @@ def print_status():
        for line in srrProcesses:
           myPrint("  {}".format(line))
 
+def remote_stop_all():
+    remote_pc_list = get_remote_driver_host()
+    for remote_pc in remote_pc_list:
+        myPrint(" calling srr stop for {}".format(remote_pc))
+        respond = remote_command_echo("radar", remote_pc, "srr stop", verbose=False)
+        print(respond)
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py","python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py","/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -289,10 +298,13 @@ def get_usrp_driver_processes():
     return usrpProcesses
 
 def stop_usrp_driver_soft():
+    """ soft stop: connectin as server and sending quit command
+        output: 0 (no driver processes have been active), 1 (soft stop worked) or -1 (driver still active) 
+    """
     usrpProcesses = get_usrp_driver_processes()
     if len(usrpProcesses) == 0:
         myPrint("  No usrp_driver processes")
-        return
+        return 0
     myPrint("Found {} usrp_driver processes".format(len(usrpProcesses)))
     
     dtype = np.uint8
@@ -317,9 +329,15 @@ def stop_usrp_driver_soft():
     
     
     myPrint("  Done.")
-    myPrint("  Again checking for usrp_driver processes...")
+    waitFor(2)
+    myPrint("   Again checking for usrp_driver processes after soft stop...")
     usrpProcesses = get_usrp_driver_processes()
-    myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
+    if len(usrpProcesses) == 0:
+        myPrint("   No usrp_driver processes")
+        return 1
+    else:
+        myPrint("   Found {} usrp_driver processes".format(len(usrpProcesses)))
+        return -1
 
 def stop_usrp_driver_hard():
   #  myPrint("Stop usrp_driver hard...")
@@ -329,10 +347,14 @@ def stop_usrp_driver_hard():
 def stop_usrp_driver():
     myPrint(" Stopping usrp_driver...")
     try:
-        stop_usrp_driver_soft()
+        driver_status = stop_usrp_driver_soft()
     except:
         myPrint("Soft USRP stop failed...")
-    stop_usrp_driver_hard()
+    if driver_status == -1:
+        stop_usrp_driver_hard()
+
+    return abs(driver_status)
+
 
 def get_cuda_driver_processes():
     processList = get_processes()
@@ -350,7 +372,7 @@ def get_process_ids(processShortName):
        processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
        nWords = 2 
     elif processShortName == "srr_watchdog":
-       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py"]
+       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py", "python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py","python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py"]
        nWords = 1
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
@@ -418,8 +440,10 @@ def stop_usrp_server():
           myPrint("Error while connecting to server. Killing PID...")
           # terminate processes if they still exis
       terminate_all(serverProcesses)
+      return 1
     else:
        myPrint("  No usrp_server processes found...")
+       return 0
     
 def stop_rtserver():
     myPrint(" Stopping rtserver...")
@@ -473,12 +497,15 @@ def stop_rawacf_write():
 def stop_watchdog():
     myPrint(" Stopping watchdog...")
     serverProcesses = get_process_ids("srr_watchdog")
+
     if len(serverProcesses):
-       terminate_all(serverProcesses)
-       return 1
+        for pro in serverProcesses:
+            myPrint("   killing pid {}".format(pro['pid']))
+            os.kill(pro['pid'], signal.SIGKILL)
+        return 1
     else:
-       myPrint("  No watchdog processes found...")
-       return 0
+        myPrint("  No watchdog processes found...")
+        return 0
     
     
     
@@ -547,14 +574,22 @@ def start_usrps_from_config(usrp_sleep = False):
       
     os.chdir(os.path.join(basePath, "usrp_driver") )   
 
-    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
-#    baseStartArg = ['./usrp_driver',  '--host' ]
+###    baseStartArg = ['./usrp_driver', '--intclk', '--host' ] # intclock only for debug
+
+    if USE_USRP_DRIVER_WRAPPER:
+        baseStartArg = ['./usrp_driver_logging_wrapper',  '--host' ]
+    else:
+        baseStartArg = ['./usrp_driver',  '--host' ]
+
     
     for start_arg in start_arg_list:
        all_start_arg = baseStartArg + start_arg 
        myPrint("Starting {}".format(" ".join(all_start_arg) ))
 
        usrpPIDlist.append( subprocess.Popen(all_start_arg))
+
+       # test: wait to avoid frame sizes < 8000 bytes
+       time.sleep(0.1)
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:
@@ -615,6 +650,10 @@ def start_rtserver():
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
+    commandList = 'rtserver -rp 43104 -ep 41000 -tp 1402'.split(" ")
+    myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
 def start_fitacf_write():
     commandList = 'fitacfwrite -r mcm.a -lp 41103 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
@@ -627,6 +666,10 @@ def start_rawacf_write():
 
 def start_errorlog():
     commandList = 'errlog -name mcm.a -lp 41000'.split(" ")
+    myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
+    subprocess.Popen(commandList)
+
+    commandList = 'errlog -name mcm.b -lp 43000'.split(" ")
     myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
     subprocess.Popen(commandList)
 
@@ -654,16 +697,18 @@ def restart_all():
    myPrint("Restarting all processes")
    restart_driver()
    myPrint("done starting usrps.. waiting....")
-   waitFor(25)
+   waitFor(delay_between_driver_and_server)
    myPrint("done  waiting.... starting server")
    start_usrp_server()
 
 def restart_driver():
-    stop_usrp_server() # this does not work....
-    waitFor(10)
-    stop_usrp_driver()
+    server_was_running = stop_usrp_server() 
+    if server_was_running:
+        waitFor(5)
+    usrp_driver_was_running = stop_usrp_driver()
     stop_cuda_driver()
-    waitFor(nSecs_restart_pause)
+    if usrp_driver_was_running or server_was_running:
+        waitFor(nSecs_restart_pause)
     start_cuda_driver()
     start_usrp_driver()
 
@@ -678,6 +723,7 @@ def remote_command_echo(user, radar, command, verbose = True, port = 22):
         failed = True
         out = ''
         cmdlist = ["ssh", '-T', user + '@' + radar, '-p', str(port)]
+        cmdlist = ["ssh", user + '@' + radar, '-p', str(port)]
         s = subprocess.Popen(cmdlist, stdin = commandecho.stdout, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
         commandecho.stdout.close()
         if verbose:
@@ -720,7 +766,7 @@ def main():
             myPrint("Starting all...")
             start_cuda_driver()
             start_usrp_driver()
-            waitFor(10)
+            waitFor(delay_between_driver_and_server)
             start_usrp_server()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             start_usrp_driver()
@@ -758,9 +804,9 @@ def main():
             restart_all()
 
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
-            stop_usrp_driver()
-            myPrint("waiting for {} sec".format(nSecs_restart_pause+2))
-            time.sleep(nSecs_restart_pause+2)
+            usrp_driver_was_running = stop_usrp_driver()
+            if usrp_driver_was_running:
+                waitFor(nSecs_restart_pause) 
             start_usrp_driver()
    
          elif inputArg[1].lower() in ["cuda_driver", "cuda"]:
@@ -783,12 +829,13 @@ def main():
       elif firstArg == "stop":
          if nArguments == 1 or inputArg[1].lower == "all":
             myPrint("Stopping all...")
+            remote_stop_all()
             stop_watchdog()
-            stop_usrp_server()
-            time.sleep(5)
-            stop_cuda_driver()
-            time.sleep(5)
+            server_was_running = stop_usrp_server() 
+            if server_was_running:
+                waitFor(5)
             stop_usrp_driver()
+            stop_cuda_driver()
          elif inputArg[1].lower() in ["usrp_driver", "usrps"]:
             stop_watchdog()
             stop_usrp_driver()
