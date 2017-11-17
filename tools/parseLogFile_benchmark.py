@@ -1,5 +1,13 @@
 #!/usr/bin/python3
 """
+Function parses usrp_server log file and plots timing of main function calls.
+Therefore logger level has to be set to DEBUG (in python_include/logging_usrp.py).
+Function call:
+
+ - no argument:         looks for newest file in ../log/
+ - only filename:       looks for that file in ../log/
+ - filename with path:  takes this file
+
 Created on Thu Nov 17 18:42:45 2016
 
 @author: mguski
@@ -8,20 +16,23 @@ Created on Thu Nov 17 18:42:45 2016
 # %%
 from datetime import datetime
 import matplotlib.pyplot as plt
+import sys
+import os
 
 # %% class stuff
 
 class logEntries:
-    def __init__(self,fileName=None):
+    def __init__(self,fileName=None, line_limit=10000):
         self.time  = []
         self.name  = []
         self.level = []
         self.msg   = []
         self.fileName = fileName
         if self.fileName != None:
-            self.parseFile()
+            self.parseFile(line_limit)
         
-    def parseFile(self):
+    def parseFile(self, line_limit):
+        nLines = 0
         with open(self.fileName) as f:
             for line in f:
                 dateStr = line[:23]
@@ -33,6 +44,10 @@ class logEntries:
                 self.name.append(line[24:37].strip())
                 self.level.append(line[37:46].strip())
                 self.msg.append(line[46:-1].strip())
+                nLines += 1
+                if nLines > line_limit:
+                    break
+
                         
     def copy(self):
         output = logEntries()
@@ -96,7 +111,25 @@ class timeSpans():
         
 # %% parse log files
 
-server = logEntries('../log/server.log')          
+
+# %% try input arguments ...
+raw_path = "../log/"
+
+if len(sys.argv) == 1:
+    import glob
+    print('No input. Looking for newest file in {} ...'.format(raw_path))
+    file_with_path = max(glob.iglob('{}*server__*.log'.format(raw_path)), key=os.path.getctime)
+    fileName = file_with_path[len(raw_path):]
+    print('found :{}'.format(fileName))
+else:
+    fileName = sys.argv[1]
+    if fileName.find("/") == -1: # no path defined => assume raw_path
+        print('Only filename without path. looking for file in {} ...'.format(raw_path))
+        file_with_path = os.path.join(raw_path, fileName)
+    else:
+        file_with_path = fileName
+
+server = logEntries(file_with_path)          
 timSpansServer = timeSpans(server)
 
 # %% plot data
@@ -107,6 +140,11 @@ uniqueMessages = list(set(timSpansServer.msg))
 uniqueMessages.sort(reverse=True)
 
 t0 = timSpansServer.startTime[0]
+if "USRP_SETUP" in uniqueMessages:
+    trigger_idx = uniqueMessages.index("USRP_SETUP")
+    all_trigger_time_list = []
+else:
+    trigger_idx = None
 
 for idx in range(len(timSpansServer.startTime)):
 
@@ -117,6 +155,16 @@ for idx in range(len(timSpansServer.startTime)):
     duration = (timSpansServer.stopTime[idx] - timSpansServer.startTime[idx]).total_seconds()
     ax.barh(nameIdx, duration, left= startSec, align='center')
     ax.text(startSec+duration/2, nameIdx, "{:3.0f} ms".format(duration*1000), rotation=45, backgroundcolor='gray', alpha=0.5, ha='center', va='center' )
+    if nameIdx == trigger_idx:
+        all_trigger_time_list.append(startSec)
+
+# plot time between trigger
+if trigger_idx != None:
+    for iTrigger in range(len(all_trigger_time_list)-1):
+        delta_t = all_trigger_time_list[iTrigger+1] - all_trigger_time_list[iTrigger]
+        plot_position =all_trigger_time_list[iTrigger] + delta_t /2
+        ax.text(plot_position, trigger_idx, "{:3.0f} ms".format(delta_t*1000), rotation=0, backgroundcolor='red', alpha=0.85, ha='center', va='center' )
+
 
 plt.xlabel('Time in s')
 
