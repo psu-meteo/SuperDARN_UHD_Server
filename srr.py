@@ -88,7 +88,7 @@ USE_USRP_DRIVER_WRAPPER = True
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
-delay_between_driver_and_server = 26
+delay_between_driver_and_server = 10
 
 def myPrint(msg):
    print("||>  {}".format(msg))

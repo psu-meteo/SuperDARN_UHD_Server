@@ -889,22 +889,25 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         // send_timing_for_sequence(usrp, start_time, pulse_times);
                         double pulseLength = nSamples_tx_pulse / txrate;
-                        
-                        // float debugt = usrp->get_time_now().get_real_secs();
-                        // DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
+
+			
+			
+                        float debugt = usrp->get_time_now().get_real_secs();
+                        DEBUG_PRINT("USRP_DRIVER: spawning worker threads at usrp_time %2.4f\n", debugt);
 
                         DEBUG_PRINT("TRIGGER_PULSE creating rx and tx worker threads on swing %d (nSamples_rx= %d + %d pause + %d auto clear freq )\n", swing,(int) nSamples_rx, nSamples_pause_after_rx, nSamples_auto_clear_freq);
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx_total, rx_start_time, &rx_worker_status));
 
-
-
-
-                        if (tx_worker_active) { 
-                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
+			useconds_t usecs=1000;
+                        if (tx_worker_active) {
+			  usleep(usecs);
+			  uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
                         }
 
+			usleep(usecs);
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
+
 
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);

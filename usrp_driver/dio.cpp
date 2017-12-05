@@ -146,7 +146,7 @@
 #define MCM_ATT_SCK     IO_PIN_07
 
 #define MCM_RXFE_MASK  (MCM_SYNC + MCM_TR + MCM_AMP_A1 + MCM_AMP_A2 + MCM_AMP_B1 + MCM_AMP_B2 + MCM_AUX_IO_A + MCM_AUX_IO_B + MCM_ATT_A_LE + MCM_ATT_B_LE + MCM_ATT_SDI + MCM_ATT_SCK)
-#define DEBUG 0
+#define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else
@@ -345,7 +345,8 @@ void send_timing_for_sequence(
     now = boost::posix_time::microsec_clock::universal_time();
     std::cout << "GPIO command issue end time is: "<< to_iso_extended_string(now)<< std::endl;
 
-    DEBUG_PRINT("All DIO commands sent! clock time\n");
+    debugt = usrp->get_time_now().get_real_secs();
+    DEBUG_PRINT("All DIO commands sent! clock time %2.4f\n",debugt);
 
     usrp->clear_command_time();
 

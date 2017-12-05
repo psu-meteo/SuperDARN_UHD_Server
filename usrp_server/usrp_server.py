@@ -1070,19 +1070,19 @@ class RadarHardwareManager:
         testParSet = [[False, False, 0], [True, False, 0], [True, True, 0], [False, True, 0], [True, True, 31.5]] + [[False, False, 2**i/2] for i in range(6) ]
         
         nSets = len(testParSet)
-        while True:
+        #while True:
 
 #<<<<<<< HEAD
-            print("flasing wax off")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 0) # *2 since LSB is 0.5 dB 
-            cmd.transmit()
-            cmd.client_return()
-            time.sleep(1)
-            print("flasing wax on")
-            cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 63) # *2 since LSB is 0.5 dB 
-            cmd.transmit()
-            cmd.client_return()
-            time.sleep(1)
+            #print("flasing wax off")
+            #cmd = usrp_rxfe_setup_command(self.usrpManager.socks, False, False, 0) # *2 since LSB is 0.5 dB 
+            #cmd.transmit()
+            #cmd.client_return()
+            #time.sleep(1)
+            #print("flasing wax on")
+            #cmd = usrp_rxfe_setup_command(self.usrpManager.socks, True, True, 63) # *2 since LSB is 0.5 dB 
+            #cmd.transmit()
+            #cmd.client_return()
+            #time.sleep(1)
 #=======
 #>>>>>>> updated dio worker to work with mcm style phasing cards for transmit and sync pulses (untested)
 
@@ -1095,7 +1095,8 @@ class RadarHardwareManager:
             cmd.transmit()
             cmd.client_return()
             self.logger.warning("Current settings: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
-            input("  Press Enter for next chage...")
+            #npt = input('  Press Enter for next chage... ')
+            time.sleep(2)
 
         print("Finished testing RXFE!")
 
@@ -1858,6 +1859,8 @@ class RadarHardwareManager:
                     if antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]:
                         if var_list[iAntenna] > var_threshold:
                             scale_factor = np.sqrt(max_var/var_list[iAntenna]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]
+
+
                             antenna_scale_factors[iChannel][RHM.antenna_idx_list_main[iAntenna]]  =  scale_factor
                             RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_main[iAntenna], scale_factor))
                         else:
@@ -1878,6 +1881,7 @@ class RadarHardwareManager:
                     if antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]:
                         if var_list[iAntenna+nAntennas_main] > var_threshold:
                             scale_factor = np.sqrt(max_var/var_list[iAntenna+nAntennas_main]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]
+
                             antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]  =  scale_factor
                             RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_back[iAntenna], scale_factor))
                         else:
@@ -1915,6 +1919,10 @@ class RadarHardwareManager:
                 first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
                 first_pol_matrix_idx = [RHM.antenna_idx_list_main.index(ant_idx) for ant_idx in first_pol_ant_idx] 
                 phasing_matrix = np.matrix([rad_to_rect(ant_idx * pshift)*antenna_scale_factors[iChannel][ant_idx] for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
+                print("main")
+                print(phasing_matrix)
+                s_matrix = np.matrix([antenna_scale_factors[iChannel][ant_idx] for ant_idx in first_pol_ant_idx])  # calculate a complex number representing the phase shift for each antenna
+                print(s_matrix)
                 complex_float_samples = phasing_matrix * np.matrix(main_samples[iChannel])[first_pol_matrix_idx,:] 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
@@ -1944,7 +1952,12 @@ class RadarHardwareManager:
                    plt.title("Main array")
 
                 # BACK ARRAY (same as middle of main array, ant 16 = ant 6, ...)
-                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift* antenna_scale_factors[iChannel][ant_idx]) for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift)* antenna_scale_factors[iChannel][ant_idx] for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                s_matrix = np.matrix([antenna_scale_factors[iChannel][ant_idx] for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                print("back")
+                print(phasing_matrix)
+                print(s_matrix)
+
                 complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)
