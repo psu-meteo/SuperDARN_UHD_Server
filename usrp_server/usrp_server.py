@@ -93,7 +93,7 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.175
+         overhead_time = 0.300
       elif int_time == 2.9:
          overhead_time = 0.05
       elif int_time == 1:
@@ -1875,6 +1875,7 @@ class RadarHardwareManager:
                     if antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]:
                         if var_list[iAntenna+nAntennas_main] > var_threshold:
                             scale_factor = np.sqrt(max_var/var_list[iAntenna+nAntennas_main]) * antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]
+
                             antenna_scale_factors[iChannel][RHM.antenna_idx_list_back[iAntenna]]  =  scale_factor
                             RHM.logger.info("scaling antenna {} with factor {:}".format(RHM.antenna_idx_list_back[iAntenna], scale_factor))
                         else:
@@ -1941,7 +1942,7 @@ class RadarHardwareManager:
                    plt.title("Main array")
 
                 # BACK ARRAY (same as middle of main array, ant 16 = ant 6, ...)
-                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift* antenna_scale_factors[iChannel][ant_idx]) for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
+                phasing_matrix = np.matrix([rad_to_rect((ant_idx-10) * pshift)* antenna_scale_factors[iChannel][ant_idx] for ant_idx in RHM.antenna_idx_list_back])  # calculate a complex number representing the phase shift for each antenna
                 complex_float_samples = phasing_matrix * np.matrix(back_samples[iChannel]) 
                 real_mat = np.real(complex_float_samples)
                 imag_mat = np.imag(complex_float_samples)

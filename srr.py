@@ -88,7 +88,7 @@ USE_USRP_DRIVER_WRAPPER = True
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
-delay_between_driver_and_server = 25
+delay_between_driver_and_server = 26
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -587,6 +587,9 @@ def start_usrps_from_config(usrp_sleep = False):
        myPrint("Starting {}".format(" ".join(all_start_arg) ))
 
        usrpPIDlist.append( subprocess.Popen(all_start_arg))
+
+       # test: wait to avoid frame sizes < 8000 bytes
+       time.sleep(0.1)
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver', '--intclk', '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
 #       usrpPIDlist.append( subprocess.Popen(['./usrp_driver',  '--antenna', usrp_config[usrpName]['array_idx']  , '--host', usrp_config[usrpName]['usrp_hostname'] ]))
        if usrp_sleep:

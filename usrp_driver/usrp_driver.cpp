@@ -896,12 +896,13 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx_total, rx_start_time, &rx_worker_status));
 
 
-
-
+			useconds_t usecs=1000;
                         if (tx_worker_active) { 
-                           uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
+			  usleep(usecs);
+			  uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
                         }
 
+			usleep(usecs);
                         uhd_threads.create_thread(boost::bind(send_timing_for_sequence, usrp, start_time,  pulse_time_offsets, pulseLength, mimic_active, mimic_delay, nSides)); 
 
 
