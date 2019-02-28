@@ -1,5 +1,3 @@
-# H1
-## H2
 <!---
 *BOLD*
 1. List
@@ -37,24 +35,8 @@ Tested on UHD release 003.009.004, underflow issues on .003.010.001
 # Dependencies
 python 3 with numpy, pycuda
 
-
-# Usage
-Run 
-- python
-
-# TODO
-- interface usrp\_server with usrp\_server\_uhd
-
-# STATUS
-- written driver accept requests from site library, 
-- working on hooking in into usrp driver
-
-
-
 ## Starting:
-- run `./init_network.sh`
-- run `python run_usrp.py`
-- run `python cuda_driver.py`
-- run `python usrp_server.py`
+- run `.tools/init_network.sh`
+- run `./launch_all.sh`
 - run `uafscan --stid tst --debug`
 
