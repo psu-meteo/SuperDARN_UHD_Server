@@ -316,7 +316,7 @@ class ServerTestCases(unittest.TestCase):
         pass
 
     '''
-
+'''
     def test_clrfreq_narrow(self):
         send_servercmd(self.arbysock, usrp_server.CLRFREQ)
        
@@ -372,3 +372,5 @@ class ServerTestCases(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+'''
