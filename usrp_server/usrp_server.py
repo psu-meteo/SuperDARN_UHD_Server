@@ -775,6 +775,8 @@ class scanManager():
 # e.g, ready flags and whatnot
 class RadarHardwareManager:
     def __init__(self, port):
+        # Setup connection
+        # TODO: should this be its own class?
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.client_sock.bind(('localhost', port))
@@ -782,7 +784,26 @@ class RadarHardwareManager:
         self.logger = logging.getLogger('HwManager')
         self.logger.info('listening on port ' + str(port) + ' for control programs')
 
+        # FLAGS
         self.exit_usrp_server = False
+        self.processing_swing_invalid = False
+        self.trigger_next_function_running = False
+        self.auto_collect_clrfrq_after_rx = True
+
+        self.nRegisteredChannels = 0  # number of channels after compatibility check
+        self.n_SetParameterHandlers_active = 0
+        self.nControlPrograms = 0  # number of control programs, also include unregistered channels
+        self.channel_manager_consecutive_number = 10  # serial number shown in logger of channel_manager
+
+        self.active_channels = []  # list of channels where ROS called SET_ACTIVE
+        self.channels = []  # all channels that are really transmitting
+        self.newChannelList = []  # waiting list for channels to be added at the right time (between two trigger_next() calls)
+
+        self.commonChannelParameter = {}
+
+        self.nSequences_per_period = 0
+
+    def start_up(self):
 
         self.ini_file_init()
         self.usrp_init()
@@ -790,31 +811,19 @@ class RadarHardwareManager:
         # self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
 
-        self.nRegisteredChannels = 0  # number of channels after compatibility check
-        self.n_SetParameterHandlers_active = 0
-        self.nControlPrograms = 0  # number of control programs, also include unregistered channels
-        self.channel_manager_consecutive_number = 10  # serial number shown in logger of channel_manager
-
         self.clearFreqRawDataManager = clearFrequencyRawDataManager(self.array_x_spacing, self.usrpManager)
         self.clearFreqRawDataManager.set_usrp_driver_connections(
             self.usrpManager.socks)  # TODO check if this also works after reconnection to a usrp (copy or reference?)
 
         self.clearFreqRawDataManager.set_clrfreq_search_span(self.mixingFreqManager.current_mixing_freq,
                                                              self.usrp_rf_rx_rate, self.usrp_rf_rx_rate / CLRFREQ_RES)
-        self.active_channels = []  # list of channels where ROS called SET_ACTIVE
-        self.channels = []  # all channels that are really transmitting
-        self.newChannelList = []  # waiting list for channels to be added at the right time (between two trigger_next() calls)
+
         ###        self.record_new_data     = self.clearFreqRawDataManager.record_new_data
         self.swingManager = swingManager()
 
         self.set_par_semaphore = threading.BoundedSemaphore()
-        self.processing_swing_invalid = False
-        self.trigger_next_function_running = False
-        self.commonChannelParameter = {}
-        self.integration_time_manager = integrationTimeManager(self)
-        self.nSequences_per_period = 0
 
-        self.auto_collect_clrfrq_after_rx = True
+        self.integration_time_manager = integrationTimeManager(self)
 
     def run(self):
         def spawn_channel(conn):
@@ -3179,6 +3188,7 @@ def main():
     logging.info('Strating main() of usrp_server')
 
     radar = RadarHardwareManager(RMSG_PORT)
+    radar.start_up()
     radar.run()
 
 
