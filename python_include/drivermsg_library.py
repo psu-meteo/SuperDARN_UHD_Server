@@ -5,7 +5,7 @@ import collections
 import pdb
 import logging
 import time
-from socket_utils import *
+from .socket_utils import *
 from termcolor import cprint
 
 checkSwing  = True # check if transmitted swing is declared
@@ -48,7 +48,7 @@ TRIGGER_BUSY = 'b'
 class driver_command(object):
     # class to help manage sending data 
     class socket_data(object):
-        def __init__(self, data, dtype, name, nitems = 1):
+        def __init__(self, data, dtype, name, nitems=1):
             self.name = name
             self.nitems = nitems
             
@@ -74,9 +74,9 @@ class driver_command(object):
         self.command = np.uint8(command)
         self.logger = logging.getLogger('socket_data')
     
-    def queue(self, data, dtype, name = '', nitems = 1):
+    def queue(self, data, dtype, name='', nitems=1):
         # pdb.set_trace()
-        self.dataqueue.append(self.socket_data(data, dtype, name, nitems = nitems))
+        self.dataqueue.append(self.socket_data(data, dtype, name, nitems=nitems))
    
     
     # command to set variables by name in the dataqueue
@@ -96,7 +96,7 @@ class driver_command(object):
         for clientsock in self.clients:
             try:
                if self.command != NO_COMMAND:
-                   transmit_dtype(clientsock, np.uint8(self.command))
+                    transmit_dtype(clientsock, np.uint8(self.command))
 
                for item in self.dataqueue:
             #       pdb.set_trace()
@@ -256,6 +256,7 @@ class cuda_add_channel_command(driver_command):
         for sock in self.clients:
             pickle_send(sock, self.sequence)
 
+
 # clear one channels from gpu
 # TODO: just transmit channel number to save time?
 class cuda_remove_channel_command(driver_command):
@@ -275,6 +276,7 @@ class cuda_remove_channel_command(driver_command):
         super().transmit()
         for sock in self.clients:
             pickle_send(sock, self.sequence)
+
 
 # generate rf samples for a pulse sequence
 class cuda_generate_pulse_command(driver_command):
@@ -301,6 +303,7 @@ class usrp_setup_command(driver_command):
         self.queue(num_requested_tx_samples, np.uint64, 'num_requested_tx_samples')
         self.queue(pulse_offsets_vector, np.uint64, 'pulse_offsets_vector')
 
+
 # set rxfe (amplifier and attenuator) settings 
 class usrp_rxfe_setup_command(driver_command):
     def __init__(self, usrps, amp0 = 0, amp1 = 0, att = 0):
@@ -308,6 +311,7 @@ class usrp_rxfe_setup_command(driver_command):
         self.queue(amp0, np.uint8, 'amp0')
         self.queue(amp1, np.uint8, 'amp1')
         self.queue(att, np.uint8, 'att')
+
 
 # trigger the start of an integration period
 class usrp_trigger_pulse_command(driver_command):
@@ -317,10 +321,6 @@ class usrp_trigger_pulse_command(driver_command):
         self.queue(np.uint32(np.int(trigger_time)), np.uint32, 'uhd_time_int')
         self.queue(np.float64(np.mod(trigger_time,1)), np.float64, 'uhd_time_frac')
         self.queue(np.float64(tr_to_pulse_delay), np.float64, 'tr_to_pulse_delay')
-
-
-
-
 
 
 # command usrp drivers to ready rx sample data into shared memory
@@ -356,7 +356,8 @@ class usrp_ready_data_command(driver_command):
         super().receive(sock)
         
         if sock_samples:
-            self.samples = recv_dtype(sock, np.uint16, nitems = 2 * self.payload['nsamples'])
+            self.samples = recv_dtype(sock, np.uint16, number_of_items=2 * self.payload['nsamples'])
+
 
 # command to query usrp time
 class usrp_get_time_command(driver_command):
@@ -367,6 +368,7 @@ class usrp_get_time_command(driver_command):
         self.full_sec = recv_dtype(sock, np.uint32)
         self.frac_sec = recv_dtype(sock, np.float64)
         return self.full_sec + self.frac_sec
+
 
 # command get auto clear freq samples
 class usrp_get_auto_clear_freq_command(driver_command):
@@ -381,7 +383,7 @@ class usrp_get_auto_clear_freq_command(driver_command):
             nSamples = recv_dtype(sock, np.uint32)
             print("receive ant {}: {} samples".format(antenna_no, nSamples))
             time.sleep(0.001)
-            sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
+            sample_buf = recv_dtype(sock, np.int16, number_of_items= int(2 * nSamples))
             sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
         return antenna_no, sample_buf
 
@@ -447,10 +449,11 @@ class sequence(object):
     
         self.sequence_id = uuid.uuid1()
 
+
 def create_testsequence_uafscan():
     import pickle
     fh = open('uafscan_sequence.pickle', 'rb')
     seq = pickle.load(fh)
-    fh.close
+    fh.close()
     
     return seq
