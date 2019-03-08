@@ -3241,7 +3241,7 @@ def main():
     now = datetime.datetime.now()
     now_string = now.strftime("__%Y%m%d_%H%M%S")
     logging_usrp.initLogging('server' + now_string + '.log')
-    logging.info('Strating main() of usrp_server')
+    logging.info('Starting main() of usrp_server')
 
     radar = RadarHardwareManager(RMSG_PORT)
     radar.start_up()

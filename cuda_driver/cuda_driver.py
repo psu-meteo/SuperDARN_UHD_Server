@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # driver to process chunks of samples using CUDA
 # uses shared memory to get samples from usrp_drivers 
-# spawn one cude driver per computer
+# spawn one cuda driver per computer
 # sends processed samples to usrp_server using sockets
 # requires python 3 (need mmap with buffer interface to move samples directly between shared memory and gpu)
 
@@ -18,24 +18,22 @@ import functools
 import configparser
 import logging
 
-import ctypes #  oly for debug
+import ctypes #  only for debug
 
 import posix_ipc
 import pycuda.driver as cuda
 import pycuda.compiler
 import pycuda.autoinit
 
-import pickle # for cuda dump
+import pickle  # for cuda dump
 from datetime import datetime
 import time
 
-sys.path.insert(0, '../python_include')
-
-from socket_utils import *
-from drivermsg_library import *
-import dsp_filters
-from phasing_utils import *
-import logging_usrp
+from python_include.socket_utils import *
+from python_include.drivermsg_library import *
+import python_include.dsp_filters
+from python_include.phasing_utils import *
+import python_include.logging_usrp
 
 
 # import pycuda stuff
@@ -44,7 +42,7 @@ SWING1 = 1
 allSwings = [SWING0, SWING1]
 nSwings = len(allSwings)
 
-SIDEA = 0 # just for compatibility of shm names
+SIDEA = 0  # just for compatibility of shm names
 
 RXDIR = 'rx'
 TXDIR = 'tx'
@@ -53,7 +51,7 @@ DEBUG = True
 verbose = 1
 
 C = 3e8
-nAntennas_per_polarization = 20 # used to reset (modulo) the tx phasing input antenna number 
+nAntennas_per_polarization = 20  # used to reset (modulo) the tx phasing input antenna number
 
 
 RF_IF_GAIN = 1
@@ -69,12 +67,11 @@ shm_list = []
 sem_list = []
 
 
-
 # TODO: write decorator for acquring/releasing semaphores
 
 # python3 or greater is needed for direct transfers between shm and gpu memory
 if sys.hexversion < 0x030300F0:
-    loggin.error('this code requires python 3.3 or greater')
+    logging.error('this code requires python 3.3 or greater')
     sys.exit(0)
 
 
