@@ -2,6 +2,7 @@
 import numpy as np
 import scipy.ndimage
 
+
 # filter for TX pulses
 def gaussian_pulse(samples, trise, rate):
 # samples - input samples of rate rate
@@ -14,6 +15,7 @@ def gaussian_pulse(samples, trise, rate):
     filt_imag = scipy.ndimage.filters.gaussian_filter1d(np.imag(samples), gauss_sigma)
 
     return filt_real + 1j * filt_imag
+
 
 # filter also includes mixing frequencies
 def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
@@ -39,6 +41,7 @@ def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
 
     return filterData
 
+
 #TODO: test this filter
 def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
 #simple filter: real = 1, image = 0
@@ -53,7 +56,6 @@ def rect_filter_s0(nTaps, channelFreqVec, samplingRate):
         else:
            dbPrint("filter generation: channel {}: skipping because undefined".format(iChannel))
     return filterData
-
 
 
 def raisedCosine_filter(nTaps, nChannels, normalize = True):
@@ -74,8 +76,10 @@ def raisedCosine_filter(nTaps, nChannels, normalize = True):
 
     return filterData
 
+
 def dbPrint(msg):
     print(' {}: {} '.format(__file__, msg) )
+
 
 # functions to test filters
 if __name__ == '__main__':
