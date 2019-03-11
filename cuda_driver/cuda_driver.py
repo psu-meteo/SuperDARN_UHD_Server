@@ -77,8 +77,8 @@ if sys.hexversion < 0x030300F0:
 
 
 class cudamsg_handler(object):
-    def __init__(self, serversock, command, gpu, antennas, array_info, hardware_limits):
-        self.sock = serversock
+    def __init__(self, server_socket, command, gpu, antennas, array_info, hardware_limits):
+        self.sock = server_socket
         self.antenna_index_list = np.uint16(antennas)
         self.command = command
         self.status = 0

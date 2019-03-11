@@ -24,6 +24,17 @@ def recv_dtype(sock, dtype, number_of_items=1):
     return data
 
 
+def transmit_dtype(sock, data, dtype=None):
+    # TODO: handle vectors..
+    if dtype is not None:
+        data = dtype(data)
+
+    dstr = sock.sendall(data.tobytes())
+    if verbose:
+        print(' => {}  transmitted {} as {} ({} bytes): {}'.format(__file__, data, dtype,
+                                                                   len(data.tobytes()), data.tobytes()))
+
+
 # pickle send/recv for sending arbitrary objects over the network between python processes
 # could use json for compatibility with other languages..
 # mostly to send large messy sequence objects to cuda_driver to generate baseband samples
@@ -42,12 +53,4 @@ def pickle_recv(sock):
     return data
 
 
-def transmit_dtype(sock, data, dtype=None):
-    # TODO: handle vectors..
-    if dtype is not None:
-        data = dtype(data)
 
-    dstr = sock.sendall(data.tobytes())
-    if verbose:
-        print(' => {}  transmitted {} as {} ({} bytes): {}'.format(__file__, data, dtype,
-                                                                   len(data.tobytes()), data.tobytes()))
