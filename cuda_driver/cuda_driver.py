@@ -30,6 +30,8 @@ import pickle  # for cuda dump
 from datetime import datetime
 import time
 
+sys.path.insert(0, '..')
+
 from python_include.socket_utils import *
 from python_include.drivermsg_library import *
 import python_include.dsp_filters as dsp_filters
