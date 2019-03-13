@@ -1177,6 +1177,7 @@ def main():
     now_string = now.strftime("__%Y%m%d_%H%M%S")
     logging_usrp.initLogging('cuda' + now_string + '.log')
     logger = logging.getLogger('cuda_driver')
+    logger.info("Starting the CUDA driver")
 
     # parse usrp config file, read in antennas list
     usrpconfig = configparser.ConfigParser()
