@@ -541,7 +541,7 @@ class ProcessingGPU(object):
     def __init__(self, antennas, maxchannels, maxpulses,  fsamptx, fsamprx):
 
         self.logger = logging.getLogger("cuda_gpu")
-        self.logger.info('initializing cuda gpu')
+        self.logger.info('Initializing cuda gpu')
         self.antenna_index_list = np.int16(antennas)
         # maximum supported channels
         self.nChannels = int(maxchannels)
