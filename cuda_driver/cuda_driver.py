@@ -1241,7 +1241,7 @@ def main():
     # TODO: make this more.. robust, add error recovery..
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()
-    logger.debug('cuda_driver waiting for command')
+    logger.info('Waiting for command from USRP server')
    
     # wait for commands from usrp_server,  
     while True:
