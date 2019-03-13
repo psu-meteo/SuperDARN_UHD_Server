@@ -1194,6 +1194,7 @@ def main():
     antennas = main_antennas + back_antennas
 
     # parse gpu config file
+    logger.info("Loading the configuration files")
     cudadriverconfig = configparser.ConfigParser()
     cudadriverconfig.read('../driver_config.ini')
     shm_settings = cudadriverconfig['shm_settings']
@@ -1212,6 +1213,7 @@ def main():
         gpu.addUSRP(**dict(usrpconfig[usrp]))
     
     # create command socket server to communicate with usrp_server.py
+    logger.info("Setting up communications to the USRP server")
     cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     cmd_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     cmd_sock.bind((network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
