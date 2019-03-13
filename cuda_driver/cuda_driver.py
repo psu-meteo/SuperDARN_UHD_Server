@@ -1239,9 +1239,9 @@ def main():
         network_settings.get('ServerHost'), network_settings.getint('CUDADriverPort')))
 
     # TODO: make this more.. robust, add error recovery..
+    logger.info('Waiting for command from USRP server')
     cmd_sock.listen(1)
     server_conn, addr = cmd_sock.accept()
-    logger.info('Waiting for command from USRP server')
    
     # wait for commands from usrp_server,  
     while True:
