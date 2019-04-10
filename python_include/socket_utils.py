@@ -11,8 +11,8 @@ def recv_dtype(sock, dtype, number_of_items=1):
     else:
         data_string = sock.recv(dtype().nbytes * number_of_items, socket.MSG_WAITALL)
         if verbose:
-            print(' => {}  received ?? as {} ({} / {}  bytes): {}'.format(__file__, dtype, len(data_string),
-                                                                          dtype().nbytes * number_of_items, data_string))
+            print(' => {}  received ?? as {} ({} / {}  bytes): {}'.format(
+                __file__, dtype, len(data_string), dtype().nbytes * number_of_items, data_string))
         data = np.fromstring(data_string, dtype=dtype, count=number_of_items)
     # except ValueError:
     #    import logging 
