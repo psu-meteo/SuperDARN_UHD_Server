@@ -8,7 +8,7 @@ import time
 from .socket_utils import *
 from termcolor import cprint
 
-checkSwing  = True # check if transmitted swing is declared
+checkSwing = True  # check if transmitted swing is declared
 
 
 UHD_SETUP = ord('s')
@@ -42,8 +42,6 @@ USRP_DRIVER_ERROR = -1
 TRIGGER_BUSY = 'b'
 
 
-
-
 # parent class for driver socket messages
 class driver_command(object):
     # class to help manage sending data 
@@ -56,12 +54,12 @@ class driver_command(object):
             self.data = dtype(data)
         
         def transmit(self, sock):
-     #       print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            # print('\t driverMSG transmitting: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return transmit_dtype(sock, self.data, self.dtype)
 
         def receive(self, sock):
             self.data = recv_dtype(sock, self.dtype, self.nitems)
-            #print('\treceiving: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
+            # print('\treceiving: {}, value: {}, type {}'.format(self.name, self.data, self.dtype))
             return self.data
 
     def __init__(self, clients, command):
@@ -69,16 +67,15 @@ class driver_command(object):
             clients = [clients]
 
         self.clients = clients
-        self.dataqueue = [] # ordered list of variables to transmit/receive
-        self.payload = {} # dictionary to store received values
+        self.dataqueue = []  # ordered list of variables to transmit/receive
+        self.payload = {}  # dictionary to store received values
         self.command = np.uint8(command)
         self.logger = logging.getLogger('socket_data')
     
     def queue(self, data, dtype, name='', nitems=1):
         # pdb.set_trace()
         self.dataqueue.append(self.socket_data(data, dtype, name, nitems=nitems))
-   
-    
+
     # command to set variables by name in the dataqueue
     def set_data(self, name, data):
         for var in self.dataqueue:
@@ -95,38 +92,42 @@ class driver_command(object):
     def transmit(self):
         for clientsock in self.clients:
             try:
-               if self.command != NO_COMMAND:
+                if self.command != NO_COMMAND:
                     transmit_dtype(clientsock, np.uint8(self.command))
 
-               for item in self.dataqueue:
-            #       pdb.set_trace()
-                   if checkSwing and  item.name == "swing" and item.data == np.uint32(-1):
-                      raise ValueError("swing has been not defined!")
-                   item.transmit(clientsock)
+                for item in self.dataqueue:
+                    # pdb.set_trace()
+                    if checkSwing and item.name == "swing" and item.data == np.uint32(-1):
+                        raise ValueError("swing has been not defined!")
+                    item.transmit(clientsock)
 
-                  # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
+                # cprint('transmitting {}: {}'.format(item.name, item.data), 'yellow')
             except:
-#               self.logger.error("Error transmitting command {} to cient {}:{} (from {};{})".format(self.command, clientsock.getpeername()[0], clientsock.getpeername()[1], clientsock.getsockname()[0], clientsock.getsockname()[1] ))
-#               self.logger.error("Error transmitting command {}  (from {};{})".format(self.command,  clientsock.getsockname()[0], clientsock.getsockname()[1] ))
-               self.logger.error("Error transmitting command {} ".format(self.command ))
+                # self.logger.error("Error transmitting command {} to cient {}:{} (from {};{})".format(
+                # self.command, clientsock.getpeername()[0], clientsock.getpeername()[1],
+                # clientsock.getsockname()[0], clientsock.getsockname()[1] ))
+                # self.logger.error("Error transmitting command {}  (from {};{})".format(
+                # self.command,  clientsock.getsockname()[0], clientsock.getsockname()[1] ))
+                self.logger.error("Error transmitting command {} ".format(self.command ))
 
     # ask all clients for a return value, compare against command
     # normally, client will indicate success by sending the command byte back to the server 
-    def client_return(self, dtype = np.uint8, check_return = True):
+    def client_return(self, dtype=np.uint8, check_return=True):
         returns = []
         for client in self.clients:
             try:
-               r = recv_dtype(client, dtype)
-               if check_return:
+                r = recv_dtype(client, dtype)
+                if check_return:
                    assert r == self.command, 'return {} does not match expected command of {}'.format(r, self.command)
                
-               returns.append(r)
+                returns.append(r)
             except:
-               self.logger.error("Error receiving client_return for command '{}'({}) from  client {}:{}".format(chr(self.command), self.command, client.getsockname()[0], client.getsockname()[1] ))
-              # pdb.set_trace()
-               returns.append(CONNECTION_ERROR)
+                self.logger.error("Error receiving client_return for command '{}'({}) from  client {}:{}".format(
+                    chr(self.command), self.command, client.getsockname()[0], client.getsockname()[1]))
+                # pdb.set_trace()
+                returns.append(CONNECTION_ERROR)
 
-        #cprint('command return success', 'yellow')
+        # cprint('command return success', 'yellow')
         return returns
 
     def receive(self, sock):
@@ -136,12 +137,12 @@ class driver_command(object):
              
 
 class server_ctrlprm(driver_command):
-    def __init__(self, servers = None, ctrlprm_dict = None):
-        if not (servers == None) and not isinstance(servers, collections.Iterable):
+    def __init__(self, servers=None, ctrlprm_dict=None):
+        if not (servers is None) and not isinstance(servers, collections.Iterable):
                 servers = [servers]
 
         driver_command.__init__(self, servers, NO_COMMAND)
-        if ctrlprm_dict == None:
+        if ctrlprm_dict is None:
             # stuff in default values to be over-written during rx
             ctrlprm_dict = {}
             ctrlprm_dict['radar'] = 0
@@ -203,30 +204,36 @@ class server_ctrlprm(driver_command):
         description_arr = np.uint8(np.zeros(120))
         self.queue(description_arr, np.uint8, name='desc_arr', nitems=120)
 
+
 class cuda_get_if_data_command(driver_command):
     def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GET_IF_DATA)
         self.queue(swing, np.uint32, 'swing')
-    
+
+
 class cuda_get_data_command(driver_command):
     def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_GET_DATA)
         self.queue(swing, np.uint32, 'swing')
-    
+
+
 class cuda_exit_command(driver_command):
     def __init__(self, cudas):
         driver_command.__init__(self, cudas, CUDA_EXIT)
+
 
 class cuda_pulse_init_command(driver_command):
     def __init__(self, cudas, swing = -1):
         driver_command.__init__(self, cudas, CUDA_PULSE_INIT)
         self.queue(swing, np.uint32, 'swing')
 
+
 class cuda_process_command(driver_command):
     def __init__(self, cudas, swing = -1, nSamples = -1):
         driver_command.__init__(self, cudas, CUDA_PROCESS)
         self.queue(swing, np.uint32, 'swing')
         self.queue(nSamples, np.uint64, 'nSamples')
+
 
 class cuda_setup_command(driver_command):
     def __init__(self, cudas, upsampleRate = 0, downsampleRate_rf2if=0, downsampleRate_if2bb=0, usrp_mixing_freq=0):
@@ -330,29 +337,29 @@ class usrp_ready_data_command(driver_command):
         self.queue(swing , np.int16,   'swing' )
         
     def receive_all_metadata(self):
-       payloadList = []
-       for sock in self.clients:
-           try:
-              payload = {}
-              payload['status']   = recv_dtype(sock, np.int32)
-              payload['antenna']  = recv_dtype(sock, np.int32)
-              payload['nsamples'] = recv_dtype(sock, np.int32)
-              payload['fault']    = recv_dtype(sock, np.bool_)
-              payloadList.append(payload)
-           except:
-              payloadList.append(CONNECTION_ERROR)
-              self.logger.error("Connection error.")
-       return payloadList
+        payloadList = []
+        for sock in self.clients:
+            try:
+                payload = {}
+                payload['status']   = recv_dtype(sock, np.int32)
+                payload['antenna']  = recv_dtype(sock, np.int32)
+                payload['nsamples'] = recv_dtype(sock, np.int32)
+                payload['fault']    = recv_dtype(sock, np.bool_)
+                payloadList.append(payload)
+            except:
+                payloadList.append(CONNECTION_ERROR)
+                self.logger.error("Connection error.")
+        return payloadList
 
     def recv_metadata(self, sock):
         payload = {}
-        payload['status']   = recv_dtype(sock, np.int32)
-        payload['antenna']  = recv_dtype(sock, np.int32)
+        payload['status'] = recv_dtype(sock, np.int32)
+        payload['antenna'] = recv_dtype(sock, np.int32)
         payload['nsamples'] = recv_dtype(sock, np.int32)
-        payload['fault']    = recv_dtype(sock, np.bool_)
+        payload['fault'] = recv_dtype(sock, np.bool_)
         return payload
 
-    def recv_samples(self, sock, sock_samples = False):
+    def recv_samples(self, sock, sock_samples=False):
         super().receive(sock)
         
         if sock_samples:
@@ -414,6 +421,7 @@ class usrp_clrfreq_command(driver_command):
         self.queue(clrfreq_freq, np.float64, 'clrfreq_freq')
         self.queue(clrfreq_rate, np.float64, 'clrfreq_rate')
 
+
 # prompt the usrp driver to cleanly shut down, useful for testing
 class usrp_exit_command(driver_command):
     def __init__(self, usrps):
@@ -446,7 +454,6 @@ class sequence(object):
         if self.npulses == 0:
             raise ValueError('number of pulses must be greater than zero!')
 
-    
         self.sequence_id = uuid.uuid1()
 
 
