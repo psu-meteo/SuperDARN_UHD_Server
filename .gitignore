@@ -3,3 +3,7 @@
 *.log
 *.*int16
 tags
+dist/*
+
+driver_config.ini
+usrp_config.ini

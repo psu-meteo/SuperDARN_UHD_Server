@@ -1,5 +1,8 @@
 import numpy as np
 
+import sys
+sys.path.append("/home/radar/SuperDARN_UHD_Server")
+
 max_int16_value = np.iinfo(np.int16).max  # +32767
 min_int16_value = np.iinfo(np.int16).min  # -32768
 

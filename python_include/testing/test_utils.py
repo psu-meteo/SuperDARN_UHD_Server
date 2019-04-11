@@ -3,7 +3,10 @@
 import numpy as np
 import pytest
 
-from python_include.utils import complex_float_to_int16
+from SuperDARN_UHD_Server.python_include.utils import complex_float_to_int16
+
+import sys
+sys.path.append("/home/radar/SuperDARN_UHD_Server/python_include")
 
 
 def test_complex_float_to_int16_integer_array():
