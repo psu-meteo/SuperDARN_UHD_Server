@@ -55,10 +55,11 @@ def beamform_uhd_samples(samples, phasing_matrix, n_samples, antennas, pack_uint
         qtemp = 0
 
         for aidx in range(len(antennas)):
-            itemp += np.real(samples[aidx][i]) * np.real(phasing_matrix[aidx]) - \
-                np.imag(samples[aidx][i]) * np.imag(phasing_matrix[aidx])
-            qtemp += np.real(samples[aidx][i]) * np.imag(phasing_matrix[aidx]) + \
-                np.imag(samples[aidx][i]) * np.real(phasing_matrix[aidx])
+            itemp += np.real(samples[aidx][i]) * np.real(phasing_matrix[aidx]) \
+                     - np.imag(samples[aidx][i]) * np.imag(phasing_matrix[aidx])
+            qtemp += np.real(samples[aidx][i]) * np.imag(phasing_matrix[aidx]) \
+                     + np.imag(samples[aidx][i]) * np.real(phasing_matrix[aidx])
+
         if pack_uint32:
             beamformed_samples[i] = np.complex_int32_pack(itemp, qtemp)
         else:
