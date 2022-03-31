@@ -3,11 +3,24 @@
 from drivermsg_library import *
 from rosmsg import *
 from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect
-from radar_config_constants import *
+
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
 
+# Import radar_config_constants from array_config.ini file
+# Formerly imported using `from radar_config_constants import *`
+import configparser
+config = configparser.ConfigParser()
+config.read('../array_config.ini')
+USRP_MASTER_CLOCK_FREQ = float(config['radar_config_constants']['USRP_MASTER_CLOCK_FREQ'])
+INTEGRATION_PERIOD_SYNC_TIME_ONESEC = float(config['radar_config_constants']['INTEGRATION_PERIOD_SYNC_TIME_ONESEC'])
+INTEGRATION_PERIOD_SYNC_TIME = float(config['radar_config_constants']['INTEGRATION_PERIOD_SYNC_TIME'])
+MIN_CLRFREQ_DELAY = float(config['radar_config_constants']['MIN_CLRFREQ_DELAY'])
+CLRFREQ_RES = float(config['radar_config_constants']['CLRFREQ_RES'])
+MAX_AGE_OF_AUTO_CLEAR_FREQ = int(config['radar_config_constants']['MAX_AGE_OF_AUTO_CLEAR_FREQ'])
+PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ = float(config['radar_config_constants']['PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ'])
+PULSE_SEQUENCE_PADDING_TIME = float(config['radar_config_constants']['PULSE_SEQUENCE_PADDING_TIME'])
 
 def test_burst_worker():
     import sys

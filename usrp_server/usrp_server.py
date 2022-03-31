@@ -30,12 +30,25 @@ from python_include.phasing_utils import *
 from python_include.socket_utils import *
 from python_include.rosmsg import *
 from python_include.drivermsg_library import *
-from python_include.radar_config_constants import *
+
 from python_include.clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, \
     calc_clear_freq_on_raw_samples
 from python_include.profiling_tools import *
 import python_include.logging_usrp as logging_usrp
 import python_include.utils as utils
+
+# Import radar_config_constants from array_config.ini file
+# Formerly imported using `from python_include.radar_config_constants import *`
+config = configparser.ConfigParser()
+config.read('../array_config.ini')
+USRP_MASTER_CLOCK_FREQ = float(config['radar_config_constants']['USRP_MASTER_CLOCK_FREQ'])
+INTEGRATION_PERIOD_SYNC_TIME_ONESEC = float(config['radar_config_constants']['INTEGRATION_PERIOD_SYNC_TIME_ONESEC'])
+INTEGRATION_PERIOD_SYNC_TIME = float(config['radar_config_constants']['INTEGRATION_PERIOD_SYNC_TIME'])
+MIN_CLRFREQ_DELAY = float(config['radar_config_constants']['MIN_CLRFREQ_DELAY'])
+CLRFREQ_RES = float(config['radar_config_constants']['CLRFREQ_RES'])
+MAX_AGE_OF_AUTO_CLEAR_FREQ = int(config['radar_config_constants']['MAX_AGE_OF_AUTO_CLEAR_FREQ'])
+PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ = float(config['radar_config_constants']['PAUSE_TIME_BEFORE_AUTO_CLEAR_FREQ'])
+PULSE_SEQUENCE_PADDING_TIME = float(config['radar_config_constants']['PULSE_SEQUENCE_PADDING_TIME'])
 
 RMSG_PORT = 45000
 MAX_CHANNELS = 4
