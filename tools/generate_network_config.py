@@ -23,6 +23,9 @@ if hostName == 'kodiak-aux':
 elif hostName == 'kodiak-main':
    interface_bases = ['enp10s0f', 'enp11s0f']
    SUBNET_BASE = 40
+elif hostName == 'superdarn-lab':
+   interface_bases = ['ens85f','ens93f','ens118f']
+   SUBNET_BASE = 41
 else:
    print('error: unkown host name: ' + hostName)
    quit()

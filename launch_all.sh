@@ -19,6 +19,6 @@ rtserver -rp 41104 -ep 41000 -tp 1401 & # ch 4
 python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py server &
 
 sleep 15
-#schedule -l /data/ros/scdlog/mcm.a.scdlog -f /data/ros/scd/mcm.a.scd & 
+schedule -l /data/ros/scdlog/mcm.a.scdlog -f /data/ros/scd/mcm.a.scd & 
 #schedule -l /data/ros/scdlog/mcm.b.scdlog -f /data/ros/scd/mcm.b.scd & 
 

@@ -3,3 +3,4 @@
 *.log
 *.*int16
 tags
+/log

@@ -35,7 +35,7 @@ from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
-import utils
+#import utils
 
 
 RMSG_PORT = 45000
@@ -175,7 +175,8 @@ class usrpSockManager():
       self.last_reconnection = datetime.datetime.now()
       
       # open each
-      self.hostnameList_active = [] 
+      self.hostnameList_active = []
+      print(usrp_driver_base_port)
       for usrpConfig in RHM.ini_usrp_configs:
          try:
             if usrpConfig['usrp_hostname'] in self.hostnameList_active:

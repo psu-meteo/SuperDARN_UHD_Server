@@ -3,5 +3,5 @@ echo `date +%s`>>$4.log
 NOW=$(date +"%Y%m%d_%H%M%S")
 LOGFILE="usrp_driver_$2__$NOW.log"
 
-./usrp_driver "$@" > ../log/$LOGFILE  2>&1
+./usrp_driver "$@" > /data/log/$LOGFILE  2>&1
 

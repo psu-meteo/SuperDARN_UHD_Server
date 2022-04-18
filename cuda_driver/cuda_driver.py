@@ -824,7 +824,8 @@ class ProcessingGPU(object):
         tx_bb_nSamples_per_pulse = None
         # TODO: this assumes all channels have the same number of samples
         for iCh in range(len(bb_signal)):
-           if bb_signal[iCh] != None: 
+           ##if bb_signal[iCh] != None: 
+           if(bb_signal[iCh] is not None):
               tx_bb_nSamples_per_pulse = int(bb_signal[iCh].shape[2]) # number of baseband samples per pulse
               break
         if  tx_bb_nSamples_per_pulse == None:
