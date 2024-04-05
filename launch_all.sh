@@ -1,24 +1,31 @@
 #!/bin/bash
 
+source /home/radar/.profile
+source /home/radar/.bashrc
+
 #sudo ./init_network.sh &
 
-/home/radar/ros.3.6/bin/errlog -name mcm.a -lp 41000 &
-#/home/radar/ros.3.6/bin/errlog -name mcm.b -lp 42000 &
+errlog -name sps.a -lp 41000 &
+#errlog -name mcm.b -lp 43000 &
 
-/home/radar/ros.3.6/bin/rawacfwrite -r mcm.a -lp 41102 -ep 41000 &
-#/home/radar/ros.3.6/bin/rawacfwrite -r mcm.b -lp 42102 -ep 42000 &
+rawacfwrite -r sps.a -lp 41102 -ep 41000 &
+#rawacfwrite -r mcm.b -lp 43102 -ep 43000 &
 
-/home/radar/ros.3.6/bin/fitacfwrite -r mcm.a -lp 41103 -ep 41000 &
-#/home/radar/ros.3.6/bin/fitacfwrite -r mcm.b -lp 42103 -ep 42000 &
-
-
-/home/radar/ros.3.6/bin/rtserver -rp 41104 -ep 41000 -tp 1401 & # ch 4
-#/home/radar/ros.3.6/bin/rtserver -rp 42104 -ep 42000 -tp 1402 & # ch 3
+fitacfwrite -r sps.a -lp 41103 -ep 41000 &
+#fitacfwrite -r mcm.b -lp 43103 -ep 43000 &
 
 
-python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py server &
+rtserver -rp 41104 -ep 41000 -tp 10011 & # ch 4
+rtserver -rp 43104 -ep 43000 -tp 10012 & # ch 3
 
-sleep 5
-/home/radar/ros.3.6/bin/schedule -l /data/ros/scdlog/mcm.a.scdlog -f /data/ros/scd/mcm.a.scd & 
-#/home/radar/ros.3.6/bin/schedule -l /data/ros/scdlog/mcm.b.scdlog -f /data/ros/scd/mcm.b.scd & 
+
+python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py server &
+
+sleep 15
+schedule -l /data/ros/scdlog/sps.a.scdlog -f /data/ros/scd/sps.a.scd & 
+#schedule -l /data/ros/scdlog/mcm.b.scdlog -f /data/ros/scd/mcm.b.scd & 
+
+ps -C cuda_driver.py -o pid= | xargs sudo renice -20
+ps -C usrp_driver -o pid= | xargs sudo renice -15
+ps -C usrp_server.py -o pid= | xargs sudo renice -15
 

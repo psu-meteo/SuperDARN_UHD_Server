@@ -51,7 +51,7 @@
 
 #define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
-#define DEBUG 1
+#define DEBUG 0
 
 #define MAX_STREAM_RESETS 120
 
@@ -137,7 +137,7 @@ void *open_sample_shm(int32_t ant, int32_t dir, int32_t side, int32_t swing, siz
         sprintf(shm_device,"/shm_rx_ant_%d_side_%d_swing_%d", ant, side, swing);
     }
 
-    fprintf(stderr, "usrp_driver opening: %s\n", shm_device);
+    //fprintf(stderr, "usrp_driver opening: %s\n", shm_device);
     shm_fd = shm_open(shm_device, O_RDWR, S_IRUSR | S_IWUSR);
     if (shm_fd == -1) {
         if (errno == ENOENT) {
@@ -178,7 +178,7 @@ sem_t open_sample_semaphore(int32_t ant, int32_t swing, int32_t dir ) {
        sprintf(sem_name,"/semaphore_rx_ant_%d_swing_%d", ant, swing);
     }
     
-    fprintf(stderr, "usrp_driver opening: %s\n", sem_name);
+    //fprintf(stderr, "usrp_driver opening: %s\n", sem_name);
     sem = sem_open(sem_name, 0);
 
     if (sem == SEM_FAILED) {
@@ -460,7 +460,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     boost::property_tree::ini_parser::read_ini("../array_config.ini", pt_array);
     mimic_active = std::stof(pt_array.get<std::string>("mimic.mimic_active")) != 0;
     mimic_delay  = std::stof(pt_array.get<std::string>("mimic.mimic_delay"));
-    fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
+    //fprintf(stderr, "read from ini: mimic_active=%d, mimic_delay=%f\n", mimic_active, mimic_delay);
 
     init_all_dirs();
 
@@ -649,7 +649,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         // TODO: maybe limit addr to interface connected to usrp_server
         sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-        fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + ip_part); 
+        //fprintf(stderr, "listening on port: %d\n", usrp_driver_base_port + ip_part); 
         sockaddr.sin_port = htons(usrp_driver_base_port + ip_part);
         
 
@@ -662,10 +662,10 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
         listen(driversock, 5);
 
         // and accept it
-        fprintf(stderr, "waiting for socket connection\n");
+        // fprintf(stderr, "waiting for socket connection\n");
         addr_size = sizeof(client_addr);
         driverconn = accept(driversock, (struct sockaddr *) &client_addr, &addr_size);
-        fprintf(stderr, "accepted socket connection\n");
+        // fprintf(stderr, "accepted socket connection\n");
 
 
 

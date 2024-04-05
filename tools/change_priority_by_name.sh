@@ -7,8 +7,7 @@ pid_list=`/bin/ps -ef | grep $NAME | grep -v grep | grep -v kill_by_name | awk '
 
 for pid in $pid_list;
 do 
-    echo $pid
-    /bin/ps -p $pid
-    chrt -p $PRIORITY $pid
-done
-
+        echo $pid
+            /bin/ps -p $pid
+                chrt -p $PRIORITY $pid
+            done

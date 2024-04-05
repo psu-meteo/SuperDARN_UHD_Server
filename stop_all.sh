@@ -2,7 +2,7 @@
 
 pkill -KILL -f srr_watchdog.py
 
-/home/radar/repos/SuperDARN_UHD_Server/srr.py stop
+/home/radar/SuperDARN_UHD_Server/srr.py stop
 # from old stop.radar
 killall -s 2 schedule
 

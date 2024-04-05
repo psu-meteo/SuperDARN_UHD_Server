@@ -380,7 +380,8 @@ class usrp_get_auto_clear_freq_command(driver_command):
         else:
             nSamples = recv_dtype(sock, np.uint32)
             print("receive ant {}: {} samples".format(antenna_no, nSamples))
-            time.sleep(0.001)
+#            time.sleep(0.001)
+            time.sleep(0.0005)
             sample_buf = recv_dtype(sock, np.int16, nitems = int(2 * nSamples))
             sample_buf = sample_buf[0::2] + 1j * sample_buf[1::2]
         return antenna_no, sample_buf

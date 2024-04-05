@@ -35,7 +35,7 @@ from radar_config_constants import *
 from clear_frequency_search import read_restrict_file, record_clrfreq_raw_samples, calc_clear_freq_on_raw_samples
 from profiling_tools import *
 import logging_usrp
-import utils
+#import utils
 
 
 RMSG_PORT = 45000
@@ -49,7 +49,7 @@ RMSG_FAILURE = -1
 RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
-RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.mcm/restrict.dat.inst'
+RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.sps/restrict.dat.inst'
 nSwings = 2 
 
 debug = False 
@@ -93,18 +93,17 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.5
-      elif int_time == 3.2:
-          overhead_time = 0.4
-      elif int_time == 2.9:
-         overhead_time = 0.05
+         overhead_time = 0.3
+      elif int_time == 3.1:
+         overhead_time = 0.3
+      elif int_time == 2.7:
+         overhead_time = 0.3
       elif int_time == 1:
          overhead_time = 0.05 # TODO adjust and test
       else:
-         overhead_time = 0.5
-         error_str = "No overhead time defined for {} s, using 0.7  please add it...".format(int_time)
+         error_str = "No overhead time defined for {} s, please add it...".format(int_time)
          self.RHM.logger.error(error_str)
-#         raise ValueError(error_str)
+         raise ValueError(error_str)
       return overhead_time
     
 
@@ -585,12 +584,11 @@ class scanManager():
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast = False # to handle last trigger_next_swing() call
-        self.logger = logging.getLogger('scanManager')
 
  ###       self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
-        self.logger.debug("in scanManager __init__. Setting isInitSetParameter true")
         self.isInitSetParameter = True
         self.restricted_frequency_list = restricted_frequency_list
+        self.logger = logging.getLogger('scanManager')
 
         self.syncBeams  = False
         self.beam_times = None
@@ -654,7 +652,6 @@ class scanManager():
         self.next_clrFreq_result    = None 
         self.isPrePeriod            = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast             = False # to handle last trigger_next_swing() call
-        self.logger.debug("in init_new_scan. Setting isInitSetParameter true")
         self.isInitSetParameter     = True
         self.isFirstPeriod          = True
 
@@ -1100,7 +1097,7 @@ class RadarHardwareManager:
             cmd.transmit()
             cmd.client_return()
             self.logger.warning("Current settings: Amp1={}, Amp2={}, Attenuation={} dB".format(amp1, amp2, att)) 
-            #npt = input('  Press Enter for next chage... ')
+            #npt = raw_input("  Press Enter for next chage... ")
             time.sleep(2)
 
         print("Finished testing RXFE!")
@@ -1805,8 +1802,7 @@ class RadarHardwareManager:
         nChannels = len(self.channels) + nChannelsWillBeAdded
         self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.scaling_factor_tx_total, nChannels))
         for ch in self.channels + self.newChannelList:
-            ch.channelScalingFactor = self.scaling_factor_tx_total
-#            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
+            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
 
     # normalize
     def calc_normalize_and_mute_factors(RHM, main_samples, back_samples):
@@ -1916,17 +1912,12 @@ class RadarHardwareManager:
     
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
-                cur_beam=channel.ctrlprm_struct.payload['rbeam']
                 cur_freq=channel.ctrlprm_struct.payload['rfreq']
-                # bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
-                bmazm         = calc_beam_azm_rad(RHM.array_nBeams, cur_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
+                bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
                 channel.logger.debug("rx beamforming: ch {}, beam {}".format(channel.cnum, channel.scanManager.current_beam))
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
                 # pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
                 pshift        = calc_phase_increment(bmazm, cur_freq * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
-                channel.logger.debug("rx beamforming: ch {}, frequency {}".format(channel.cnum, cur_freq, clrFreqResult[0]))
-
-
                 
                 # MAIN ARRAY
                 first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
@@ -1942,21 +1933,13 @@ class RadarHardwareManager:
                 abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
                 RHM.logger.info("Abs max_value is {} (int16_max= {}, max_value / int16_max = {} ) ".format(abs_max_value, maxInt16value, abs_max_value / maxInt16value ))                
 
-                real_mx = np.max(np.abs(real_mat))
-                imag_mx = np.max(np.abs(imag_mat))
-                if (real_mx > maxInt16value) or (imag_mx > maxInt16value ):
-                   OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   scale_value = maxInt16value/np.max([real_mx,imag_mx])
-                   real_mat = scale_value*real_mat
-                   imag_mat = scale_value*imag_mat
-
-                # # check for clipping
-                # if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
-                #    RHM.logger.info("Overflow error while casting beamformed rx samples to complex int16s.")
+                # check for clipping
+                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
+                   RHM.logger.info("Overflow error while casting beamformed rx samples to complex int16s.")
         
-                #    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                #    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
-                #    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
+                   OverflowError("calc_beamforming: overflow error in casting data to complex int")
+                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
 
                 complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.uint16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
@@ -2064,7 +2047,6 @@ class RadarChannelHandler:
         #   UPDATE_SITE_SETTINGS : self.UpdateSiteSettingsHandler,\
             GET_PARAMETERS       : self.GetParametersHandler,\
             SET_PARAMETERS       : self.SetParametersHandler,\
-            SET_PARAMETERS_I     : self.SetParametersHandler,\
             PING                 : self.PingHandler,\
         #   OKAY                 : self.OkayHandler,\
         #   NOOP                 : self.NoopHandler,\
@@ -2563,54 +2545,51 @@ class RadarChannelHandler:
            RHM.n_SetParameterHandlers_active -= 1
            return RMSG_SUCCESS
 
-
-#        self.ctrlprm_struct.receive(self.conn)
         self.logger.debug("ch {}: Received from ROS SetParameter for swing {} : tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, current_swing, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
         self.logger.debug("swing state {}".format(self.state[current_swing]))
         # wait if RHM.trigger_next_swing() is slower... 
         self._waitForState(current_swing, [CS_INACTIVE, CS_PROCESSING, CS_LAST_SWING])   
 
-        # period not jet triggered
-        if self.state[current_swing] == CS_INACTIVE:# or self.active_state == CS_READY:#  not needed with change of site.c
 
+        # period not jet triggered
+        if self.state[current_swing] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
+           
            self.logger.debug("Ch {} waiting for Parameter semaphore...".format(self.cnum)) 
            RHM.set_par_semaphore.acquire()
            self.logger.debug("Ch {} acquired semaphore, setting parameter".format(self.cnum)) 
-           
+
            if self.state[current_swing] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
               self.state[current_swing] = CS_INACTIVE
-              
+
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-           
+
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
-              self.logger.debug("CheckChannelCompatability FAIL")
               RHM.n_SetParameterHandlers_active -= 1
               return RMSG_FAILURE
-              
+
            if self not in self.parent_RadarHardwareManager.newChannelList:
               self.parent_RadarHardwareManager.newChannelList.append(self)
               self.logger.debug("Adding ch {} to newChannelList ".format(self.cnum))
            else:
               self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
-
            RHM.set_par_semaphore.release()
            self.logger.debug("Ch {} released semaphore".format(self.cnum)) 
  
         # in middle of scan, period already triggerd. only compare with prediction
         elif self.state[current_swing] == CS_PROCESSING or self.state[current_swing] == CS_LAST_SWING: 
-           # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
+         # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
-           
+
            # compare received with predicted parameter
            self.ctrlprm_struct.receive(self.conn)
            for key in ctrlprm_old.keys():
               if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
-                  self.logger.debug("ch {} rreceived new ctrl_prm {} ({}) old ctrl_prm ({})".format(self.cnum, key, self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
                   if key == "tfreq" and self.ctrlprm_struct.payload[key] == 12000: # control program always sends 2 SET_PAR. 1st one with tfreq 12MHz
                       continue
+
                   self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
                   # TODO return RMSG_FAILURE
               #else:
