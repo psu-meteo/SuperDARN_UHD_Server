@@ -130,6 +130,9 @@ class usrpClass():
           else:
              log("unknown usrp side: {}".format(side))
 
+       # uncomment following line to test with internal clock
+       # start_arg += ["--intclk"]
+       
        if self.mainarray.lower() in ["false", "0", "off"]:
             start_arg += ["--interferometer"]
        return start_arg

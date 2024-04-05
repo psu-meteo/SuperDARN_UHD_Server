@@ -163,16 +163,24 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
     if (iSample_rf >= offset) {
         uint32_t idxSample_rf = (iSample_rf - offset) * 2 + iAntenna *  nSamples_rf *2;         // index in memory (account for  I/Q, iAntenna)
 
+        double phi0 = fmod((double)phaseIncrement_NCO_rad[iChannel] * (double)iSample_rf, 2*M_PI);
+	float mc0=(float)cos(phi0);
+	float ms0=(float)sin(phi0);
+
+        double phi1 = fmod((double)phaseIncrement_NCO_rad[iChannel] * (double)(iSample_rf+1), 2*M_PI);
+	float mc1=(float)cos(phi1);
+	float ms1=(float)sin(phi1);
+
         itemp[iThread_lin] =
-            filter[idxSample_filter  ] * samples[idxSample_rf  ] -
-            filter[idxSample_filter+1] * samples[idxSample_rf+1] +
-            filter[idxSample_filter+2] * samples[idxSample_rf+2] -
-            filter[idxSample_filter+3] * samples[idxSample_rf+3];
+            filter[idxSample_filter  ] * samples[idxSample_rf  ] * mc0 -
+            filter[idxSample_filter+1] * samples[idxSample_rf+1] * ms0 +
+            filter[idxSample_filter+2] * samples[idxSample_rf+2] * mc1 -
+            filter[idxSample_filter+3] * samples[idxSample_rf+3] * ms1;
         qtemp[iThread_lin] =
-            filter[idxSample_filter  ] * samples[idxSample_rf+1] +
-            filter[idxSample_filter+1] * samples[idxSample_rf  ] +
-            filter[idxSample_filter+2] * samples[idxSample_rf+3] +
-            filter[idxSample_filter+3] * samples[idxSample_rf+2];
+            filter[idxSample_filter  ] * samples[idxSample_rf+1] * mc0 +
+            filter[idxSample_filter+1] * samples[idxSample_rf  ] * ms0 +
+            filter[idxSample_filter+2] * samples[idxSample_rf+3] * mc1 +
+            filter[idxSample_filter+3] * samples[idxSample_rf+2] * ms1;
     } else {
         itemp[iThread_lin] = 0;
         qtemp[iThread_lin] = 0;
@@ -224,11 +232,11 @@ __global__ void multiply_mix_add(int16_t *samples, float *odata, float *filter)
      
      if (threadIdx.x == 0) {
         // the NCO inclueded in the filter causes a phase error. this is the correction
-        double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
-        double ltemp = (double) itemp[iThread_lin]; // TODO: avoid numerical errors?? why only itemp? (mgu)
+	//        double phiOffset = fmod(phaseIncrement_NCO_rad[iChannel] * iSampleIF*decimationRate_rf2if, 2*M_PI);
+        //	  double ltemp = (double) itemp[iThread_lin]; // TODO: avoid numerical errors?? why only itemp? (mgu)
         
-        itemp[iThread_lin] = itemp[iThread_lin] * cos(phiOffset) - qtemp[iThread_lin] * sin(phiOffset);
-        qtemp[iThread_lin] = ltemp * sin(phiOffset) + qtemp[iThread_lin] * cos(phiOffset);
+        //	itemp[iThread_lin] = itemp[iThread_lin] * cos(phiOffset) - qtemp[iThread_lin] * sin(phiOffset);
+        //	qtemp[iThread_lin] = ltemp * sin(phiOffset) + qtemp[iThread_lin] * cos(phiOffset);
 
         // write outout
         uint32_t output_idx = iSampleIF *2 + iChannel * nSamplesIF *2 + iAntenna * nChannels * nSamplesIF *2; 

@@ -1,0 +1,2 @@
+#!/bin/bash
+dot -Tpng -o graph.png radar_state_machine.dot

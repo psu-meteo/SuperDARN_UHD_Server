@@ -1,0 +1,24 @@
+digraph G {
+//size="8,6"; ratio=fill; node[fontsize=24];
+
+    subgraph "RSM" { label="Radar State Machine"; RSM_INIT; RSM_WAIT; RSM_CLRFREQ; RSM_PRETRIGGER; RSM_TRIGGER; RSM_GET_DATA; }
+    node[shape="box", style="rounded"]
+        RSM_INIT, RSM_WAIT, RSM_CLRFREQ, RSM_PRETRIGGER, RSM_TRIGGER, RSM_GET_DATA, RSM_RESET
+
+    RSM_INIT [label = "Init"]
+    RSM_WAIT [label = "Wait"]
+    RSM_CLRFREQ [label = "Clear Frequency Search"]
+    RSM_TRIGGER [label = "Trigger"]
+    RSM_PRETRIGGER [label = "Pretrigger"]
+    RSM_GET_DATA [label = "Get Data"]
+    RSM_RESET [label = "Reset"]
+
+    RSM_RESET -> RSM_INIT -> RSM_WAIT -> RSM_WAIT
+    RSM_WAIT -> RSM_CLRFREQ -> RSM_WAIT;
+    RSM_WAIT -> RSM_PRETRIGGER -> RSM_WAIT;
+    RSM_WAIT -> RSM_TRIGGER -> RSM_WAIT;
+    RSM_WAIT -> RSM_GET_DATA -> RSM_WAIT;
+
+    subgraph "RSM" { label="State Machine"; RSM_RESET;}
+}
+

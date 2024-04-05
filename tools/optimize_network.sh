@@ -17,25 +17,25 @@ sudo sysctl -w net.core.netdev_max_backlog=300000
 sudo cpufreq-set -g PERFORMANCE
 
 # disable interrupt coallesing:
-sudo ethtool -C enp10s0f0 adaptive-tx off
-sudo ethtool -C enp10s0f1 adaptive-tx off
-sudo ethtool -C enp10s0f3 adaptive-tx off
-sudo ethtool -C enp10s0f4 adaptive-tx off
+sudo ethtool -C enp130s0f0 adaptive-tx off
+sudo ethtool -C enp130s0f1 adaptive-tx off
+sudo ethtool -C enp130s0f2 adaptive-tx off
+sudo ethtool -C enp130s0f3 adaptive-tx off
 
-sudo ethtool -C enp11s0f0 adaptive-tx off
-sudo ethtool -C enp11s0f1 adaptive-tx off
-sudo ethtool -C enp11s0f3 adaptive-tx off
-sudo ethtool -C enp11s0f4 adaptive-tx off
+sudo ethtool -C enp4s0f0 adaptive-tx off
+sudo ethtool -C enp4s0f1 adaptive-tx off
+sudo ethtool -C enp4s0f2 adaptive-tx off
+sudo ethtool -C enp4s0f3 adaptive-tx off
 
-sudo ethtool -C enp10s0f0 adaptive-rx off
-sudo ethtool -C enp10s0f1 adaptive-rx off
-sudo ethtool -C enp10s0f2 adaptive-rx off
-sudo ethtool -C enp10s0f3 adaptive-rx off
+sudo ethtool -C enp130s0f0 adaptive-rx off
+sudo ethtool -C enp130s0f1 adaptive-rx off
+sudo ethtool -C enp130s0f2 adaptive-rx off
+sudo ethtool -C enp130s0f3 adaptive-rx off
 
-sudo ethtool -C enp11s0f0 adaptive-rx off
-sudo ethtool -C enp11s0f1 adaptive-rx off
-sudo ethtool -C enp11s0f2 adaptive-rx off
-sudo ethtool -C enp11s0f3 adaptive-rx off
+sudo ethtool -C enp4s0f0 adaptive-rx off
+sudo ethtool -C enp4s0f1 adaptive-rx off
+sudo ethtool -C enp4s0f2 adaptive-rx off
+sudo ethtool -C enp4s0f3 adaptive-rx off
 
 
 

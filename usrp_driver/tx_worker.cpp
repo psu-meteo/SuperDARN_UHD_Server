@@ -40,8 +40,11 @@ void usrp_tx_worker(
     // pulse samples are zero padded with 
     // [ spb * 0 ] [ pulse samples ] [ spb * 0 ]
     std::vector<std::vector<std::complex<int16_t>>> pulse_samples = (*pulse_samples_pointer);
-    struct timeval t0, t1;
+    struct timeval t0, t1, t2;
     gettimeofday(&t0,NULL);
+    time_t nowtime;
+    struct tm *nowtm;
+    char tmbuf[80];
 
     DEBUG_PRINT("TX_WORKER starting up\n");
 
@@ -78,7 +81,11 @@ void usrp_tx_worker(
  //   md.start_of_burst = false;
  //   md.has_time_spec = false;
 
-
+    gettimeofday(&t2,NULL);
+    nowtime=t2.tv_sec;
+    nowtm=gmtime(&nowtime);
+    strftime(tmbuf,sizeof(tmbuf),"%Y-%m-%d  %H:%M:%S",nowtm);
+    fprintf(stderr,"%s %d\n",tmbuf,t2.tv_usec);
     while(nacc_samples < tx_burst_length_samples) {
         // calculate the number of samples to send in the packet
         nsamples_to_send = std::min(tx_burst_length_samples - nacc_samples, spb);
