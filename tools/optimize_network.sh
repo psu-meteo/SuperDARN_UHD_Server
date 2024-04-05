@@ -9,7 +9,7 @@ sudo sysctl -w net.core.rmem_default=5242870
 sudo sysctl -w net.core.wmem_default=5242870
 sudo sysctl -w net.core.optmem_max=5242870
 sudo sysctl -w net.core.netdev_max_backlog=300000
-
+sudo sysctl -w net.core.netdev_budget=600
 
 
 
@@ -17,27 +17,32 @@ sudo sysctl -w net.core.netdev_max_backlog=300000
 sudo cpufreq-set -g PERFORMANCE
 
 # disable interrupt coallesing:
-sudo ethtool -C enp10s0f0 adaptive-tx off
-sudo ethtool -C enp10s0f1 adaptive-tx off
-sudo ethtool -C enp10s0f3 adaptive-tx off
-sudo ethtool -C enp10s0f4 adaptive-tx off
+sudo ethtool -C ens1f0 adaptive-tx off
+sudo ethtool -C ens1f1 adaptive-tx off
+sudo ethtool -C ens1f2 adaptive-tx off
+sudo ethtool -C ens1f3 adaptive-tx off
 
-sudo ethtool -C enp11s0f0 adaptive-tx off
-sudo ethtool -C enp11s0f1 adaptive-tx off
-sudo ethtool -C enp11s0f3 adaptive-tx off
-sudo ethtool -C enp11s0f4 adaptive-tx off
+sudo ethtool -C ens1f0 adaptive-rx off
+sudo ethtool -C ens1f1 adaptive-rx off
+sudo ethtool -C ens1f2 adaptive-rx off
+sudo ethtool -C ens1f3 adaptive-rx off
 
-sudo ethtool -C enp10s0f0 adaptive-rx off
-sudo ethtool -C enp10s0f1 adaptive-rx off
-sudo ethtool -C enp10s0f2 adaptive-rx off
-sudo ethtool -C enp10s0f3 adaptive-rx off
+sudo ethtool -C ens2f0 adaptive-tx off
+sudo ethtool -C ens2f1 adaptive-tx off
+sudo ethtool -C ens2f2 adaptive-tx off
+sudo ethtool -C ens2f3 adaptive-tx off
 
-sudo ethtool -C enp11s0f0 adaptive-rx off
-sudo ethtool -C enp11s0f1 adaptive-rx off
-sudo ethtool -C enp11s0f2 adaptive-rx off
-sudo ethtool -C enp11s0f3 adaptive-rx off
+sudo ethtool -C ens2f0 adaptive-rx off
+sudo ethtool -C ens2f1 adaptive-rx off
+sudo ethtool -C ens2f2 adaptive-rx off
+sudo ethtool -C ens2f3 adaptive-rx off
 
+sudo ethtool -C ens3f0 adaptive-tx off
+sudo ethtool -C ens3f1 adaptive-tx off
+sudo ethtool -C ens3f2 adaptive-tx off
+sudo ethtool -C ens3f3 adaptive-tx off
 
-
-
-
+sudo ethtool -C ens3f0 adaptive-rx off
+sudo ethtool -C ens3f1 adaptive-rx off
+sudo ethtool -C ens3f2 adaptive-rx off
+sudo ethtool -C ens3f3 adaptive-rx off

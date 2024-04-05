@@ -1,7 +1,6 @@
 # https://www.andreas-jung.com/contents/a-python-decorator-for-measuring-the-execution-time-of-methods 
 import time
 
-
 def timeit(method):
 
     def timed(*args, **kw):

@@ -73,7 +73,7 @@ def read_and_plot():
     
     
        for iAnt in range(nAntennas):
-          plt.subplot(np.ceil(nAntennas/2)+1, 2, 1+iAnt)
+          plt.subplot(np.ceil(nAntennas/2), 2, 1+iAnt)
           if iChannel == 0: 
              plt.cla()
           plt.plot([i /xAxis_scaling for i in range(len(channelPlotData[iAnt]))], np.real(channelPlotData[iAnt]))
@@ -105,34 +105,34 @@ def read_and_plot():
   #     plt.xlabel(xAxis_label)
 
 
-          plt.subplot(np.ceil(nAntennas/2)+1, 1,np.ceil(nAntennas/2)+1 )
-          plt.cla()
-          idx2checkVec = [0, 70, 109]
-          colorList = cm.rainbow(np.linspace(0,1,len(idx2checkVec)))
-          for idx2check, plotColor in zip(idx2checkVec, colorList):
-             exampleTXsamples = [antennaPlotData[0][iAnt][idx2check] for iAnt in range(nAntennas)]
-             arrayAngle = np.angle(exampleTXsamples, deg=True)
-             arrayAngle = arrayAngle - arrayAngle[0]
-             plt.scatter(np.arange(nAntennas)+(np.random.rand(1)-0.5)/5, arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)), color=plotColor)
-          
+  # plt.subplot(414)
+  # plt.cla()
+  # idx2checkVec = [0, 70, 109]
+  # colorList = cm.rainbow(np.linspace(0,1,len(idx2checkVec)))
+  # for idx2check, plotColor in zip(idx2checkVec, colorList):
+  #    exampleTXsamples = [antennaPlotData[0][iAnt][idx2check] for iAnt in range(nAntennas)]
+  #    arrayAngle = np.angle(exampleTXsamples, deg=True)
+  #    arrayAngle = arrayAngle - arrayAngle[0]
+  #    plt.scatter(np.arange(nAntennas)+(np.random.rand(1)-0.5)/5, arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)), color=plotColor)
+  # 
 
-          beamsep = 3.24 
-          delta_x = 15.4
-          nBeams = 16
-          for iChannel in range(nChannels): 
-             alpha = beamsep * (parDictList[iChannel]["tbeam"] - (nBeams -1) /2 )
-             print("alpha is {} (beam {})".format(alpha, parDictList[iChannel]['tbeam']))
-             phaseDiff_per_ant = - delta_x / 3e8 * parDictList[iChannel]["rfreq"] *1000 * np.sin(alpha/180*np.pi)  *360
-             plt.plot(np.arange(nAntennas), [phaseDiff_per_ant*iAnt % 360  for iAnt in range(nAntennas)])
-          plt.grid(True)
-          plt.ylabel("phase difference in deg")
-          plt.xlabel("antenna number")
-          plt.axis([-0, nAntennas+3, 0, 360])
-          legendList = ["Measured sample {} (ch 0)".format(idx) for idx in idx2checkVec]
-          for iChannel in range(nChannels):
-             legendList.insert(iChannel, "Theory (ch {})".format(iChannel))
-          plt.legend(legendList)
-          plt.pause(0.05)
+  # beamsep = 3.24 
+  # delta_x = 15.4
+  # nBeams = 16
+  # for iChannel in range(nChannels): 
+  #    alpha = beamsep * (parDictList[iChannel]["tbeam"] - (nBeams -1) /2 )
+  #    print("alpha is {} (beam {})".format(alpha, parDictList[iChannel]['tbeam']))
+  #    phaseDiff_per_ant = - delta_x / 3e8 * parDictList[iChannel]["rfreq"] *1000 * np.sin(alpha/180*np.pi)  *360
+  #    plt.plot(np.arange(nAntennas), [phaseDiff_per_ant*iAnt % 360  for iAnt in range(nAntennas)])
+  # plt.grid(True)
+  # plt.ylabel("phase difference in deg")
+  # plt.xlabel("antenna number")
+  # plt.axis([-0, nAntennas+3, 0, 360])
+  # legendList = ["Measured sample {} (ch 0)".format(idx) for idx in idx2checkVec]
+  # for iChannel in range(nChannels):
+  #    legendList.insert(iChannel, "Theory (ch {})".format(iChannel))
+  # plt.legend(legendList)
+   plt.pause(0.05)
 
 plt.figure()
 #plt.axis([0, 10, 0, 1])
