@@ -49,7 +49,7 @@
 #include "rx_worker.h"
 #include "dio.h"
 
-#define SAVE_RAW_SAMPLES_DEBUG 0
+#define SAVE_RAW_SAMPLES_DEBUG 0 
 #define SUPRESS_UHD_PRINTS 0
 #define DEBUG 1
 
@@ -446,8 +446,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
     boost::property_tree::ptree pt;
     boost::property_tree::ini_parser::read_ini("../driver_config.ini", pt);
 
-    useconds_t usecs=500;
-    
   //  DEBUG_PRINT("USRP_DRIVER reading rxshm_size\n");
   //  std::cout << pt.get<std::string>("shm_settings.rxshm_size") << '\n';
     rxshm_size = std::stoi(pt.get<std::string>("shm_settings.rxshm_size"));
@@ -728,7 +726,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                     for(uint32_t i = 0; i < npulses; i++) {
                 //        DEBUG_PRINT("USRP_SETUP waiting for pulse offset %d of %d\n", i+2, npulses);
                         pulse_sample_idx_offsets[i] = sock_get_uint64(driverconn); 
-                       DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
+                //        DEBUG_PRINT("USRP_SETUP received %zu pulse offset\n", pulse_sample_idx_offsets[i]);
 
                     }
                     DEBUG_PRINT("USRP_SETUP resize autoclear freq\n");
@@ -901,6 +899,7 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
                         // works fine with tx_worker and dio_worker, fails if rx_worker is enabled
                         uhd_threads.create_thread(boost::bind(usrp_rx_worker, usrp, rx_stream, &rx_data_buffer, nSamples_rx_total, rx_start_time, &rx_worker_status));
 
+			useconds_t usecs=1000;
                         if (tx_worker_active) {
 			  usleep(usecs);
 			  uhd_threads.create_thread(boost::bind(usrp_tx_worker, tx_stream, &tx_samples, num_samples_per_pulse_with_padding, start_time, pulse_sample_idx_offsets)); 
@@ -913,7 +912,6 @@ int UHD_SAFE_MAIN(int argc, char *argv[]){
 
                         sock_send_uint8(driverconn, TRIGGER_PULSE);
 
-			
                         uhd_threads.join_all(); // wait for transmit threads to finish, drawn from shared memory..
                         DEBUG_PRINT("TRIGGER_PULSE rx_worker, tx_worker and dio threads on swing %d\n joined.", swing);
 

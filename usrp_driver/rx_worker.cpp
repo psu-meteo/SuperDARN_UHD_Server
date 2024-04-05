@@ -27,7 +27,7 @@
 
 #define RX_STREAM_EXEC_TIME .005
 
-#define DEBUG 0
+#define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else
@@ -108,7 +108,6 @@ void usrp_rx_worker(
 	DEBUG_PRINT("RX_WORKER: issued stream command %2.4f\n",debugt,++counter);
 
         samples_remaining_to_stream -= max_samples_per_stream;
-	// usleep(20);
 
         // stream commands after the first should execute immediately
         // keep sending NUM_SAMPS_AND_MORE until there are fewer than max_samples_per_stream samples 
@@ -125,7 +124,6 @@ void usrp_rx_worker(
         stream_cmd.stream_now = true;
         stream_cmd.num_samps = samples_remaining_to_stream;
         usrp->issue_stream_cmd(stream_cmd); 
-	// usleep(20);
 	debugt = usrp->get_time_now().get_real_secs();
 	DEBUG_PRINT("RX_WORKER: issued last stream command %2.4f\n",debugt,++counter);
     }
@@ -137,7 +135,6 @@ void usrp_rx_worker(
         stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
         stream_cmd.num_samps = samples_remaining_to_stream;
         usrp->issue_stream_cmd(stream_cmd); 
-	// usleep(20);
     }
 
 

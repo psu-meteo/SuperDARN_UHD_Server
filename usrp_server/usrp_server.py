@@ -49,10 +49,10 @@ RMSG_FAILURE = -1
 RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
-RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.ksr/restrict.dat.inst'
+RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.mcm/restrict.dat.inst'
 nSwings = 2 
 
-debug = True 
+debug = False 
 
 DEFAULT_USRP_MIXING_FREQ = 13000
 
@@ -93,9 +93,9 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.4
-      elif int_time == 3.3:
-          overhead_time = 0.3
+         overhead_time = 0.5
+      elif int_time == 3.2:
+          overhead_time = 0.4
       elif int_time == 2.9:
          overhead_time = 0.05
       elif int_time == 1:
@@ -249,7 +249,6 @@ class usrpSockManager():
 
 
    def eval_client_return(self, cmd, fcn=None):
-      print("command is: ",cmd)
       if fcn is None: # default receive function
          client_return = cmd.client_return()
       else:
@@ -734,8 +733,7 @@ class scanManager():
      ### rawData, metaData, recordTime = self.get_clr_freq_raw_data()
         RHM = self.RHM
         rawData, metaData, recordTime = RHM.clearFreqRawDataManager.get_raw_data()
-        metaData['usrp_fcenter']=RHM.mixingFreqManager.current_mixing_freq
-
+    
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         RHM.clearFreqRawDataManager.select_clear_freq.acquire()
         self.logger.debug("clear_freq_range: {} on beam {} angle {}".format(self.clear_freq_range_list[iPeriod], beamNo, beam_angle))
@@ -785,14 +783,10 @@ class RadarHardwareManager:
         self.exit_usrp_server = False
  
         self.ini_file_init()
-        self.logger.info('init file')
         self.usrp_init()
-        self.logger.info('usrp init')
         self.rxfe_init()
-        self.logger.info('rxfe init')
         #self.test_rxfe_control() # toggle all amp and att stages on and off for testing
         self.cuda_init()
-        self.logger.info('cuda init')
 
         self.nRegisteredChannels = 0  # number of channels after compatibility check
         self.n_SetParameterHandlers_active = 0 
@@ -992,7 +986,6 @@ class RadarHardwareManager:
         self.array_nBeams    = int(  self.ini_array_settings['nbeams'] )
         self.array_x_spacing = float(self.ini_array_settings['x_spacing'] ) # meters 
         self.hardwareLimit_freqRange = [float(array_config['hardware_limits']['minimum_tfreq'] ) /1000, float(array_config['hardware_limits']['maximum_tfreq'] )/1000] # converted to kHz
-        self.logger.info("Array initialization done.")
 
     def usrp_init(self):
         self.usrpManager = usrpSockManager(self)
@@ -1797,7 +1790,8 @@ class RadarHardwareManager:
                   ch.scanManager.period_finished()
    
     def apply_channel_scaling(self, nChannelsWillBeAdded=0):
-        # self.gain_control_divide_by_nChannels(nChannelsWillBeAdded)
+
+        # self.gain_control_divide_by_nChannels(self, nChannelsWillBeAdded)
         self.no_channel_gain_control()
 
 
@@ -1811,8 +1805,8 @@ class RadarHardwareManager:
         nChannels = len(self.channels) + nChannelsWillBeAdded
         self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.scaling_factor_tx_total, nChannels))
         for ch in self.channels + self.newChannelList:
-#            ch.channelScalingFactor = self.scaling_factor_tx_total
-            ch.channelScalingFactor = 1.5 / nChannels * self.scaling_factor_tx_total
+            ch.channelScalingFactor = self.scaling_factor_tx_total
+#            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
 
     # normalize
     def calc_normalize_and_mute_factors(RHM, main_samples, back_samples):
@@ -2910,24 +2904,19 @@ class RadarChannelHandler:
         self.received_first_SETPAR = False
         self.logger.debug('SetActiveHandler starting')
 
+        # receive all data from control program        
         scan_num_beams         = recv_dtype(self.conn, np.int32)
-        print("scan_num_beams",scan_num_beams)
         fixFreq                = recv_dtype(self.conn, np.int32)
-        print("fixFreq",fixFreq)
         clrfreq_start_list     = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        print(clrfreq_start_list)
         clrfreq_bandwidth_list = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        print(clrfreq_bandwidth_list)
         scan_beam_list         = recv_dtype(self.conn, np.int32, nitems = scan_num_beams)
-        print(scan_beam_list)
-        
         syncBeams              = recv_dtype(self.conn, np.int32)
         scan_time_sec          = recv_dtype(self.conn, np.int32)  
         scan_time_us           = recv_dtype(self.conn, np.int32) 
         integration_time_sec   = recv_dtype(self.conn, np.int32)  
         integration_time_us    = recv_dtype(self.conn, np.int32)  
         start_period           = recv_dtype(self.conn, np.int32)
-          
+ 
         integration_time = integration_time_sec + integration_time_us/1e6
         scan_time = scan_time_sec + scan_time_us/1e6 
 

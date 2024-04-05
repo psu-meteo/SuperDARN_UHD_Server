@@ -19,13 +19,13 @@ from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, 
 from radar_config_constants import *
 
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
-RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.ksr/restrict.dat.inst'
+RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
 SAVE_CLEAR_FREQUENCY_SEARCH = False 
 CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
 
 
-DEBUG = 1
+DEBUG = 0
 def dbPrint(msg):
    if DEBUG:
      print("clear_frequency_search.py : " + msg)
@@ -81,7 +81,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
         clr_time = time.time()
         pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freq_vector':freq_vector,  'power':spectrum_power, 'clear_freq_range':clear_freq_range, 'phasing_vector':phasing_vector, 'beam_angle':beam_angle}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
-    return np.round(tfreq), noise
+    return tfreq, noise
 
 def mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies):
     import pdb
@@ -107,7 +107,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     # find lowest power channel
     clrfreq_idx = np.argmin(channel_power) 
     
-    clrfreq = spectrum_freqs[clrfreq_idx] / 1e3
+    clrfreq = int(spectrum_freqs[clrfreq_idx] / 1e3)
     noise = channel_power[clrfreq_idx]
     
     return clrfreq, noise

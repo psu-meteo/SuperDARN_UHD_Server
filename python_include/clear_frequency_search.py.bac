@@ -18,18 +18,14 @@ from rosmsg import *
 from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, beamform_uhd_samples
 from radar_config_constants import *
 
-MIN_CLRFREQ_DELAY = .20 # TODO: lower this?
-CLEAR_FREQUENCY_FILTER_FUDGE_FACTOR = 1.5
-CLRFREQ_RES = 2e3 # fft frequency resolution in kHz
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
 RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
-OBEY_RESTRICTED_FREQS = True 
 
 SAVE_CLEAR_FREQUENCY_SEARCH = False 
 CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
 
 
-DEBUG = 1
+DEBUG = 0
 def dbPrint(msg):
    if DEBUG:
      print("clear_frequency_search.py : " + msg)
@@ -48,46 +44,42 @@ def read_restrict_file(restrict_file):
 
     return restricted_frequencies; 
 
-def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle):
-    # unpack meta data 
-    antennas = sample_meta_data['antenna_list']
-    num_samples = sample_meta_data['number_of_samples']
-    tfreq = np.mean(clear_freq_range)
-    x_spacing = sample_meta_data['x_spacing']
+def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_frequencies, clear_freq_range, beam_angle, smsep):
+    # unpack meta data
+    antennas = np.array(sample_meta_data['antenna_list'])
+    num_samples = int(sample_meta_data['number_of_samples'])
 
-    usrp_center_freq = sample_meta_data['usrp_fcenter'] # center frequency, in kHz..
-    usrp_sampling_rate = sample_meta_data['usrp_rf_rate']
+    # calculate phasing vector 
+    phase_increment = calc_phase_increment(beam_angle, np.mean(clear_freq_range) * 1000, sample_meta_data['x_spacing'])
+    phasing_vector =np.array([rad_to_rect(ant * phase_increment) for ant in antennas])
 
-    # calculate phasing matrix 
-    phase_increment = calc_phase_increment(beam_angle, tfreq, x_spacing)
-    phasing_matrix = [rad_to_rect(ant * phase_increment) for ant in antennas]
+    # mute back array antennas
+    phasing_vector[np.logical_and(antennas > 15, antennas < 20)] = 0
 
     # apply beamforming 
-    beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
+    #beamformed_samples = beamform_uhd_samples(raw_samples, phasing_matrix, num_samples, antennas, False)
+    beamformed_samples = np.array(phasing_vector * np.matrix(raw_samples))[0]
 
-    # apply spectral estimation (takes about 20-40 ms) TODO: why [0]?
-    spectrum_power = fft_clrfreq_samples(raw_samples)[0]
+    # apply spectral estimation 
+    spectrum_power = fft_clrfreq_samples(beamformed_samples)
+
    
     # calculate spectrum range of rf samples given sampling rate and center frequency
-    fstart_actual = usrp_center_freq * 1e3 - usrp_sampling_rate / 2.0 
-    fstop_actual = usrp_center_freq * 1e3 + usrp_sampling_rate / 2.0 
-    spectrum_freqs = np.arange(fstart_actual, fstop_actual, CLRFREQ_RES)
+    freq_vector = np.fft.fftshift(np.fft.fftfreq(num_samples, 1/sample_meta_data['usrp_rf_rate'])) + sample_meta_data['usrp_fcenter']*1000
  
     # mask restricted frequencies
     if restricted_frequencies:
-        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, spectrum_freqs, restricted_frequencies)
+        spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, freq_vector, restricted_frequencies)
    
     # search for a clear frequency within the given frequency range
-    fstart = clear_freq_range[0] * 1e3
-    fstop =  clear_freq_range[1] * 1e3
-
-    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop)
+    clear_bw = 4e6/smsep
+    tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, freq_vector, clear_freq_range[0] * 1e3, clear_freq_range[1] * 1e3, clear_bw = clear_bw)
     
     if SAVE_CLEAR_FREQUENCY_SEARCH:
         import pickle
         import time
         clr_time = time.time()
-        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freqs':spectrum_freqs,  'power':spectrum_power, 'fstart':fstart, 'fstop':fstop}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
+        pickle.dump({'time':clr_time, 'raw_samples': raw_samples, 'sample_data':sample_meta_data, 'clrfreq':tfreq, 'noise':noise, 'freq_vector':freq_vector,  'power':spectrum_power, 'clear_freq_range':clear_freq_range, 'phasing_vector':phasing_vector, 'beam_angle':beam_angle}, open(CLEAR_FREQUENCY_DUMP_DIR + 'clrfreq_dump.'  + str(clr_time) + '.pickle', 'wb'))
 
     return tfreq, noise
 
@@ -127,16 +119,25 @@ def fft_clrfreq_samples(samples):
 
 def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, clrfreq_rate_requested):
     dbPrint("enter record_clrfreq_raw_samples")
+    num_clrfreq_samples = int(num_clrfreq_samples)
     output_samples_list     = []
     output_antenna_idx_list = []
     clrfreq_rate_actual = 0
 
     # gather current UHD time
     dbPrint("send usrp_get_time")
-    gettime_cmd = usrp_get_time_command(usrp_sockets[0])
+    gettime_cmd = usrp_get_time_command(usrp_sockets)
     gettime_cmd.transmit()
-     
-    usrptime  = gettime_cmd.recv_time(usrp_sockets[0])
+    
+    usrp_times = []
+    for sock in usrp_sockets:
+        try:
+            usrp_times.append( gettime_cmd.recv_time(sock))
+        except:
+            pass
+
+    usrptime = usrp_times[0]
+
     gettime_cmd.client_return()
 
     # schedule clear frequency search in MIN_CLRFREQ_DELAY seconds
@@ -153,19 +154,19 @@ def record_clrfreq_raw_samples(usrp_sockets, num_clrfreq_samples, center_freq, c
     # grab raw samples
     for usrpsock in usrp_sockets:
         try:
-            output_antenna_idx_list.append(recv_dtype(usrpsock, np.int32))
+            antenna_no_tmp = recv_dtype(usrpsock, np.int32)
             clrfreq_rate_actual = recv_dtype(usrpsock, np.float64)
             assert clrfreq_rate_actual == clrfreq_rate_requested
 
             #dbPrint("antenna {} clrfreq rate is: {} (requested: {})".format(output_antenna_idx_list[-1], clrfreq_rate_actual, clrfreq_rate_requested))
-            dbPrint("antenna {} waiting for {} samples".format(output_antenna_idx_list[-1], int(num_clrfreq_samples)))
+            dbPrint("antenna {} waiting for {} samples".format(antenna_no_tmp, int(num_clrfreq_samples)))
            
             sample_buf = recv_dtype(usrpsock, np.int16, nitems = int(2 * num_clrfreq_samples))
 
             output_samples_list.append(sample_buf[0::2] + 1j * sample_buf[1::2])
+            output_antenna_idx_list.append(antenna_no_tmp)
         except:
-            dbPrint("CLRFREQ response from {} failed, stuffing with zeros".format(usrpsock))
-            output_samples_list.append(1j * np.zeros(num_clrfreq_samples))
+            dbPrint("CLRFREQ response from {} failed.".format(usrpsock))
 
     
     try:
