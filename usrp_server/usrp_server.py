@@ -23,6 +23,7 @@ import copy
 import posix_ipc
 import mmap
 import pickle
+import struct
 
 
 sys.path.insert(0, '../python_include')
@@ -433,6 +434,166 @@ class usrpMixingFreqManager():
           upper = channel.scanManager.fixFreq
        return lower, upper
 
+class clearFrequencyService():
+        
+    def __init__(self):
+        # Shared Memory Object and Semaphores
+        self.SHM_NAME = "/shared_memory"                 # For Data Transmission
+        self.SHM_SIZE = 2 * 2500 * 4  # 2x2500 array of integers (each integer is 4 bytes)
+        self.SEM_SERVER = "/sem_server"                  # For Synchronization 
+        self.SEM_CLIENT = "/sem_client"
+        self.ACTIVE_CLIENTS_SHM_NAME = "/active_clients" # For closing on exit of last client
+
+        self.RETRY_ATTEMPTS = 5
+        self.RETRY_DELAY = 2  # seconds
+        
+        self.shm_fd = self.initialize_shared_memory()
+        self.active_clients_fd = self.initialize_active_clients_counter()
+        self.sem_server, self.sem_client = self.initialize_semaphores()
+        print("[Frequency Client] Done Initializing...\n\n")
+
+    def initialize_shared_memory(self):
+        """ Initialize Shared Memory Object for data transmission between Server 
+            and Clients. Attempts to check for already initialized object (from 
+            server).
+
+        Returns:
+            Integer: On success, returns file descriptor of shared memory object.
+        """
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.shm_fd = os.open(f"/dev/shm{self.SHM_NAME}", os.O_RDWR)
+                print("[Frequency Client] Created Shared Memory Object...")
+                return self.shm_fd
+            except FileNotFoundError:
+                print("[Frequency Client] Shared Memory Object not found. Retrying...")
+                attempts += 1
+                time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Shared Memory Object after multiple attempts. Exiting.")
+        exit(1)
+
+    def initialize_semaphores(self):
+        """ Initializes Synchronization Semaphores. Attempts to check for already 
+            initialized object (from server).
+
+        Returns:
+            Tuple: On success, returns tuple of semaphores (sem_server, sem_client).
+        """
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Semaphores (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.sem_server = posix_ipc.Semaphore(self.SEM_SERVER)
+                self.sem_client = posix_ipc.Semaphore(self.SEM_CLIENT)
+                print("[Frequency Client] Shared Memory and Semaphores ready...")
+                return self.sem_server, self.sem_client
+            except posix_ipc.ExistentialError:
+                print("[Frequency Client] Semaphore(s) not found. Retrying...")
+            attempts += 1
+            time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Semaphores after multiple attempts. Exiting.")
+        exit(1)
+
+    def initialize_active_clients_counter(self):
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Active Clients Counter (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.active_clients_fd = os.open(f"/dev/shm{self.ACTIVE_CLIENTS_SHM_NAME}", os.O_RDWR | os.O_CREAT, 0o666)
+                os.ftruncate(self.active_clients_fd, struct.calcsize('i'))  # Ensure the size of the shared memory object is large enough for an integer
+                # Initialize counter to 0 if it's the first time
+                with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+                    m.seek(0)
+                    current_value = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+                    if current_value < 0 or current_value > 1000:  # Arbitrary threshold to detect uninitialized state
+                        m.seek(0)
+                        m.write(struct.pack('i', 0))
+                print("[Frequency Client] Created Active Clients Counter...")
+                return # active_clients_fd
+            except FileNotFoundError:
+                print("[Frequency Client] Active Clients Counter not found. Retrying...")
+            except PermissionError:
+                print("[Frequency Client] Permission error while accessing Active Clients Counter. Retrying...")
+            except OSError as e:
+                print(f"[Frequency Client] OS error while accessing Active Clients Counter: {e}. Retrying...")
+            attempts += 1
+            time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Active Clients Counter after multiple attempts. Exiting.")
+        exit(1)
+
+    def increment_active_clients(self):
+        with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+            m.seek(0)
+            active_clients = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+            active_clients += 1
+            m.seek(0)
+            m.write(struct.pack('i', active_clients))
+            return active_clients
+
+    def decrement_active_clients(self):
+        with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+            m.seek(0)
+            active_clients = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+            active_clients -= 1
+            m.seek(0)
+            m.write(struct.pack('i', active_clients))
+            return active_clients
+        
+    def sendSamples(self, raw_samples):
+        """ Waits for client requests, then processes server data, writes client 
+        data, and requests server to process new data. When process is 
+        terminated, the try/finally block cleans up.
+        """
+        
+        # Get in Queue
+        active_clients = self.increment_active_clients()
+        print(f"[Frequency Client] Active clients count: {active_clients}\n")
+        
+        try:
+            # Map shared memory object as m
+            with mmap.mmap(self.shm_fd, self.SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:  
+                # Await for a Client Request
+                print("[Frequency Client] Awaiting Client Request...\n")
+                self.sem_client.acquire()
+                print("[Frequency Client] Acquired Client Request...")
+                
+                # Read data from shared memory object
+                print("[Frequency Client] Reading data from Shared Memory...")
+                m.seek(0)
+                data = struct.unpack('i' * (2 * 2500), m.read(self.SHM_SIZE))
+                print("[Frequency Client] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
+                print("[Frequency Client] Done reading data from Shared Memory...")
+                    
+                # Write new data to Shared Memory Object
+                time.sleep(2)  # Simulate processing time
+                m.seek(0)
+                new_data = [[i for i in range(raw_samples)] for i in range(2)] 
+                m.write(struct.pack('i' * (2 * 2500), *new_data))
+                
+                # Request Server 
+                print("[Frequency Client] Requesting Server Response...")
+                self.sem_server.release()
+        except KeyboardInterrupt:
+            print("[Frequency Client] Keyboard interrupt received. Exiting...")
+        finally:
+            # Clean up
+            active_clients = self.decrement_active_clients(self.active_clients_fd)
+            print(f"[Frequency Client] Active clients count after decrement: {active_clients}")
+
+            os.close(self.shm_fd)
+            os.close(self.active_clients_fd)
+            self.sem_server.close()
+            self.sem_client.close()
+
+            # Special: No active clients remaining; unlink shared memory and semaphores 
+            if active_clients == 0:
+                print("[Frequency Client] No active clients remaining, cleaning up shared resources.")
+                posix_ipc.unlink_shared_memory(self.SHM_NAME)
+                posix_ipc.unlink_shared_memory(self.ACTIVE_CLIENTS_SHM_NAME)
+                posix_ipc.unlink_semaphore(self.SEM_SERVER)
+                posix_ipc.unlink_semaphore(self.SEM_CLIENT)
 
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
@@ -445,6 +606,7 @@ class clearFrequencyRawDataManager():
         self.repeat_request_for_2nd_period = False
 
         self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
+        self.clearFreqService = clearFrequencyRawDataManager()
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
@@ -512,6 +674,7 @@ class clearFrequencyRawDataManager():
             self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. Recoring new data ".format(data_age))
             self.logger.debug('start record_clrfreq_raw_samples')
             self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
+            self.clearFreqService.sendSamples(self.rawData)
             self.logger.debug('end record_clrfreq_raw_samples')
     
             self.metaData['antenna_list'] = self.antennaList
