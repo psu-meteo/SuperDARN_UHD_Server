@@ -29,8 +29,8 @@ def kaiser_filter_s0(nTaps, channelFreqVec, samplingRate, normalize = True):
            for iTap in range(nTaps):
                phi = 2 * np.pi * channelFreq * iTap / samplingRate # phase of downmixing frequency
                k = scipy.special.i0((2 * beta / m) * np.sqrt(iTap * (m - iTap)))
-               filterData[iChannel,iTap,0] = gain * (k / b) * np.cos(phi)
-               filterData[iChannel,iTap,1] = gain * (k / b) * np.sin(phi) # still real filter, imag part result from multiplication with oscillator
+               filterData[iChannel,iTap,0] = gain * (k / b)# * np.cos(phi)
+               filterData[iChannel,iTap,1] = gain * (k / b)# * np.sin(phi) # still real filter, imag part result from multiplication with oscillator
         else:
            dbPrint("filter generation: channel {}: skipping because undefined".format(iChannel))
 

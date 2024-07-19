@@ -107,7 +107,7 @@ def find_clrfreq_from_spectrum(spectrum_power, spectrum_freqs, fstart, fstop, cl
     # find lowest power channel
     clrfreq_idx = np.argmin(channel_power) 
     
-    clrfreq = spectrum_freqs[clrfreq_idx] / 1e3
+    clrfreq = int(spectrum_freqs[clrfreq_idx] / 1e3)
     noise = channel_power[clrfreq_idx]
     
     return clrfreq, noise

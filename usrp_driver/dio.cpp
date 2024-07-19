@@ -54,6 +54,7 @@
 #include <queue>
 #include <iostream>
 #include <iomanip>
+#include <time.h>
 
 //Added by Alex for usrp
 #include <uhd/usrp/multi_usrp.hpp>
@@ -261,7 +262,8 @@ void send_timing_for_sequence(
     char bank_name[4];
     sprintf(bank_name, "FP0");
     int iSide;
-
+    time_t current_time;
+    struct tm *gmt;
 
     GPIOCommand c; // struct to hold command information so gpio commands can be created out of temporal order, sorted, and issued in order
     std::priority_queue<GPIOCommand, std::vector<GPIOCommand>, CompareTime> cmdq;
@@ -322,9 +324,13 @@ void send_timing_for_sequence(
     float debugt = usrp->get_time_now().get_real_secs();
 
 
-    boost::posix_time::ptime now = boost::posix_time::microsec_clock::universal_time();
+    /*    boost::posix_time::ptime now = boost::posix_time::microsec_clock::universal_time();
     std::cout << "GPIO command issue start time is: "<< to_iso_extended_string(now)<< std::endl;
-
+    */
+    
+    current_time = time(NULL);
+    gmt = gmtime(&current_time);
+    fprintf(stderr,"GPIO command issue start time is: %s", asctime(gmt));
 
     DEBUG_PRINT("DIO: pushed gpio commands at usrp_time %2.4f\n", debugt);
     // issue gpio commands in time sorted order 
@@ -341,9 +347,13 @@ void send_timing_for_sequence(
         cmdq.pop();
     }
 
-
+    /*
     now = boost::posix_time::microsec_clock::universal_time();
     std::cout << "GPIO command issue end time is: "<< to_iso_extended_string(now)<< std::endl;
+    */
+    current_time = time(NULL);
+    gmt = gmtime(&current_time);
+    fprintf(stderr,"GPIO command issue end time is: %s", asctime(gmt));
 
     debugt = usrp->get_time_now().get_real_secs();
     DEBUG_PRINT("All DIO commands sent! clock time %2.4f\n",debugt);

@@ -23,6 +23,7 @@ import copy
 import posix_ipc
 import mmap
 import pickle
+import struct
 
 
 sys.path.insert(0, '../python_include')
@@ -49,10 +50,10 @@ RMSG_FAILURE = -1
 RADAR_STATE_TIME = .0001
 CHANNEL_STATE_TIMEOUT = 12000
 # TODO: move this out to a config file
-RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
+RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.mcm/restrict.dat.inst'
 nSwings = 2 
 
-debug = True 
+debug = False 
 
 DEFAULT_USRP_MIXING_FREQ = 13000
 
@@ -96,12 +97,18 @@ class integrationTimeManager():
          overhead_time = 0.175
       elif int_time == 2.9:
          overhead_time = 0.05
+         overhead_time = 0.5
+      elif int_time == 3.2:
+          overhead_time = 0.4
+      elif int_time == 2.9:
+         overhead_time = 0.05
       elif int_time == 1:
          overhead_time = 0.05 # TODO adjust and test
       else:
-         error_str = "No overhead time defined for {} s, please add it...".format(int_time)
+         overhead_time = 0.5
+         error_str = "No overhead time defined for {} s, using 0.7  please add it...".format(int_time)
          self.RHM.logger.error(error_str)
-         raise ValueError(error_str)
+#         raise ValueError(error_str)
       return overhead_time
     
 
@@ -430,6 +437,166 @@ class usrpMixingFreqManager():
           upper = channel.scanManager.fixFreq
        return lower, upper
 
+class clearFrequencyService():
+        
+    def __init__(self):
+        # Shared Memory Object and Semaphores
+        self.SHM_NAME = "/shared_memory"                 # For Data Transmission
+        self.SHM_SIZE = 2 * 2500 * 4  # 2x2500 array of integers (each integer is 4 bytes)
+        self.SEM_SERVER = "/sem_server"                  # For Synchronization 
+        self.SEM_CLIENT = "/sem_client"
+        self.ACTIVE_CLIENTS_SHM_NAME = "/active_clients" # For closing on exit of last client
+
+        self.RETRY_ATTEMPTS = 5
+        self.RETRY_DELAY = 2  # seconds
+        
+        self.shm_fd = self.initialize_shared_memory()
+        self.active_clients_fd = self.initialize_active_clients_counter()
+        self.sem_server, self.sem_client = self.initialize_semaphores()
+        print("[Frequency Client] Done Initializing...\n\n")
+
+    def initialize_shared_memory(self):
+        """ Initialize Shared Memory Object for data transmission between Server 
+            and Clients. Attempts to check for already initialized object (from 
+            server).
+
+        Returns:
+            Integer: On success, returns file descriptor of shared memory object.
+        """
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.shm_fd = os.open(f"/dev/shm{self.SHM_NAME}", os.O_RDWR)
+                print("[Frequency Client] Created Shared Memory Object...")
+                return self.shm_fd
+            except FileNotFoundError:
+                print("[Frequency Client] Shared Memory Object not found. Retrying...")
+                attempts += 1
+                time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Shared Memory Object after multiple attempts. Exiting.")
+        exit(1)
+
+    def initialize_semaphores(self):
+        """ Initializes Synchronization Semaphores. Attempts to check for already 
+            initialized object (from server).
+
+        Returns:
+            Tuple: On success, returns tuple of semaphores (sem_server, sem_client).
+        """
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Semaphores (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.sem_server = posix_ipc.Semaphore(self.SEM_SERVER)
+                self.sem_client = posix_ipc.Semaphore(self.SEM_CLIENT)
+                print("[Frequency Client] Shared Memory and Semaphores ready...")
+                return self.sem_server, self.sem_client
+            except posix_ipc.ExistentialError:
+                print("[Frequency Client] Semaphore(s) not found. Retrying...")
+            attempts += 1
+            time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Semaphores after multiple attempts. Exiting.")
+        exit(1)
+
+    def initialize_active_clients_counter(self):
+        attempts = 0
+        while attempts < self.RETRY_ATTEMPTS:
+            try:
+                print(f"[Frequency Client] Attempting to initialize Active Clients Counter (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                self.active_clients_fd = os.open(f"/dev/shm{self.ACTIVE_CLIENTS_SHM_NAME}", os.O_RDWR | os.O_CREAT, 0o666)
+                os.ftruncate(self.active_clients_fd, struct.calcsize('i'))  # Ensure the size of the shared memory object is large enough for an integer
+                # Initialize counter to 0 if it's the first time
+                with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+                    m.seek(0)
+                    current_value = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+                    if current_value < 0 or current_value > 1000:  # Arbitrary threshold to detect uninitialized state
+                        m.seek(0)
+                        m.write(struct.pack('i', 0))
+                print("[Frequency Client] Created Active Clients Counter...")
+                return # active_clients_fd
+            except FileNotFoundError:
+                print("[Frequency Client] Active Clients Counter not found. Retrying...")
+            except PermissionError:
+                print("[Frequency Client] Permission error while accessing Active Clients Counter. Retrying...")
+            except OSError as e:
+                print(f"[Frequency Client] OS error while accessing Active Clients Counter: {e}. Retrying...")
+            attempts += 1
+            time.sleep(self.RETRY_DELAY)
+        print("[Frequency Client] Failed to initialize Active Clients Counter after multiple attempts. Exiting.")
+        exit(1)
+
+    def increment_active_clients(self):
+        with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+            m.seek(0)
+            active_clients = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+            active_clients += 1
+            m.seek(0)
+            m.write(struct.pack('i', active_clients))
+            return active_clients
+
+    def decrement_active_clients(self):
+        with mmap.mmap(self.active_clients_fd, struct.calcsize('i'), mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:
+            m.seek(0)
+            active_clients = struct.unpack('i', m.read(struct.calcsize('i')))[0]
+            active_clients -= 1
+            m.seek(0)
+            m.write(struct.pack('i', active_clients))
+            return active_clients
+        
+    def sendSamples(self, raw_samples):
+        """ Waits for client requests, then processes server data, writes client 
+        data, and requests server to process new data. When process is 
+        terminated, the try/finally block cleans up.
+        """
+        
+        # Get in Queue
+        active_clients = self.increment_active_clients()
+        print(f"[Frequency Client] Active clients count: {active_clients}\n")
+        
+        try:
+            # Map shared memory object as m
+            with mmap.mmap(self.shm_fd, self.SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:  
+                # Await for a Client Request
+                print("[Frequency Client] Awaiting Client Request...\n")
+                self.sem_client.acquire()
+                print("[Frequency Client] Acquired Client Request...")
+                
+                # Read data from shared memory object
+                print("[Frequency Client] Reading data from Shared Memory...")
+                m.seek(0)
+                data = struct.unpack('i' * (2 * 2500), m.read(self.SHM_SIZE))
+                print("[Frequency Client] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
+                print("[Frequency Client] Done reading data from Shared Memory...")
+                    
+                # Write new data to Shared Memory Object
+                time.sleep(2)  # Simulate processing time
+                m.seek(0)
+                new_data = [[i for i in range(raw_samples)] for i in range(2)] 
+                m.write(struct.pack('i' * (2 * 2500), *new_data))
+                
+                # Request Server 
+                print("[Frequency Client] Requesting Server Response...")
+                self.sem_server.release()
+        except KeyboardInterrupt:
+            print("[Frequency Client] Keyboard interrupt received. Exiting...")
+        finally:
+            # Clean up
+            active_clients = self.decrement_active_clients(self.active_clients_fd)
+            print(f"[Frequency Client] Active clients count after decrement: {active_clients}")
+
+            os.close(self.shm_fd)
+            os.close(self.active_clients_fd)
+            self.sem_server.close()
+            self.sem_client.close()
+
+            # Special: No active clients remaining; unlink shared memory and semaphores 
+            if active_clients == 0:
+                print("[Frequency Client] No active clients remaining, cleaning up shared resources.")
+                posix_ipc.unlink_shared_memory(self.SHM_NAME)
+                posix_ipc.unlink_shared_memory(self.ACTIVE_CLIENTS_SHM_NAME)
+                posix_ipc.unlink_semaphore(self.SEM_SERVER)
+                posix_ipc.unlink_semaphore(self.SEM_CLIENT)
 
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
@@ -442,6 +609,7 @@ class clearFrequencyRawDataManager():
         self.repeat_request_for_2nd_period = False
 
         self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
+        self.clearFreqService = clearFrequencyRawDataManager()
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
@@ -509,6 +677,7 @@ class clearFrequencyRawDataManager():
             self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. Recoring new data ".format(data_age))
             self.logger.debug('start record_clrfreq_raw_samples')
             self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
+            self.clearFreqService.sendSamples(self.rawData)
             self.logger.debug('end record_clrfreq_raw_samples')
     
             self.metaData['antenna_list'] = self.antennaList
@@ -582,11 +751,12 @@ class scanManager():
         self.next_clrFreq_result    = None 
         self.isPrePeriod = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast = False # to handle last trigger_next_swing() call
+        self.logger = logging.getLogger('scanManager')
 
  ###       self.get_clr_freq_raw_data  = None # handle to RHM:ClearFrequencyRawDatamanager.get_raw_data()
+        self.logger.debug("in scanManager __init__. Setting isInitSetParameter true")
         self.isInitSetParameter = True
         self.restricted_frequency_list = restricted_frequency_list
-        self.logger = logging.getLogger('scanManager')
 
         self.syncBeams  = False
         self.beam_times = None
@@ -650,6 +820,7 @@ class scanManager():
         self.next_clrFreq_result    = None 
         self.isPrePeriod            = True # is vert first trigger_next_period() call that just triggers first period but does not collect cuda data
         self.isPostLast             = False # to handle last trigger_next_swing() call
+        self.logger.debug("in init_new_scan. Setting isInitSetParameter true")
         self.isInitSetParameter     = True
         self.isFirstPeriod          = True
 
@@ -805,7 +976,7 @@ class RadarHardwareManager:
         self.integration_time_manager = integrationTimeManager(self)
         self.nSequences_per_period = 0
 
-        self.auto_collect_clrfrq_after_rx = True
+        self.auto_collect_clrfrq_after_rx = False
     def run(self):
         def spawn_channel(conn):
             # start new radar channel handler
@@ -1800,7 +1971,8 @@ class RadarHardwareManager:
         nChannels = len(self.channels) + nChannelsWillBeAdded
         self.logger.debug("Setting channel scaling factor to: totalScaligFactor / nChannels = {}/ {} ".format(self.scaling_factor_tx_total, nChannels))
         for ch in self.channels + self.newChannelList:
-            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
+            ch.channelScalingFactor = self.scaling_factor_tx_total
+#            ch.channelScalingFactor = 1 / nChannels * self.scaling_factor_tx_total
 
     # normalize
     def calc_normalize_and_mute_factors(RHM, main_samples, back_samples):
@@ -1910,10 +2082,17 @@ class RadarHardwareManager:
     
         for iChannel, channel in enumerate(RHM.channels):
             if channel.processing_state is CS_PROCESSING:
-                bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
+                cur_beam=channel.ctrlprm_struct.payload['rbeam']
+                cur_freq=channel.ctrlprm_struct.payload['rfreq']
+                # bmazm         = calc_beam_azm_rad(RHM.array_nBeams, channel.scanManager.current_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
+                bmazm         = calc_beam_azm_rad(RHM.array_nBeams, cur_beam, RHM.array_beam_sep)    # calculate beam azimuth from transmit beam number          
                 channel.logger.debug("rx beamforming: ch {}, beam {}".format(channel.cnum, channel.scanManager.current_beam))
                 clrFreqResult = channel.scanManager.get_current_clearFreq_result()
-                pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+                # pshift        = calc_phase_increment(bmazm, clrFreqResult[0] * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+                pshift        = calc_phase_increment(bmazm, cur_freq * 1000., RHM.array_x_spacing)       # calculate antenna-to-antenna phase shift for steering at a frequency        
+                channel.logger.debug("rx beamforming: ch {}, frequency {}".format(channel.cnum, cur_freq, clrFreqResult[0]))
+
+
                 
                 # MAIN ARRAY
                 first_pol_ant_idx = [ant_idx for ant_idx in RHM.antenna_idx_list_main if ant_idx < 20]
@@ -1929,13 +2108,21 @@ class RadarHardwareManager:
                 abs_max_value = max(abs(real_mat).max(),  abs(imag_mat).max())
                 RHM.logger.info("Abs max_value is {} (int16_max= {}, max_value / int16_max = {} ) ".format(abs_max_value, maxInt16value, abs_max_value / maxInt16value ))                
 
-                # check for clipping
-                if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
-                   RHM.logger.info("Overflow error while casting beamformed rx samples to complex int16s.")
-        
+                real_mx = np.max(np.abs(real_mat))
+                imag_mx = np.max(np.abs(imag_mat))
+                if (real_mx > maxInt16value) or (imag_mx > maxInt16value ):
                    OverflowError("calc_beamforming: overflow error in casting data to complex int")
-                   real_mat = np.clip(real_mat, minInt16value, maxInt16value)
-                   imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
+                   scale_value = maxInt16value/np.max([real_mx,imag_mx])
+                   real_mat = scale_value*real_mat
+                   imag_mat = scale_value*imag_mat
+
+                # # check for clipping
+                # if (real_mat > maxInt16value).any() or (real_mat < minInt16value).any() or (imag_mat > maxInt16value).any() or (imag_mat < minInt16value).any():
+                #    RHM.logger.info("Overflow error while casting beamformed rx samples to complex int16s.")
+        
+                #    OverflowError("calc_beamforming: overflow error in casting data to complex int")
+                #    real_mat = np.clip(real_mat, minInt16value, maxInt16value)
+                #    imag_mat = np.clip(imag_mat, minInt16value, maxInt16value)
 
                 complexInt32_pack_mat = (np.uint32(np.int16(real_mat)) << 16) + np.uint16(imag_mat) 
                 beamformed_main_samples[iChannel] = complexInt32_pack_mat.tolist()[0]
@@ -2043,6 +2230,7 @@ class RadarChannelHandler:
         #   UPDATE_SITE_SETTINGS : self.UpdateSiteSettingsHandler,\
             GET_PARAMETERS       : self.GetParametersHandler,\
             SET_PARAMETERS       : self.SetParametersHandler,\
+            SET_PARAMETERS_I     : self.SetParametersHandler,\
             PING                 : self.PingHandler,\
         #   OKAY                 : self.OkayHandler,\
         #   NOOP                 : self.NoopHandler,\
@@ -2541,51 +2729,54 @@ class RadarChannelHandler:
            RHM.n_SetParameterHandlers_active -= 1
            return RMSG_SUCCESS
 
+
+#        self.ctrlprm_struct.receive(self.conn)
         self.logger.debug("ch {}: Received from ROS SetParameter for swing {} : tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, current_swing, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
         self.logger.debug("swing state {}".format(self.state[current_swing]))
         # wait if RHM.trigger_next_swing() is slower... 
         self._waitForState(current_swing, [CS_INACTIVE, CS_PROCESSING, CS_LAST_SWING])   
 
-
         # period not jet triggered
-        if self.state[current_swing] == CS_INACTIVE: #or self.active_state == CS_READY:#  not needed with change of site.c
-           
+        if self.state[current_swing] == CS_INACTIVE:# or self.active_state == CS_READY:#  not needed with change of site.c
+
            self.logger.debug("Ch {} waiting for Parameter semaphore...".format(self.cnum)) 
            RHM.set_par_semaphore.acquire()
            self.logger.debug("Ch {} acquired semaphore, setting parameter".format(self.cnum)) 
-
+           
            if self.state[current_swing] == CS_READY:
               self.logger.debug("Channel already initialized, but not triggered, Reinitializing it...")
               self.state[current_swing] = CS_INACTIVE
-
+              
            self.ctrlprm_struct.receive(self.conn)
            self.logger.debug("ch {}: Received from ROS: tbeam={}, rbeam={}, tfreq={}, rfreq={}".format(self.cnum, self.ctrlprm_struct.payload['tbeam'], self.ctrlprm_struct.payload['rbeam'], self.ctrlprm_struct.payload['tfreq'], self.ctrlprm_struct.payload['rfreq']))
-
+           
            if not self.CheckChannelCompatibility(): # TODO  for two swings and reset after transmit?
+              self.logger.debug("CheckChannelCompatability FAIL")
               RHM.n_SetParameterHandlers_active -= 1
               return RMSG_FAILURE
-
+              
            if self not in self.parent_RadarHardwareManager.newChannelList:
               self.parent_RadarHardwareManager.newChannelList.append(self)
               self.logger.debug("Adding ch {} to newChannelList ".format(self.cnum))
            else:
               self.logger.debug("Ch {} already in newChannelList ".format(self.cnum))
+
            RHM.set_par_semaphore.release()
            self.logger.debug("Ch {} released semaphore".format(self.cnum)) 
  
         # in middle of scan, period already triggerd. only compare with prediction
         elif self.state[current_swing] == CS_PROCESSING or self.state[current_swing] == CS_LAST_SWING: 
-         # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
+           # TODO something here is wrong: uafscan with --onesec has CS_LAST_SWING but --fast not
            self.update_ctrlprm_class("current")
            ctrlprm_old = copy.deepcopy(self.ctrlprm_struct.payload)
-
+           
            # compare received with predicted parameter
            self.ctrlprm_struct.receive(self.conn)
            for key in ctrlprm_old.keys():
               if np.any(ctrlprm_old[key] != self.ctrlprm_struct.payload[key]):
+                  self.logger.debug("ch {} rreceived new ctrl_prm {} ({}) old ctrl_prm ({})".format(self.cnum, key, self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
                   if key == "tfreq" and self.ctrlprm_struct.payload[key] == 12000: # control program always sends 2 SET_PAR. 1st one with tfreq 12MHz
                       continue
-
                   self.logger.error("ch {}: received ctrlprm_struct for {} ({}) is not equal with prediction ({})".format(self.cnum, key,self.ctrlprm_struct.payload[key], ctrlprm_old[key] ))
                   # TODO return RMSG_FAILURE
               #else:
