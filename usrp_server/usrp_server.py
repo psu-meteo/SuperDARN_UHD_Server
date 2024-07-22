@@ -609,7 +609,7 @@ class clearFrequencyRawDataManager():
         self.repeat_request_for_2nd_period = False
 
         self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
-        self.clearFreqService = clearFrequencyRawDataManager()
+        self.clearFreqService = clearFrequencyService()
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
