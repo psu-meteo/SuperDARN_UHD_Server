@@ -94,6 +94,9 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
+         overhead_time = 0.175
+      elif int_time == 2.9:
+         overhead_time = 0.05
          overhead_time = 0.5
       elif int_time == 3.2:
           overhead_time = 0.4
@@ -606,7 +609,7 @@ class clearFrequencyRawDataManager():
         self.repeat_request_for_2nd_period = False
 
         self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
-        self.clearFreqService = clearFrequencyRawDataManager()
+        self.clearFreqService = clearFrequencyService()
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
