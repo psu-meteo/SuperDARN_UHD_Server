@@ -451,7 +451,8 @@ class clearFrequencyService():
         self.RETRY_DELAY = 2  # seconds
         
         self.shm_fd = self.initialize_shared_memory()
-        self.active_clients_fd = self.initialize_active_clients_counter()
+        self.active_clients_fd = None
+        self.initialize_active_clients_counter()
         self.sem_server, self.sem_client = self.initialize_semaphores()
         print("[Frequency Client] Done Initializing...\n\n")
 
@@ -533,6 +534,7 @@ class clearFrequencyService():
             active_clients += 1
             m.seek(0)
             m.write(struct.pack('i', active_clients))
+            print(f"[Frequency Client] Incremented clients: {active_clients}\n")
             return active_clients
 
     def decrement_active_clients(self):
@@ -542,6 +544,7 @@ class clearFrequencyService():
             active_clients -= 1
             m.seek(0)
             m.write(struct.pack('i', active_clients))
+            print(f"[Frequency Client] Decremented clients: {active_clients}\n")
             return active_clients
         
     def sendSamples(self, raw_samples):
@@ -570,10 +573,28 @@ class clearFrequencyService():
                 print("[Frequency Client] Done reading data from Shared Memory...")
                     
                 # Write new data to Shared Memory Object
-                time.sleep(2)  # Simulate processing time
+                print("[Frequency Client] Writing data to Shared Memory...")    
+
+                #HACK: writes only first antenna's samples; write all antenna samples
+                trimmed_samples = raw_samples[:1] 
+
+                print("[Frequency Client] trimmed len: ", len(trimmed_samples))
+                new_data = []
+                for antenna_sample in trimmed_samples:
+                    print("[Frequency Client] sample_arr len: ", len(antenna_sample))
+                    for sample in antenna_sample:
+                        new_data.append(int(sample.real))
+                        new_data.append(int(sample.imag))
+                        
+                        # Debug: Display samples
+                        # print("[Frequency Client] Flattening samples: ", sample)
+                        # print("[Frequency Client]                   : ", new_data[-2])
+                        # print("[Frequency Client]                   : ", new_data[-1])
+                print("[Frequency Client] new_data len: ", len(new_data))
                 m.seek(0)
-                new_data = [[i for i in range(raw_samples)] for i in range(2)] 
                 m.write(struct.pack('i' * (2 * 2500), *new_data))
+                print("[Frequency Client] Writing data:\n", new_data[:10], "...")
+                print("[Frequency Client] Done writing data to Shared Memory...")
                 
                 # Request Server 
                 print("[Frequency Client] Requesting Server Response...")
@@ -582,7 +603,7 @@ class clearFrequencyService():
             print("[Frequency Client] Keyboard interrupt received. Exiting...")
         finally:
             # Clean up
-            active_clients = self.decrement_active_clients(self.active_clients_fd)
+            active_clients = self.decrement_active_clients()
             print(f"[Frequency Client] Active clients count after decrement: {active_clients}")
 
             os.close(self.shm_fd)

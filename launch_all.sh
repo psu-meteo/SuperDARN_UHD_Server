@@ -2,6 +2,10 @@
 
 #sudo ./init_network.sh &
 
+# TODO: Start Clr Freq Server w/o stalling terminal
+# Launches Clear Frequency Search Service
+# ./../Freq_Server/rs_server &
+
 errlog -name mcm.a -lp 41000 &
 #/home/radar/ros.3.6/bin/errlog -name mcm.b -lp 42000 &
 
