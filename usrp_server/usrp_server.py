@@ -438,23 +438,26 @@ class usrpMixingFreqManager():
        return lower, upper
 
 class clearFrequencyService():
-        
+    # Constants
+    ACTIVE_CLIENTS_SHM_NAME = "/active_clients"
+    RETRY_ATTEMPTS = 5
+    RETRY_DELAY = 2  # seconds
+    SAMPLES_NUM = 2500
+    ANTENNAS_NUM = 14
+
     def __init__(self):
         # Shared Memory Object and Semaphores
+        self.SHM_SIZE = self.ANTENNAS_NUM * self.SAMPLES_NUM * 4  # 14x2500 array of integers (each integer is 4 bytes)
         self.SHM_NAME = "/shared_memory"                 # For Data Transmission
-        self.SHM_SIZE = 2 * 2500 * 4  # 2x2500 array of integers (each integer is 4 bytes)
         self.SEM_SERVER = "/sem_server"                  # For Synchronization 
         self.SEM_CLIENT = "/sem_client"
-        self.ACTIVE_CLIENTS_SHM_NAME = "/active_clients" # For closing on exit of last client
-
-        self.RETRY_ATTEMPTS = 5
-        self.RETRY_DELAY = 2  # seconds
+        self.ACTIVE_CLIENTS_SHM_NAME = "/active_clients" # For Debugging
         
         self.shm_fd = self.initialize_shared_memory()
-        self.active_clients_fd = None
+        self.active_clients_fd = None 
         self.initialize_active_clients_counter()
         self.sem_server, self.sem_client = self.initialize_semaphores()
-        print("[Frequency Client] Done Initializing...\n\n")
+        print("[clearFrequencyService] Done Initializing...\n\n")
 
     def initialize_shared_memory(self):
         """ Initialize Shared Memory Object for data transmission between Server 
@@ -467,15 +470,15 @@ class clearFrequencyService():
         attempts = 0
         while attempts < self.RETRY_ATTEMPTS:
             try:
-                print(f"[Frequency Client] Attempting to initialize Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                print(f"[clearFrequencyService] Attempting to initialize Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
                 self.shm_fd = os.open(f"/dev/shm{self.SHM_NAME}", os.O_RDWR)
-                print("[Frequency Client] Created Shared Memory Object...")
+                print("[clearFrequencyService] Created Shared Memory Object...")
                 return self.shm_fd
             except FileNotFoundError:
-                print("[Frequency Client] Shared Memory Object not found. Retrying...")
+                print("[clearFrequencyService] Shared Memory Object not found. Retrying...")
                 attempts += 1
                 time.sleep(self.RETRY_DELAY)
-        print("[Frequency Client] Failed to initialize Shared Memory Object after multiple attempts. Exiting.")
+        print("[clearFrequencyService] Failed to initialize Shared Memory Object after multiple attempts. Exiting.")
         exit(1)
 
     def initialize_semaphores(self):
@@ -483,28 +486,28 @@ class clearFrequencyService():
             initialized object (from server).
 
         Returns:
-            Tuple: On success, returns tuple of semaphores (sem_server, sem_client).
+            void: On success, returns tuple of semaphores (sem_server, sem_client).
         """
         attempts = 0
         while attempts < self.RETRY_ATTEMPTS:
             try:
-                print(f"[Frequency Client] Attempting to initialize Semaphores (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                print(f"[clearFrequencyService] Attempting to initialize Semaphores (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
                 self.sem_server = posix_ipc.Semaphore(self.SEM_SERVER)
                 self.sem_client = posix_ipc.Semaphore(self.SEM_CLIENT)
-                print("[Frequency Client] Shared Memory and Semaphores ready...")
+                print("[clearFrequencyService] Shared Memory and Semaphores ready...")
                 return self.sem_server, self.sem_client
             except posix_ipc.ExistentialError:
-                print("[Frequency Client] Semaphore(s) not found. Retrying...")
+                print("[clearFrequencyService] Semaphore(s) not found. Retrying...")
             attempts += 1
             time.sleep(self.RETRY_DELAY)
-        print("[Frequency Client] Failed to initialize Semaphores after multiple attempts. Exiting.")
+        print("[clearFrequencyService] Failed to initialize Semaphores after multiple attempts. Exiting.")
         exit(1)
 
     def initialize_active_clients_counter(self):
         attempts = 0
         while attempts < self.RETRY_ATTEMPTS:
             try:
-                print(f"[Frequency Client] Attempting to initialize Active Clients Counter (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                print(f"[clearFrequencyService] Attempting to initialize Active Clients Counter (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
                 self.active_clients_fd = os.open(f"/dev/shm{self.ACTIVE_CLIENTS_SHM_NAME}", os.O_RDWR | os.O_CREAT, 0o666)
                 os.ftruncate(self.active_clients_fd, struct.calcsize('i'))  # Ensure the size of the shared memory object is large enough for an integer
                 # Initialize counter to 0 if it's the first time
@@ -514,17 +517,17 @@ class clearFrequencyService():
                     if current_value < 0 or current_value > 1000:  # Arbitrary threshold to detect uninitialized state
                         m.seek(0)
                         m.write(struct.pack('i', 0))
-                print("[Frequency Client] Created Active Clients Counter...")
-                return # active_clients_fd
+                print("[clearFrequencyService] Created Active Clients Counter...")
+                return 
             except FileNotFoundError:
-                print("[Frequency Client] Active Clients Counter not found. Retrying...")
+                print("[clearFrequencyService] Active Clients Counter not found. Retrying...")
             except PermissionError:
-                print("[Frequency Client] Permission error while accessing Active Clients Counter. Retrying...")
+                print("[clearFrequencyService] Permission error while accessing Active Clients Counter. Retrying...")
             except OSError as e:
-                print(f"[Frequency Client] OS error while accessing Active Clients Counter: {e}. Retrying...")
+                print(f"[clearFrequencyService] OS error while accessing Active Clients Counter: {e}. Retrying...")
             attempts += 1
             time.sleep(self.RETRY_DELAY)
-        print("[Frequency Client] Failed to initialize Active Clients Counter after multiple attempts. Exiting.")
+        print("[clearFrequencyService] Failed to initialize Active Clients Counter after multiple attempts. Exiting.")
         exit(1)
 
     def increment_active_clients(self):
@@ -534,7 +537,7 @@ class clearFrequencyService():
             active_clients += 1
             m.seek(0)
             m.write(struct.pack('i', active_clients))
-            print(f"[Frequency Client] Incremented clients: {active_clients}\n")
+            print(f"[clearFrequencyService] Incremented Active Clients Counter: {active_clients}")
             return active_clients
 
     def decrement_active_clients(self):
@@ -544,33 +547,33 @@ class clearFrequencyService():
             active_clients -= 1
             m.seek(0)
             m.write(struct.pack('i', active_clients))
-            print(f"[Frequency Client] Decremented clients: {active_clients}\n")
+            print(f"[clearFrequencyService] Decremented Active Clients Counter: {active_clients}")
             return active_clients
-        
+                
     def sendSamples(self, raw_samples):
         """ Waits for client requests, then processes server data, writes client 
-        data, and requests server to process new data. When process is 
-        terminated, the try/finally block cleans up.
+            data, and requests server to process new data. When process is 
+            terminated, the try/finally block cleans up.
         """
         
         # Get in Queue
         active_clients = self.increment_active_clients()
-        print(f"[Frequency Client] Active clients count: {active_clients}\n")
+        print(f"[clearFrequencyService] Active clients count: {active_clients}\n")
         
         try:
             # Map shared memory object as m
             with mmap.mmap(self.shm_fd, self.SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:  
                 # Await for a Client Request
-                print("[Frequency Client] Awaiting Client Request...\n")
+                print("[clearFrequencyService] Awaiting Client Request...\n")
                 self.sem_client.acquire()
-                print("[Frequency Client] Acquired Client Request...")
+                print("[clearFrequencyService] Acquired Client Request...")
                 
                 # Read data from shared memory object
-                print("[Frequency Client] Reading data from Shared Memory...")
+                print("[clearFrequencyService] Reading data from Shared Memory...")
                 m.seek(0)
                 data = struct.unpack('i' * (2 * 2500), m.read(self.SHM_SIZE))
-                print("[Frequency Client] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
-                print("[Frequency Client] Done reading data from Shared Memory...")
+                print("[clearFrequencyService] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
+                print("[clearFrequencyService] Done reading data from Shared Memory...")
                     
                 # Write new data to Shared Memory Object
                 print("[Frequency Client] Writing data to Shared Memory...")    
@@ -597,27 +600,22 @@ class clearFrequencyService():
                 print("[Frequency Client] Done writing data to Shared Memory...")
                 
                 # Request Server 
-                print("[Frequency Client] Requesting Server Response...")
+                print("[clearFrequencyService] Requesting Server Response...")
                 self.sem_server.release()
         except KeyboardInterrupt:
-            print("[Frequency Client] Keyboard interrupt received. Exiting...")
+            print("[clearFrequencyService] Keyboard interrupt received. Exiting...")
         finally:
             # Clean up
             active_clients = self.decrement_active_clients()
-            print(f"[Frequency Client] Active clients count after decrement: {active_clients}")
+            print(f"[clearFrequencyService] Active clients count after decrement: {active_clients}")
 
             os.close(self.shm_fd)
             os.close(self.active_clients_fd)
             self.sem_server.close()
             self.sem_client.close()
-
-            # Special: No active clients remaining; unlink shared memory and semaphores 
+ 
             if active_clients == 0:
-                print("[Frequency Client] No active clients remaining, cleaning up shared resources.")
-                posix_ipc.unlink_shared_memory(self.SHM_NAME)
-                posix_ipc.unlink_shared_memory(self.ACTIVE_CLIENTS_SHM_NAME)
-                posix_ipc.unlink_semaphore(self.SEM_SERVER)
-                posix_ipc.unlink_semaphore(self.SEM_CLIENT)
+                print("[clearFrequencyService] No active clients remaining, but not cleaning up shared resources to keep service idle.")
 
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
@@ -680,7 +678,12 @@ class clearFrequencyRawDataManager():
         self.metaData['number_of_samples'] = len(self.rawData[0])
         self.metaData['usrp_rf_rate'] = self.sampling_rate 
         self.metaData['antenna_list'] = self.antennaList
-
+        
+        # TODO: Verify that these values match with clear freq search Client and Server
+        print("[clearFrequencyService] clearFrequencyRawDataManager metaData: ")
+        print("     num of samples  : ", self.metaData['number_of_samples'])
+        print("     usrp_rf_rate    : ", self.metaData['usrp_rf_rate'])
+        print("     antenna_list len: ", len(self.metaData['antenna_list']))
 
 
     def record_new_data(self):
