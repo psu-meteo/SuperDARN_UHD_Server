@@ -443,7 +443,7 @@ class clearFrequencyService():
     RETRY_ATTEMPTS = 5
     RETRY_DELAY = 2  # seconds
     SAMPLES_NUM = 2500
-    ANTENNAS_NUM = 14
+    ANTENNAS_NUM = 2 # 14 normally
 
     def __init__(self):
         # Shared Memory Object and Semaphores
@@ -571,7 +571,7 @@ class clearFrequencyService():
                 # Read data from shared memory object
                 print("[clearFrequencyService] Reading data from Shared Memory...")
                 m.seek(0)
-                data = struct.unpack('i' * (2 * 2500), m.read(self.SHM_SIZE))
+                data = struct.unpack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), m.read(self.SHM_SIZE))
                 print("[clearFrequencyService] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
                 print("[clearFrequencyService] Done reading data from Shared Memory...")
                     
@@ -595,7 +595,7 @@ class clearFrequencyService():
                         # print("[Frequency Client]                   : ", new_data[-1])
                 print("[Frequency Client] new_data len: ", len(new_data))
                 m.seek(0)
-                m.write(struct.pack('i' * (2 * 2500), *new_data))
+                m.write(struct.pack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), *new_data))
                 print("[Frequency Client] Writing data:\n", new_data[:10], "...")
                 print("[Frequency Client] Done writing data to Shared Memory...")
                 
@@ -673,18 +673,11 @@ class clearFrequencyRawDataManager():
         self.center_freq = meta_data_dict['center_freq'] /1000
         self.logger.debug("Updated clear freq raw data with auto_clear_freq data")
 
-        # TODO get rid of two different meta_data dicts
-        self.metaData['usrp_fcenter'] = self.center_freq 
-        self.metaData['number_of_samples'] = len(self.rawData[0])
-        self.metaData['usrp_rf_rate'] = self.sampling_rate 
-        self.metaData['antenna_list'] = self.antennaList
-        
-        # TODO: Verify that these values match with clear freq search Client and Server
-        print("[clearFrequencyService] clearFrequencyRawDataManager metaData: ")
-        print("     num of samples  : ", self.metaData['number_of_samples'])
-        print("     usrp_rf_rate    : ", self.metaData['usrp_rf_rate'])
-        print("     antenna_list len: ", len(self.metaData['antenna_list']))
-
+        # # TODO get rid of two different meta_data dicts
+        # self.metaData['usrp_fcenter'] = self.center_freq 
+        # self.metaData['number_of_samples'] = len(self.rawData[0])
+        # self.metaData['usrp_rf_rate'] = self.sampling_rate 
+        # self.metaData['antenna_list'] = self.antennaList
 
     def record_new_data(self):
         assert self.usrp_socks != None, "no usrp drivers assigned to clear frequency search data manager"
@@ -703,6 +696,12 @@ class clearFrequencyRawDataManager():
             self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
             self.clearFreqService.sendSamples(self.rawData)
             self.logger.debug('end record_clrfreq_raw_samples')
+
+            # TODO: Verify that these values match with clear freq search Client and Server
+            print("[clearFrequencyService] clearFrequencyRawDataManager metaData: ")
+            print("     num of samples  : ", self.metaData['number_of_samples'])
+            print("     usrp_rf_rate    : ", self.metaData['usrp_rf_rate'])
+            # print("     antenna_list len: ", len(self.metaData['antenna_list']))
     
             self.metaData['antenna_list'] = self.antennaList
             self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
