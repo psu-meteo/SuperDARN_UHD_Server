@@ -437,29 +437,38 @@ class usrpMixingFreqManager():
           upper = channel.scanManager.fixFreq
        return lower, upper
 
-class clearFrequencyService():
-    # Constants
-    ACTIVE_CLIENTS_SHM_NAME = "/active_clients"
+class ClearFrequencyService():
+    # Shared Memory Object and Semaphores
+    SAMPLES_NUM = 2500
+    ANTENNAS_NUM = 2
+    RESTRICT_NUM = 15
+    RESTRICT_ELEM_NUM = RESTRICT_NUM * 2                # 2 = start & stop of restrict freq band
+    CLR_BAND_MAX = 6
+    RESTRICT_SHM_SIZE = RESTRICT_NUM * 4 * 2            # 4 * 2 = int size * (start & stop of restrict freq band)
+
+    SAMPLES_SHM_SIZE = ANTENNAS_NUM * SAMPLES_NUM * 4    # 2x2500 array of integers (each integer is 4 bytes)
+    
     RETRY_ATTEMPTS = 5
     RETRY_DELAY = 2  # seconds
-    SAMPLES_NUM = 2500
-    ANTENNAS_NUM = 2 # 14 normally
-
+    
     def __init__(self):
         # Shared Memory Object and Semaphores
-        self.SHM_SIZE = self.ANTENNAS_NUM * self.SAMPLES_NUM * 4  # 14x2500 array of integers (each integer is 4 bytes)
-        self.SHM_NAME = "/shared_memory"                 # For Data Transmission
-        self.SEM_SERVER = "/sem_server"                  # For Synchronization 
+        self.RESTRICT_SHM_SIZE = self.RESTRICT_NUM * 4 * 2
+        self.SAMPLES_SHM_SIZE = self.ANTENNAS_NUM * self.SAMPLES_NUM * 4  # 14x2500 array of integers (each integer is 4 bytes)
+        self.SAMPLES_SHM_NAME = "/samples"             # For Data Transmission
+        self.RESTRICT_SHM_NAME = "/restricted_freq"
+        self.SEM_SERVER = "/sem_server"                              # For Synchronization 
         self.SEM_CLIENT = "/sem_client"
         self.ACTIVE_CLIENTS_SHM_NAME = "/active_clients" # For Debugging
         
-        self.shm_fd = self.initialize_shared_memory()
+        self.samples_shm_fd = self.initialize_shared_memory(self.SAMPLES_SHM_NAME)
+        self.restrict_shm_fd = self.initialize_shared_memory(self.RESTRICT_SHM_NAME)
         self.active_clients_fd = None 
         self.initialize_active_clients_counter()
         self.sem_server, self.sem_client = self.initialize_semaphores()
         print("[clearFrequencyService] Done Initializing...\n\n")
 
-    def initialize_shared_memory(self):
+    def initialize_shared_memory(self, shm_name):
         """ Initialize Shared Memory Object for data transmission between Server 
             and Clients. Attempts to check for already initialized object (from 
             server).
@@ -470,15 +479,15 @@ class clearFrequencyService():
         attempts = 0
         while attempts < self.RETRY_ATTEMPTS:
             try:
-                print(f"[clearFrequencyService] Attempting to initialize Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
-                self.shm_fd = os.open(f"/dev/shm{self.SHM_NAME}", os.O_RDWR)
-                print("[clearFrequencyService] Created Shared Memory Object...")
-                return self.shm_fd
+                print(f"[clearFrequencyService] Attempting to initialize {shm_name} Shared Memory Object (Attempt {attempts + 1}/{self.RETRY_ATTEMPTS})...")
+                shm_fd = os.open(f"/dev/shm{shm_name}", os.O_RDWR)
+                print("[clearFrequencyService] Created {shm_name} Shared Memory Object...")
+                return shm_fd
             except FileNotFoundError:
                 print("[clearFrequencyService] Shared Memory Object not found. Retrying...")
                 attempts += 1
                 time.sleep(self.RETRY_DELAY)
-        print("[clearFrequencyService] Failed to initialize Shared Memory Object after multiple attempts. Exiting.")
+        print("[clearFrequencyService] Failed to initialize {shm_name} Shared Memory Object after multiple attempts. Exiting.")
         exit(1)
 
     def initialize_semaphores(self):
@@ -550,11 +559,15 @@ class clearFrequencyService():
             print(f"[clearFrequencyService] Decremented Active Clients Counter: {active_clients}")
             return active_clients
                 
-    def sendSamples(self, raw_samples):
+    def sendSamples(self, raw_samples, restrict_data):
         """ Waits for client requests, then processes server data, writes client 
             data, and requests server to process new data. When process is 
             terminated, the try/finally block cleans up.
         """
+        
+        # Special: Find missing data
+        # if restrict_data is None:
+        #     restrict_data = read_restrict_file(RESTRICT_FILE)
         
         # Get in Queue
         active_clients = self.increment_active_clients()
@@ -562,7 +575,11 @@ class clearFrequencyService():
         
         try:
             # Map shared memory object as m
-            with mmap.mmap(self.shm_fd, self.SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m:  
+            # TODO: Why does nested map break!!!!!!!!!!!! 
+            with (
+                mmap.mmap(self.samples_shm_fd, self.SAMPLES_SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m_samples,
+                mmap.mmap(self.restrict_shm_fd, self.RESTRICT_SHM_SIZE, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) as m_restrict
+                ):  
                 # Await for a Client Request
                 print("[clearFrequencyService] Awaiting Client Request...\n")
                 self.sem_client.acquire()
@@ -570,33 +587,47 @@ class clearFrequencyService():
                 
                 # Read data from shared memory object
                 print("[clearFrequencyService] Reading data from Shared Memory...")
-                m.seek(0)
-                data = struct.unpack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), m.read(self.SHM_SIZE))
-                print("[clearFrequencyService] Data read from Shared Memory:", data[:10], "...")  # Print first 10 integers for brevity
+                m_samples.seek(0)
+                # m_restrict.seek(0)
+                samples_data = struct.unpack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), m_samples.read(self.SAMPLES_SHM_SIZE))
+                print("[clearFrequencyService] Data read from Samples:", samples_data[:5], "...")  # Print first 10 integers for brevity
+                # TODO: Fix Fail check
+                # if restrict_data is not None:
+                #     print("[clearFrequencyService] Data read from Restricted Freqs:", restrict_data[:5], "...")  # Print first 10 integers for brevity
                 print("[clearFrequencyService] Done reading data from Shared Memory...")
-                    
-                # Write new data to Shared Memory Object
-                print("[Frequency Client] Writing data to Shared Memory...")    
-
-                #HACK: writes only first antenna's samples; write all antenna samples
-                trimmed_samples = raw_samples[:1] 
-
+                   
+                # Repack read data into its orignal format 
+                print("[Frequency Client] Repacking data to Shared Memory...")    
+                trimmed_samples = raw_samples[:1]           #HACK: writes only first antenna's samples; write all antenna samples
                 print("[Frequency Client] trimmed len: ", len(trimmed_samples))
-                new_data = []
-                for antenna_sample in trimmed_samples:
+                new_sample_data = []
+                for antenna_sample in trimmed_samples:  
                     print("[Frequency Client] sample_arr len: ", len(antenna_sample))
                     for sample in antenna_sample:
-                        new_data.append(int(sample.real))
-                        new_data.append(int(sample.imag))
+                        new_sample_data.append(int(sample.real))
+                        new_sample_data.append(int(sample.imag))
                         
                         # Debug: Display samples
                         # print("[Frequency Client] Flattening samples: ", sample)
                         # print("[Frequency Client]                   : ", new_data[-2])
                         # print("[Frequency Client]                   : ", new_data[-1])
-                print("[Frequency Client] new_data len: ", len(new_data))
-                m.seek(0)
-                m.write(struct.pack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), *new_data))
-                print("[Frequency Client] Writing data:\n", new_data[:10], "...")
+                new_restrict_data = []
+                print("[Frequency Client] restrict_arr len: ", len(restrict_data))
+                for restricted_freq in restrict_data:   
+                    new_restrict_data.append(int(restricted_freq[0]))
+                    new_restrict_data.append(int(restricted_freq[1]))
+                # print(new_restrict_data)
+                    
+                # Write new data to Shared Memory Object
+                print("[Frequency Client] Writng data to Shared Memory...")    
+                print("[Frequency Client] new_data len of samples: ", len(new_sample_data))
+                print("[Frequency Client] Writing sample data:\n", new_sample_data[:10], "...")
+                m_samples.seek(0)
+                m_samples.write(struct.pack('i' * (self.ANTENNAS_NUM * self.SAMPLES_NUM), *new_sample_data))
+                print("[Frequency Client] Writing restricted freq data:\n", restrict_data[:2], "...")
+                
+                m_restrict.seek(0)
+                m_restrict.write(struct.pack('i' * (self.RESTRICT_NUM * 2), *new_restrict_data))
                 print("[Frequency Client] Done writing data to Shared Memory...")
                 
                 # Request Server 
@@ -609,14 +640,15 @@ class clearFrequencyService():
             active_clients = self.decrement_active_clients()
             print(f"[clearFrequencyService] Active clients count after decrement: {active_clients}")
 
-            os.close(self.shm_fd)
+            os.close(self.samples_shm_fd)
+            os.close(self.restrict_shm_fd)
             os.close(self.active_clients_fd)
             self.sem_server.close()
             self.sem_client.close()
- 
+
             if active_clients == 0:
                 print("[clearFrequencyService] No active clients remaining, but not cleaning up shared resources to keep service idle.")
-
+                
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
@@ -628,7 +660,7 @@ class clearFrequencyRawDataManager():
         self.repeat_request_for_2nd_period = False
 
         self.usrpManager = usrpManager # TODO change to take socks automatically form usrpManager
-        self.clearFreqService = clearFrequencyService()
+        self.clearFreqService = ClearFrequencyService()
         self.usrp_socks = None
         self.center_freq = None
         self.sampling_rate = None
@@ -694,7 +726,7 @@ class clearFrequencyRawDataManager():
             self.logger.debug("clearFreqRawData: age of data is {:2.2f} s. Recoring new data ".format(data_age))
             self.logger.debug('start record_clrfreq_raw_samples')
             self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
-            self.clearFreqService.sendSamples(self.rawData)
+            self.clearFreqService.sendSamples(self.rawData, self.freq_occupied_by_other_channels)
             self.logger.debug('end record_clrfreq_raw_samples')
 
             # TODO: Verify that these values match with clear freq search Client and Server
