@@ -13,33 +13,14 @@ import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
-
+import matplotlib.cm as cm
 
 # %% used hardcoded file and path
 #raw_path = "/data/image_samples/bb_data/"
 #fileName = '201709231930.1.iraw.d'
 #file_with_path = os.path.join(raw_path, fileName)
 
-# %%
 
-
-# %% try input arguments ...
-raw_path = "/data/image_samples/bb_data/"
-
-if len(sys.argv) == 1:
-    import glob
-    import os
-    print('No input. Looking for newest file in {} ...'.format(raw_path))
-    file_with_path = max(glob.iglob('{}*.iraw.*'.format(raw_path)), key=os.path.getctime)
-    fileName = file_with_path[len(raw_path):]
-    print('found :{}'.format(fileName))
-else:
-    fileName = sys.argv[1]
-    if fileName.find("/") == -1: # no path defined => assume /data/diagnostic_samples/
-        print('Only filename without path. looking for file in {} ...'.format(raw_path))
-        file_with_path = os.path.join(raw_path, fileName)
-    else:
-        file_with_path = fileName
 
 
 # %% read file
@@ -131,15 +112,15 @@ class RawDataGUI:
         self.data = read_raw_file(inputFile)
         self.iPeriod = 0 
         self.nPeriods = len(self.data)
-        self.iSequence = 0
+        self.iSequence = "a"
         self.nSequences = (self.data[self.iPeriod]["nSeq"])
-        self.fgh       = plt.figure()
         
+    def open(self):
+        self.fgh       = plt.figure()        
         self.plot_db = False
-
         self.cid       = self.fgh.canvas.mpl_connect('key_press_event', self.keyCallback)
         self.updateGUI()
-        print('Shortcuts:\n  left / right : previous / next sequence \n  up / down    : previous / next period\n  d            : toggle lin / log plotting')
+        print('\n\nShortcuts:\n  left / right : previous / next sequence \n  up / down    : previous / next period\n  d            : toggle lin / log plotting\n  a            : toggle all / one sequence')
      #   mng = plt.get_current_fig_manager()
      #   mng.full_screen_toggle()
         plt.show()
@@ -147,11 +128,28 @@ class RawDataGUI:
     def keyCallback(self, event):
        # print('you pressed', event.key, event.xdata, event.ydata)
         if event.key == 'right':
-            self.iSequence = (self.iSequence+1) % self.nSequences
+            if self.iSequence == "a":
+                self.iSequence = 0
+            else:
+                self.iSequence = (self.iSequence+1) % self.nSequences
             self.updateGUI()
 
         elif event.key == 'left':
+            if self.iSequence == "a":
+                self.iSequence = self.nSequences-1
+            else:
+                self.iSequence = (self.iSequence-1) % self.nSequences
             self.updateGUI()
+            
+        elif event.key == 'a':
+            if self.iSequence == "a":
+                self.iSequence = 0
+            else:
+                self.iSequence = "a"
+                
+            self.updateGUI()            
+            
+            
         elif event.key == 'up':
             self.iPeriod = (self.iPeriod+1) % self.nPeriods
             self.nSequences = (self.data[self.iPeriod]["nSeq"])
@@ -163,7 +161,7 @@ class RawDataGUI:
         elif event.key == 'd':
             self.plot_db = not self.plot_db
             self.updateGUI()    
-            
+        
 
             
     def updateGUI(self):
@@ -173,34 +171,45 @@ class RawDataGUI:
         nAntennas = self.data[self.iPeriod]['nAntennas']
         nRows = int(np.ceil(nAntennas/2)+1)
         gs = gridspec.GridSpec(nRows, 2)
+                 
+        if self.iSequence == "a":
+            plot_data = np.array(self.data[self.iPeriod]["seq_list"][0]['samples'])
+            for iSequence in range(1,self.nSequences):
+                plot_data = np.concatenate((plot_data,self.data[self.iPeriod]["seq_list"][iSequence]['samples']), axis=1)
+            seq_text = "all {} ".format( self.nSequences)
+        else:
+            plot_data = np.array(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'])
+            seq_text = "{}/{}".format(self.iSequence+1, self.nSequences)
         
         for iAntenna in range(nAntennas):
             ax  = self.fgh.add_subplot(gs[int(iAntenna/2),int(iAntenna%2)])
             yLabel = "ant {}".format(self.data[self.iPeriod]['antenna_list'][iAntenna])
             if iAntenna == 0:
                plt.title(self.inputFile)
+            elif iAntenna == 1:
+                plt.title('Period:{}/{}, Seq: {}'.format(self.iPeriod+1, self.nPeriods, seq_text))
+                
             if self.plot_db:
-                min_value = 1
+                min_value = 0.5
                 ref_value = 2**15
 
        #         plt.plot(20*np.log10(np.abs(np.real(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value))
        #         plt.plot(20*np.log10(np.abs(np.imag(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value))
-                plot_values = 20*np.log10(np.abs(np.abs(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna])+min_value)/ref_value)
+                plot_values = 20*np.log10(np.abs(plot_data[iAntenna]+min_value)/ref_value)
                 plt.plot(plot_values)
-               
 
-                
-                ax.set_ylim([-92,0])
+                ax.set_ylim([-92,10])
                 yLabel += " (dB)"
             else:
-                plt.plot(np.real(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna]))
-                plt.plot(np.imag(self.data[self.iPeriod]["seq_list"][self.iSequence]['samples'][iAntenna]))
-            plt.xlim([0, self.data[self.iPeriod]["nSamples"]])
+                plt.plot(np.real(plot_data[iAntenna]))
+                plt.plot(np.imag(plot_data[iAntenna]))
+                
+            plt.xlim([0, plot_data.shape[1]])
             plt.grid(True)
             ax.set_ylabel(yLabel)
             
-    #    self.ax    = self.fgh.add_subplot(gs[0:8,:])
-        axTxt = self.fgh.add_subplot(gs[nRows-1,:])
+
+        axTxt = self.fgh.add_subplot(gs[nRows-1,0])
         axTxt.axis("off")   
 
     #    self.ax.plot(self.allDataSets[self.currentDataset][self.channelNames[self.iChannel]], marker='x')
@@ -209,22 +218,84 @@ class RawDataGUI:
     #    self.ax.set_title(self.inputFile)
     #    self.ax.set_xlabel("Samples")
     #    self.ax.set_ylabel(self.channelNames[self.iChannel] )
-        axTxt.set_title('Period:{}/{}, Seq: {}/{}'.format(self.iPeriod, self.nPeriods, self.iSequence, self.nSequences))
+        
         par_list = self.data[self.iPeriod].keys()
-        dont_print_list = ["antenna_list","seq_list", "pcode" ]
-        par_txt = ""
-        for iPar,par in enumerate(par_list):
-            if  par not in dont_print_list:
-                if ((iPar+1) % 5):
-                    par_txt += "{}={},  ".format(par, self.data[self.iPeriod][par])
-                else:
-                    par_txt += "{}={},\n".format(par, self.data[self.iPeriod][par])
+        dont_print_list = ["antenna_list","seq_list", "pcode", "year", 'minute', 'second', 'month', 'day', 'hour', 'microsecond', "beam", "rfreq"]
+        par_txt = "\n{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:02d}\n".format(self.data[self.iPeriod]["year"], self.data[self.iPeriod]["month"], self.data[self.iPeriod]["day"], self.data[self.iPeriod]["hour"], self.data[self.iPeriod]["minute"], self.data[self.iPeriod]["second"], self.data[self.iPeriod]["microsecond"])
+        par_txt += "beam {}, rfreq = {} kHz \n".format(self.data[self.iPeriod]["beam"], self.data[self.iPeriod]["rfreq"])
+
+        print_par = [par for par in par_list if par not in dont_print_list]
+
+        for iPar,par in enumerate(print_par):
+            if ((iPar+1) % 3):
+                par_txt += "{}={},  ".format(par, self.data[self.iPeriod][par])
+            else:
+                par_txt += "{}={},\n".format(par, self.data[self.iPeriod][par])
 
         axTxt.text(0, 1, par_txt, verticalalignment='top')
     #    self.ax.grid(True)
       #  self.ax.set_xlim((0,self.allDataSets[self.currentDataset][self.channelNames[self.iChannel]].shape[0]))
+        
+        ax = self.fgh.add_subplot(gs[nRows-1,1])
+        #ax = plt.subplot(212)
+        
+        pulse_idx_list = [0, 1, 2, 3, 4]
+        colorList = cm.rainbow(np.linspace(0,1,len(pulse_idx_list)))
+        for iPulse, plotColor in zip(pulse_idx_list, colorList):
+            iSample = int(np.round(self.data[self.iPeriod]['ppat'][iPulse] * self.data[self.iPeriod]['mpinc'] / self.data[self.iPeriod]['smsep']))
+            exampleTXsamples = [plot_data[iAnt][iSample] for iAnt in range(nAntennas)]       
+            arrayAngle = np.angle(exampleTXsamples, deg=True)
+            arrayAngle = arrayAngle - arrayAngle[0]
+            plt.scatter(np.array(self.data[self.iPeriod]['antenna_list'])+(np.random.rand(1)-0.5)/5, arrayAngle % 360, s=5*np.log(np.abs(exampleTXsamples)+0.01), color=plotColor)
+               
+        beamsep = 3.24 
+        delta_x = 15.24
+        nBeams = 16
+        max_antenna_idx = 16  # max(self.data[self.iPeriod]['antenna_list'])
+
+        plot_all_beams = False
+        if plot_all_beams:
+            for iBeam in range(16): 
+               alpha = beamsep * (iBeam - (nBeams -1) /2 )
+               phaseDiff_per_ant = - delta_x / 3e8 * self.data[self.iPeriod]["rfreq"] *1000 * np.sin(alpha/180*np.pi)  *360
+               plt.plot(np.arange(max_antenna_idx), [phaseDiff_per_ant*iAnt % 360  for iAnt in range(max_antenna_idx)], ":")
+                       
+                       
+        for iChannel in range(1): 
+           alpha = beamsep * (self.data[self.iPeriod]['beam'] - (nBeams -1) /2 )
+           phaseDiff_per_ant = - delta_x / 3e8 * self.data[self.iPeriod]["rfreq"] *1000 * np.sin(alpha/180*np.pi)  *360
+           plt.plot(np.arange(max_antenna_idx), [phaseDiff_per_ant*(iAnt-1) % 360  for iAnt in range(max_antenna_idx)], linewidth=2)
+           plt.plot(np.arange(max_antenna_idx), [(phaseDiff_per_ant*(iAnt-1)+180) % 360  for iAnt in range(max_antenna_idx)], "--", linewidth=1)
+
+           
+        plt.grid(True)
+        plt.ylabel("phase difference in deg")
+        plt.xlabel("antenna number")
+        plt.axis([-0, max_antenna_idx, 0, 360])
+        #legendList = ["Measured sample {} (ch 0)".format(idx) for idx in idx2checkVec] 
+        
         plt.draw()            
 
+    
 
 # %% 
-x = RawDataGUI(file_with_path)
+if __name__ == '__main__':
+   # %% try input arguments ...
+   raw_path = "/data/image_samples/bb_data/"
+   
+   if len(sys.argv) == 1:
+       import glob
+       print('No input. Looking for newest file in {} ...'.format(raw_path))
+       file_with_path = max(glob.iglob('{}*.iraw.*'.format(raw_path)), key=os.path.getctime)
+       fileName = file_with_path[len(raw_path):]
+       print('found :{}'.format(fileName))
+   else:
+       fileName = sys.argv[1]
+       if fileName.find("/") == -1: # no path defined => assume /data/diagnostic_samples/
+           print('Only filename without path. looking for file in {} ...'.format(raw_path))
+           file_with_path = os.path.join(raw_path, fileName)
+       else:
+           file_with_path = fileName
+   
+   x = RawDataGUI(file_with_path)
+   x.open()

@@ -1,10 +1,10 @@
 import logging
 import os
 
-consoleOutputLevel = logging.DEBUG
-logfileOutputLevel = logging.DEBUG
-#consoleOutputLevel = logging.INFO
-#logfileOutputLevel = logging.INFO
+# consoleOutputLevel = logging.DEBUG
+# logfileOutputLevel = logging.DEBUG
+consoleOutputLevel = logging.INFO
+logfileOutputLevel = logging.INFO
 useColor = True
 
 
@@ -53,15 +53,15 @@ colorCoding = {
     'ERROR': RED
 }
 
-class ColorFilter(logging.Filter):
 
+class ColorFilter(logging.Filter):
 
     def filter(self, record):
         levelName = record.levelname
         if levelName in colorCoding:
-            record.preLevel  = colorCoding[levelName]
+            record.preLevel = colorCoding[levelName]
             record.postLevel = RESET
         else:
-            record.preLevel  = ""
+            record.preLevel = ""
             record.postLevel = ""
         return True

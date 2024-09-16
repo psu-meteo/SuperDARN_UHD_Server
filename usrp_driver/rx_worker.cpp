@@ -27,7 +27,7 @@
 
 #define RX_STREAM_EXEC_TIME .005
 
-#define DEBUG 1
+//#define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( stderr, __VA_ARGS__ ); } while( false )
 #else
@@ -45,8 +45,7 @@ void usrp_rx_worker(
     int32_t *return_status
 ){
 
-    float debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("entering RX_WORKER %2.4f\n",debugt);
+    DEBUG_PRINT("entering RX_WORKER\n");
  //   fprintf( stderr, "RX WORKER nSamples requested: %i\n", num_requested_samps );
  //   fprintf( stderr, "RX WORKER nSides : %i\n", nSides );
 
@@ -88,10 +87,9 @@ void usrp_rx_worker(
     rx_usrp_pre_stream_time = usrp->get_time_now();
     time_to_start = start_time.get_real_secs() - rx_usrp_pre_stream_time.get_real_secs();
     fprintf(stderr,"#timing: time left for rx_worker  %f ms\n", time_to_start*1000);
-    DEBUG_PRINT("rx_worker: samples_remaining_to stream: %d  max_samples_per_stream: %d\n",samples_remaining_to_stream,max_samples_per_stream);
 
 
-    int counter=0;
+
     if(samples_remaining_to_stream > max_samples_per_stream) {
         // each stream command should request the around the maximum number of samples possible that is a multiple of the recv stream packet size
         // so, issue NUM_SAMPS_AND_MORE commands until there are fewer than max_samples_per_packet remaining 
@@ -100,12 +98,8 @@ void usrp_rx_worker(
         stream_cmd.time_spec = offset_time_spec(start_time, RX_OFFSET);
        
         // issue the first stream command to be timed at the start of the integration period
-	debugt = usrp->get_time_now().get_real_secs();
-	DEBUG_PRINT("RX_WORKER: before stream command %2.4f\n",debugt);
         stream_cmd.stream_now = false;
         usrp->issue_stream_cmd(stream_cmd); 
-	debugt = usrp->get_time_now().get_real_secs();
-	DEBUG_PRINT("RX_WORKER: issued stream command %2.4f\n",debugt,++counter);
 
         samples_remaining_to_stream -= max_samples_per_stream;
 
@@ -115,8 +109,6 @@ void usrp_rx_worker(
         while(samples_remaining_to_stream > max_samples_per_stream) {
             usrp->issue_stream_cmd(stream_cmd); 
             samples_remaining_to_stream -= max_samples_per_stream;
-	    debugt = usrp->get_time_now().get_real_secs();
-	    DEBUG_PRINT("RX_WORKER: issued stream command %2.4f\n",debugt,++counter);
         }
         
         // finally, issue a NUM_SAMPS_AND_DONE command for the last command
@@ -124,8 +116,6 @@ void usrp_rx_worker(
         stream_cmd.stream_now = true;
         stream_cmd.num_samps = samples_remaining_to_stream;
         usrp->issue_stream_cmd(stream_cmd); 
-	debugt = usrp->get_time_now().get_real_secs();
-	DEBUG_PRINT("RX_WORKER: issued last stream command %2.4f\n",debugt,++counter);
     }
     
     else {
@@ -148,26 +138,25 @@ void usrp_rx_worker(
           DEBUG_PRINT("%i, ", (*rx_data_buffer)[iSide][iSample]);
     }
  */
-    debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("starting rx_worker while loop %2.4f\n",debugt);
+
+    DEBUG_PRINT("starting rx_worker while loop\n");
     while(num_acc_samps < num_requested_samps) {
 
         size_t samp_request = std::min(max_samples_per_packet, num_requested_samps - num_acc_samps);
         for (int iSide = 0; iSide < nSides; iSide++) {
             buff_ptrs[iSide] = &((*rx_data_buffer)[iSide][num_acc_samps]);
-            if (num_acc_samps == 0)
-               DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
+          //  if (num_acc_samps == 0)
+          //     DEBUG_PRINT("rx_worker addr: %p iSide: %d \n    ", buff_ptrs[iSide], iSide);
         }
 
         size_t num_rx_samps = rx_stream->recv(buff_ptrs , samp_request, md, timeout);
-       // DEBUG print
-//        if (num_rx_samps == 1996) {
-      //     DEBUG_PRINT("|");
-//             DEBUG_PRINT("%d  ",num_acc_samps);
- //       } else {
-//           DEBUG_PRINT("(rxed %d) ", num_rx_samps);
-//        }
-    
+     /*   // DEBUG print
+        if (num_rx_samps == 1996) {
+           DEBUG_PRINT("|");
+        } else {
+           DEBUG_PRINT("(rxed %d) ", num_rx_samps);
+        }
+     */
         timeout = 0.1;
 
         //handle the error codes
@@ -199,8 +188,8 @@ void usrp_rx_worker(
         //}
         num_acc_samps += num_rx_samps;
     }
-    debugt = usrp->get_time_now().get_real_secs();
-    DEBUG_PRINT("RX_WORKER fetched samples! %2.4f\n",debugt);
+
+    DEBUG_PRINT("RX_WORKER fetched samples!\n");
 //    if(DEBUG) std::cout << boost::format("RX_WORKER : %u full secs, %f frac secs") % md.time_spec.get_full_secs() % md.time_spec.get_frac_secs() << std::endl;
 
     if (num_acc_samps != num_requested_samps){
