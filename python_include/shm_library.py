@@ -3,7 +3,7 @@
 import posix_ipc
 import mmap
 import os
-from cuda_driver.cuda_driver import shm_namer
+from cuda_driver import shm_namer
 
 ANTENNA = 0
 
@@ -12,9 +12,9 @@ SWING1 = 1
 SIDEA = 0
 SIDEB = 1
 
-rx_shm_list = [[], []]
+rx_shm_list = [[],[]]
 tx_shm_list = []
-rx_semaphore_list = [[], []]  # [side][swing]
+rx_semaphore_list = [[],[]] # [side][swing]
 swings = [SWING0, SWING1]
 sides = [SIDEA]
 
@@ -30,7 +30,6 @@ def shm_mmap(name):
     shm = mmap.mmap(memory.fd, memory.size)
     os.close(memory.fd)
     return shm
-
 
 '''
 for swing in range(2):

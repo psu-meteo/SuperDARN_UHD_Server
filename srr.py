@@ -88,7 +88,7 @@ USE_USRP_DRIVER_WRAPPER = True
 # time to wait for usrps
 # UHD 3.9 10s, UHD 3.10 0
 nSecs_restart_pause = 10
-delay_between_driver_and_server = 26
+delay_between_driver_and_server = 10
 
 def myPrint(msg):
    print("||>  {}".format(msg))
@@ -233,7 +233,7 @@ def remote_stop_all():
         print(respond)
 
 def get_known_processes(processList):
-    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py","python3 /home/radar/repos/usrp/tools/srr_watchdog.py","/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
+    kownProcessList = ['./usrp_driver', "/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py",  "/usr/bin/python3 ./usrp_server", "uafscan", "fitacfwrite", "rawacfwrite", "errlog", "rtserver", "python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py","python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py","/usr/bin/python3 ./srr_watchdog.py", "schedule", "start.scd"]
     srrProcesses = []
     for line in processList:
         wordList = [word for word in line.split(" " ) if word != ""]
@@ -372,7 +372,7 @@ def get_process_ids(processShortName):
        processMatchString = ["/usr/bin/python3 ./cuda_driver.py", "python3 cuda_driver.py"]
        nWords = 2 
     elif processShortName == "srr_watchdog":
-       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py", "python3 /home/radar/repos/usrp/tools/srr_watchdog.py","python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py"]
+       processMatchString = ["/usr/bin/python3 ./srr_watchdog.py", "python3 /home/radar/repos/SuperDARN_UHD_Server/tools/srr_watchdog.py","python3 /home/radar/SuperDARN_UHD_Server/tools/srr_watchdog.py"]
        nWords = 1
     elif processShortName == "usrp_server":
        processMatchString = ["/usr/bin/python3 ./usrp_server.py"]
@@ -655,21 +655,21 @@ def start_rtserver():
     subprocess.Popen(commandList)
 
 def start_fitacf_write():
-    commandList = 'fitacfwrite -r kod.d -lp 41103 -ep 41000'.split(" ")
+    commandList = 'fitacfwrite -r mcm.a -lp 41103 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_rawacf_write():
-    commandList = 'rawacfwrite -r kod.d -lp 41102 -ep 41000'.split(" ")
+    commandList = 'rawacfwrite -r mcm.a -lp 41102 -ep 41000'.split(" ")
     myPrint("Starting {}  ({})".format(commandList[0], " ".join(commandList)))
     subprocess.Popen(commandList)
 
 def start_errorlog():
-    commandList = 'errlog -name kod.d -lp 41000'.split(" ")
+    commandList = 'errlog -name mcm.a -lp 41000'.split(" ")
     myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
     subprocess.Popen(commandList)
 
-    commandList = 'errlog -name kod.c -lp 43000'.split(" ")
+    commandList = 'errlog -name mcm.b -lp 43000'.split(" ")
     myPrint("Starting {} on port {} ({})".format(commandList[0], commandList[-1], " ".join(commandList)))
     subprocess.Popen(commandList)
 
