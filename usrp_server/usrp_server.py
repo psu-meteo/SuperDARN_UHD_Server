@@ -450,7 +450,7 @@ class ClearFrequencyService():
     DOUBLE_SIZE = 8
     
     # Shared Memory Object and Semaphores Constants
-    SAMPLES_NUM  = 2500
+    SAMPLES_NUM  = 20000
     ANTENNAS_NUM = 3
     ANTENNA_ELEM = 3    
     META_ELEM    = 4                                    # 4 = 5 - 1 (fcenter has unique obj)
@@ -1431,8 +1431,6 @@ class scanManager():
      ### rawData, metaData, recordTime = self.get_clr_freq_raw_data()
         RHM = self.RHM
         rawData, metaData, recordTime = RHM.clearFreqRawDataManager.get_raw_data()
-
-        print(f"Beam Info: {self.numBeams} {beamNo} {self.beamSep}")
     
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         RHM.clearFreqRawDataManager.select_clear_freq.acquire()
