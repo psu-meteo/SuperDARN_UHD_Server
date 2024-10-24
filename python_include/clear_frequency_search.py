@@ -19,7 +19,6 @@ from phasing_utils import calc_beam_azm_rad, calc_phase_increment, rad_to_rect, 
 from radar_config_constants import *
 
 RESTRICTED_POWER = 1e12 # arbitrary high power for restricted frequency
-RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.kod/restrict.dat.inst'
 
 SAVE_CLEAR_FREQUENCY_SEARCH = False 
 CLEAR_FREQUENCY_DUMP_DIR = '/data/logs/clearfreq_logs/'
@@ -72,7 +71,7 @@ def calc_clear_freq_on_raw_samples(raw_samples, sample_meta_data, restricted_fre
         spectrum_power = mask_spectrum_power_with_restricted_freqs(spectrum_power, freq_vector, restricted_frequencies)
    
     # search for a clear frequency within the given frequency range
-    clear_bw = 2e6/smsep
+    clear_bw = 4e6/smsep
     tfreq, noise = find_clrfreq_from_spectrum(spectrum_power, freq_vector, clear_freq_range[0] * 1e3, clear_freq_range[1] * 1e3, clear_bw = clear_bw)
     
     if SAVE_CLEAR_FREQUENCY_SEARCH:
