@@ -443,7 +443,7 @@ class ClearFrequencyService():
     # load_dotenv(".env")
 
     # Debugging Flags
-    CLEAN_ON_INACTIVE = False           # Cleans all semaphores and shared memory objects when there are no Active Clients
+    CLEAN_ON_INACTIVE   = False         # Cleans all semaphores and shared memory objects when there are no Active Clients
     
     # Static Constants
     INT_SIZE = 4
@@ -451,19 +451,19 @@ class ClearFrequencyService():
     
     # Shared Memory Object and Semaphores Constants
     SAMPLES_NUM  = 2500
-    ANTENNAS_NUM = 2                                    # 14 for real
-    RESTRICT_NUM = 15
-    META_ELEM    = 4                                    # 4 = 5 - 1 (fcenter has unique obj)
+    ANTENNAS_NUM = 3
     ANTENNA_ELEM = 3    
+    META_ELEM    = 4                                    # 4 = 5 - 1 (fcenter has unique obj)
+    RESTRICT_NUM = 15
     CLR_BAND_MAX = 6
     
-    SAMPLES_ELEM_NUM    = ANTENNAS_NUM * SAMPLES_NUM
+    SAMPLES_ELEM_NUM    = ANTENNAS_NUM * SAMPLES_NUM * 2
     CLR_RANGE_ELEM_NUM  = 2
     RESTRICT_ELEM_NUM   = RESTRICT_NUM * 2
     META_ELEM_NUM       = META_ELEM + ANTENNA_ELEM
     CLR_BANDS_ELEM_NUM  = CLR_BAND_MAX * 3                # 2 = start & stop freqs and noise
     
-    SAMPLES_SHM_SIZE    = (ANTENNAS_NUM * SAMPLES_NUM * INT_SIZE) 
+    SAMPLES_SHM_SIZE    = (ANTENNAS_NUM * SAMPLES_NUM * 2 * INT_SIZE) 
     CLR_RANGE_SHM_SIZE  = (2 * INT_SIZE)
     FCENTER_SHM_SIZE    = (1 * INT_SIZE)
     BEAM_NUM_SHM_SIZE   = (1 * INT_SIZE)
@@ -755,8 +755,9 @@ class ClearFrequencyService():
                         # print("[Frequency Client]                   : ", flattened_data[-2])
                         # print("[Frequency Client]                   : ", flattened_data[-1])
             elif atype == 'meta':
-                for ant in array_data[0]:
-                    flattened_data.append(ant.item())
+                flattened_data += array_data[0]
+                # for ant in array_data[0]:
+                    # flattened_data.append(ant.item())
                 for i in range (1, len(array_data)):
                     flattened_data.append(array_data[i])
             else:
@@ -775,12 +776,13 @@ class ClearFrequencyService():
                 else: 
                     raise ValueError(f"An unexpected value occured: {list_of_lists}")
             
-            
+
             dtype = 'i'
             # Determine dtype for Packing
-            dtype = self.detect_dtype(flattened_data)
             if atype == 'meta':
                 dtype = 'd'
+            else: dtype = self.detect_dtype(flattened_data)
+
             
             print(f"dtype: {dtype}, elem_num: {obj['elem_num']}, ")
                 
@@ -788,13 +790,16 @@ class ClearFrequencyService():
                 
             if type(flattened_data) is list:  
                 print("[Frequency Client] new_data len of: ", len(flattened_data))
-                print("[Frequency Client] Writing data:\n", flattened_data[1], "...")
+                if atype == 'complex':
+                    print("[Frequency Client] Writing data:\n", flattened_data[:1], "...")
+                else:
+                    print("[Frequency Client] Writing data:\n", flattened_data)
                 
                 obj['shm_ptr'].seek(0)
                 obj['shm_ptr'].write(struct.pack(dtype * obj['elem_num'], *flattened_data)) 
             else:
                 print("[Frequency Client] new_data len of: ", 1)
-                print("[Frequency Client] Writing data:\n", flattened_data, "...")
+                print("[Frequency Client] Writing data:\n", flattened_data)
                 
                 obj['shm_ptr'].seek(0)
                 obj['shm_ptr'].write(struct.pack(dtype * 1, flattened_data))
@@ -971,16 +976,15 @@ class ClearFrequencyService():
             active_clients = self.decrement_active_clients()
             print(f"[clearFrequencyService] Active clients count after decrement: {active_clients}")
 
-            # for obj in self.shm_objects: 
-            #     os.close(obj['shm_fd'])
-            # os.close(self.active_clients_fd)
-            # for sem in self.semaphores:
-            #     sem['sem'].close()
-            
-
             if active_clients == 0:
                 print("[clearFrequencyService] No active clients remaining; cleaning up shared resources.")
-                # self.cleanup_shm()
+                try:
+                    posix_ipc.unlink_shared_memory(self.ACTIVE_CLIENTS_SHM_NAME)
+                    print(f"Unlinked shared memory {self.ACTIVE_CLIENTS_SHM_NAME}")
+                except posix_ipc.ExistentialError or ValueError:
+                    print(f"Shared memory {self.ACTIVE_CLIENTS_SHM_NAME} does not exist")
+
+                self.cleanup_shm()
                 # print("[clearFrequencyService] No active clients remaining, but not cleaning up shared resources to keep service idle.")
     
     def cleanup_shm(self):
@@ -988,12 +992,12 @@ class ClearFrequencyService():
             try:
                 posix_ipc.unlink_shared_memory(obj['name'])
                 print(f"Unlinked shared memory {obj['name']}")
-            except posix_ipc.ExistentialError:
+            except posix_ipc.ExistentialError or ValueError or AttributeError:
                 print(f"Shared memory {obj['name']} does not exist")
         try:
             posix_ipc.unlink_shared_memory(self.ACTIVE_CLIENTS_SHM_NAME)
             print(f"Unlinked shared memory {self.ACTIVE_CLIENTS_SHM_NAME}")
-        except posix_ipc.ExistentialError:
+        except posix_ipc.ExistentialError or ValueError or AttributeError:
             print(f"Shared memory {self.ACTIVE_CLIENTS_SHM_NAME} does not exist")
 
         for sem in self.semaphores:
@@ -1207,12 +1211,6 @@ class clearFrequencyRawDataManager():
             self.rawData, self.antennaList = record_clrfreq_raw_samples(self.usrpManager.get_all_main_antenna_socks(), self.number_of_samples, self.center_freq, self.sampling_rate)
             self.logger.debug('end record_clrfreq_raw_samples')
 
-            # TODO: Verify that these values match with clear freq search Client and Server
-            print("[clearFrequencyService] clearFrequencyRawDataManager metaData: ")
-            print("     num of samples  : ", self.metaData['number_of_samples'])
-            print("     usrp_rf_rate    : ", self.metaData['usrp_rf_rate'])
-            # print("     antenna_list len: ", len(self.metaData['antenna_list']))
-    
             self.metaData['antenna_list'] = self.antennaList
             self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
     
@@ -1433,6 +1431,8 @@ class scanManager():
      ### rawData, metaData, recordTime = self.get_clr_freq_raw_data()
         RHM = self.RHM
         rawData, metaData, recordTime = RHM.clearFreqRawDataManager.get_raw_data()
+
+        print(f"Beam Info: {self.numBeams} {beamNo} {self.beamSep}")
     
         beam_angle = calc_beam_azm_rad(self.numBeams, beamNo, self.beamSep)
         RHM.clearFreqRawDataManager.select_clear_freq.acquire()
@@ -1446,11 +1446,12 @@ class scanManager():
         clear_freq_range = []
         for freq in self.clear_freq_range_list[iPeriod]: 
             clear_freq_range.append(int(freq))
-        print(int(self.channel.raw_export_data['smsep']))
-        print(f"fcenter: {int(metaData['usrp_fcenter'])}")
-        print(f"samples: { int(beamNo) }")
+        print(f"smsep:      {int(self.channel.raw_export_data['smsep'])}")
+        print(f"fcenter:    {int(metaData['usrp_fcenter'])}")
+        print(f"beamNo:     {int(beamNo)}")
+        print(f"num_sample: { len(rawData[:3]) }")
 
-        self.clearFreqService.sendSamples(rawData[:1], clear_freq_range, int(metaData['usrp_fcenter']), int(beamNo), int(self.channel.raw_export_data['smsep']), meta_data=metaData)
+        self.clearFreqService.sendSamples(rawData[:3], clear_freq_range, int(metaData['usrp_fcenter']), int(beamNo), int(self.channel.raw_export_data['smsep']), meta_data=metaData)
         
         self.logger.debug('end calc_clear_freq_on_raw_samples')
         if 'baseband_samplerate' in RHM.commonChannelParameter: 
