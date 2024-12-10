@@ -94,9 +94,8 @@ class integrationTimeManager():
       int_time = self.RHM.commonChannelParameter['integration_period_duration']  
       # TODO optimize by tracking times of last periods
       if int_time == 3.5:
-         overhead_time = 0.175
+         overhead_time = 0.4
       elif int_time == 2.9:
-         overhead_time = 0.05
          overhead_time = 0.5
       elif int_time == 3.2:
           overhead_time = 0.4
@@ -1216,7 +1215,7 @@ class scanManager():
        
         self.channel = channel
         self.RHM = channel.parent_RadarHardwareManager
-        self.clearFreqService = ClearFrequencyService()
+        #self.clearFreqService = ClearFrequencyService()
         self.beamSep = self.RHM.array_beam_sep
         self.numBeams = self.RHM.array_nBeams
 
@@ -1392,7 +1391,7 @@ class scanManager():
         print(f"num_sample: { len(rawData) }")
 
 
-        self.clearFreqService.sendSamples(rawData, clear_freq_range, int(metaData['usrp_fcenter']), int(beamNo), int(self.channel.raw_export_data['smsep']), meta_data=metaData)
+        #self.clearFreqService.sendSamples(rawData, clear_freq_range, int(metaData['usrp_fcenter']), int(beamNo), int(self.channel.raw_export_data['smsep']), meta_data=metaData)
         
         self.logger.debug('end calc_clear_freq_on_raw_samples')
         if 'baseband_samplerate' in RHM.commonChannelParameter: 
