@@ -296,7 +296,7 @@ void find_clear_freqs(double *spectrum, sample_meta_data meta_data, double delta
         // Compare curr power with min_powers...
         for (int j = CLR_BANDS_MAX - 1; j >= 0 ; j--) {
             // Update Insert Index; maintaining ascending order 
-            if (curr_band.noise > clr_bands[j].noise && curr_band.noise > 0 && curr_band.noise < RAND_MAX) { // XXX: Logic Flip
+            if (curr_band.noise < clr_bands[j].noise && curr_band.noise > 0 && curr_band.noise < RAND_MAX) { // XXX: Logic Flip
                 insert_idx = j;
             }
             // Check for Intersecting Band; get intersecting clr_band index
@@ -307,8 +307,8 @@ void find_clear_freqs(double *spectrum, sample_meta_data meta_data, double delta
             }
             // Continue Intersection Search 
         }
-        // printf("    Intersection Search finished...\n");
-        // printf("    intersect_idx: %d\n    insert_idx: %d\n", intersect_idx, insert_idx);
+        printf("    Intersection Search finished...\n");
+        printf("    intersect_idx: %d\n    insert_idx: %d\n", intersect_idx, insert_idx);
 
         // Insertion Point was Found...
         if (insert_idx != -1) {
@@ -316,17 +316,17 @@ void find_clear_freqs(double *spectrum, sample_meta_data meta_data, double delta
             if (intersect_idx != -1) {
                 // Special: If Intersect is less noisy, do not place/skip
                 if (insert_idx > intersect_idx) continue;
-                // printf("    Intersecting Insertion found w/...\n");
-                // freq_band inter_band = clr_bands[intersect_idx];
 
-                // printf("        i-band = | %d -- %f -- %d|\n", inter_band.f_start, inter_band.noise, inter_band.f_end);
+                printf("    Intersecting Insertion found w/...\n");
+                freq_band inter_band = clr_bands[intersect_idx];
+                printf("        i-band = | %d -- %f -- %d|\n", inter_band.f_start, inter_band.noise, inter_band.f_end);
 
                 // Special: Shift right till the Intersecting band is overwritten 
                 if (insert_idx < intersect_idx) {
                     // Debug: verify bands shift properly @ sample
-                    // if (i == 10) for (int j = 0; j < CLR_BANDS_MAX; j++) {
-                    //     printf("Clear Freq Band[%d]: | %dMHz -- Noise: %f -- %dMHz |\n", j, clr_bands[j].f_start, clr_bands[j].noise, clr_bands[j].f_end);
-                    // }
+                    if (i == 10) for (int j = 0; j < CLR_BANDS_MAX; j++) {
+                        printf("Clear Freq Band[%d]: | %dMHz -- Noise: %f -- %dMHz |\n", j, clr_bands[j].f_start, clr_bands[j].noise, clr_bands[j].f_end);
+                    }
                     
                     // printf("        shifting clr_bands for intersect...\n");
                     for (int j = intersect_idx - 1; j >= insert_idx; j--) {
@@ -340,7 +340,7 @@ void find_clear_freqs(double *spectrum, sample_meta_data meta_data, double delta
             // Only Insertion Point Found...
             else {
                 // printf("    Insertion found...\n");
-                // Special: Keep pre-existing bands by shifting them to right
+                // Shift pre-existing bands to right
                 for (int j = CLR_BANDS_MAX - 2; j >= insert_idx; j--) {
                     // printf("        shifting clr_bands for insert...\n");
                     if (j + 1 < CLR_BANDS_MAX) {
@@ -355,9 +355,9 @@ void find_clear_freqs(double *spectrum, sample_meta_data meta_data, double delta
             min_idx[insert_idx] = i;
 
             // Debug: verify shifting @ sample   
-            // if (i == 10) for (int j = 0; j < CLR_BANDS_MAX; j++) {
-            //     printf("Clear Freq Band[%d]: | %dMHz -- Noise: %f -- %dMHz |\n", j, clr_bands[j].f_start, clr_bands[j].noise, clr_bands[j].f_end);
-            // }
+            if (i == 10) for (int j = 0; j < CLR_BANDS_MAX; j++) {
+                printf("Clear Freq Band[%d]: | %dMHz -- Noise: %f -- %dMHz |\n", j, clr_bands[j].f_start, clr_bands[j].noise, clr_bands[j].f_end);
+            }
         }
     }
 
