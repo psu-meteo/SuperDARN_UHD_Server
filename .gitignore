@@ -4,6 +4,7 @@
 *.*int16
 tags
 dist/*
+config/*
 
 driver_config.ini
 usrp_config.ini
