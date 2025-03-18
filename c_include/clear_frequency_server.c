@@ -731,7 +731,7 @@ int main() {
                 // Get site specific restrict file
                 if (strcmp(new_site_id,"lab") != 0) {
                     printf("[Frequency Server] Using restrict.dat.inst in site_id\n\n");
-                    sprintf(restrict_file,"%s/site.%s/restrict.dat.%s",site_path,site_id,site_id);
+                    sprintf(restrict_file,"%s/site.%s/restrict.dat.inst",site_path,site_id);
                     printf("\nFrequency Server] Using restrict file path: %s\n\n", restrict_file);
                 } 
                 // Default: Get lab testing restrict file
