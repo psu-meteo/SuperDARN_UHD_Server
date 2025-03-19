@@ -589,9 +589,10 @@ void phasing_and_beamforming(double beam_angle, int *clear_freq_range, sample_me
             sample_re[aidx][i] = creal(raw_samples[aidx][i]);
         }
         beamformed_samples[i] = real_sum + I * imag_sum;
+        
+        if (VERBOSE)
+            printf("beamformed[%d]    = %f + %fi\n", i, creal(beamformed_samples[i]), cimag(beamformed_samples[i]));
     }
-    if (VERBOSE)
-        printf("beamformed[625]    = %f + %fi\n", creal(beamformed_samples[625]), cimag(beamformed_samples[625]));
 }
 
 clear_freq clear_freq_search(
