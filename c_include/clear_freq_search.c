@@ -40,6 +40,7 @@
 #define SAMPLE_RE_FILE      "log/sample_re.csv"
 #define SAMPLE_IM_FILE      "log/sample_im.csv"
 
+
 // TODO: Pass in clr_freq_range via restrict actual file
 // #define RESTRICT_FILE = '/home/radar/repos/SuperDARN_MSI_ROS/linux/home/radar/ros.3.6/tables/superdarn/site/site.sps/restrict.dat.inst'
 
@@ -554,15 +555,15 @@ void phasing_and_beamforming(double beam_angle, int *clear_freq_range, sample_me
     if (VERBOSE)
         printf("phase_increment: %lf\n", phase_increment);
 
-    for (int i = 0; i < meta_data->num_antennas; i++) {
-        if (antennas[i] <= IDX_LAST_MA || antennas[i] > IDX_LAST_IA) {
-            phasing_vector[i] = rad_to_rect(antennas[i] * phase_increment);
+    for (int aidx = 0; aidx < meta_data->num_antennas; aidx++) {
+        if (antennas[aidx] <= IDX_LAST_MA || antennas[aidx] > IDX_LAST_IA) {
+            phasing_vector[aidx] = rad_to_rect(antennas[aidx] * phase_increment);
         } 
-        else phasing_vector[i] = 0;
+        else phasing_vector[aidx] = 0;
 
         if (VERBOSE) {
-            printf("ant[%d]: %d", i, antennas[i]);
-            printf("phasing vec[%d]: %f + %fi\n", i, creal(phasing_vector[i]), cimag(phasing_vector[i]));
+            // printf("ant[%d]: %d", i, antennas[i]);
+            printf("phasing vec[%d]: %f + %fi\n", aidx, creal(phasing_vector[aidx]), cimag(phasing_vector[aidx]));
         }
     }
 
@@ -589,7 +590,7 @@ void phasing_and_beamforming(double beam_angle, int *clear_freq_range, sample_me
             sample_re[aidx][i] = creal(raw_samples[aidx][i]);
         }
         beamformed_samples[i] = real_sum + I * imag_sum;
-        
+
         if (VERBOSE)
             printf("beamformed[%d]    = %f + %fi\n", i, creal(beamformed_samples[i]), cimag(beamformed_samples[i]));
     }
