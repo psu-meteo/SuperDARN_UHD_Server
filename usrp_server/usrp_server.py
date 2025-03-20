@@ -455,7 +455,7 @@ class ClearFrequencyService():
     DOUBLE_SIZE = 8
     
     # Shared Memory Object and Semaphores Constants
-    SAMPLES_NUM  = 10000
+    SAMPLES_NUM  = 7507
     ANTENNA_NUM = 16
     RESTRICT_NUM = 20
     META_ELEM    = 3                                    # 3 = 4 - 1 (fcenter has unique obj)
@@ -894,8 +894,8 @@ class ClearFrequencyService():
             noise_data = []
             for start_freq, noise, end_freq in zip(read_data[::3], read_data[1::3], read_data[2::3]):
                 # Return Center Freq and Noise
-                packed_data.append((start_freq + end_freq) / 2)
-                noise_data.append(noise)
+                packed_data.append(int(((start_freq + end_freq) / 2) / 1000))
+                noise_data.append(int(noise))
             return packed_data, noise_data            
                 
     def request_clr_freq(self, raw_samples, clr_range=None, fcenter=None, beam_num=None, sample_sep=None, restrict_data=None, meta_data=None, ):
@@ -1081,9 +1081,9 @@ class ClearFrequencyService():
                 new_noise_data = []
                 new_clrfreq_data = self.read_m_data(self.shm_objects[8])
                 new_clrfreq_data, new_noise_data = self.repack_data(new_clrfreq_data, True)
-                for clr_freq in zip(new_clrfreq_data, new_noise_data):
-                    print(f"[clearFrequencyService] Clear Freq Band: | {clr_freq[0]} (Hz), {clr_freq[1]} (N/A) |")
-                clr_freq, noise = new_clrfreq_data[0]/1000, new_noise_data[0]
+                for clr_freq_and_noise in zip(new_clrfreq_data, new_noise_data):
+                    print(f"[clearFrequencyService] Clear Freq Band: | {clr_freq_and_noise[0]} (kHz), {clr_freq_and_noise[1]} (N/A) |")
+                clr_freq, noise = new_clrfreq_data[0], new_noise_data[0]
                 
                 self.sl_clrfreq['sem'].release()
                         
@@ -1272,7 +1272,7 @@ class scanManager():
        
         self.channel = channel
         self.RHM = channel.parent_RadarHardwareManager
-        self.clearFreqService = ClearFrequencyService()
+        self.clearFreqService = ClearFrequencyService('ksr')
         self.beamSep = self.RHM.array_beam_sep
         self.numBeams = self.RHM.array_nBeams
 
