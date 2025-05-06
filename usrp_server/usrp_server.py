@@ -706,7 +706,7 @@ class ClearFrequencyService():
             active_clients -= 1
             m.seek(0)
             m.write(struct.pack('i', active_clients))
-            print(f"[clearFrequencyService] Decremented Active Clients Counter: {active_clients}")
+            print(f"[clearFrequencyService] Decremented Active Clients Counter: {active_clients}\n")
             return active_clients
       
               
@@ -797,7 +797,7 @@ class ClearFrequencyService():
                 interleaved_data[1::2] = array_data_np.imag.astype(np.int32).ravel()
                 
                 # Print set per 2500 elemnents (till 5 set) in interleaved_data to verify
-                for i in range(0, 5):
+                for i in range(0, interleaved_data.size // 5000):
                     print(f"[Frequency Client] interleaved_data: ", interleaved_data[i * 5000:(i + 1) * 5000], "...")
                 
                 # Write directly to shared memory
@@ -970,6 +970,8 @@ class ClearFrequencyService():
         """ Waits for client requests, then processes server data, writes client 
             data, and requests server to process new data. When process is 
             terminated, the try/finally block cleans up.
+            
+            Note: fcenter and meta_data can be None after being passed as arguments on the first send_samples() method call.
         """
         input_data = [
             raw_samples, 
@@ -990,7 +992,7 @@ class ClearFrequencyService():
                 
         # Get in Queue
         active_clients = self.increment_active_clients()
-        print(f"[clearFrequencyService] Active clients count: {active_clients}\n")
+        print(f"[clearFrequencyService] Active clients count: {active_clients}")
         
         try:
             self.premap_shm(meta_data)
@@ -1113,7 +1115,7 @@ class ClearFrequencyService():
                 
         # Get in Queue
         active_clients = self.increment_active_clients()
-        print(f"[clearFrequencyService] Active clients count: {active_clients}\n")
+        print(f"[clearFrequencyService] Active clients count: {active_clients}")
         
         try:
             self.premap_shm()
@@ -1256,7 +1258,7 @@ class ClearFrequencyService():
             print("[clearFrequencyService] Recieved Server Response. Reading Clear Freq data...\n\n")
             
             self.sl_clrfreq['sem'].release()
-    
+
 class clearFrequencyRawDataManager():
     """ Buffers the raw clearfrequency data for all channels
     """
@@ -1564,7 +1566,6 @@ class scanManager():
    
         all_restricted_freq = self.restricted_frequency_list + RHM.clearFreqRawDataManager.freq_occupied_by_other_channels
         self.logger.debug('start calc_clear_freq_on_raw_samples')
-        # clearFreq, noise = calc_clear_freq_on_raw_samples(rawData, metaData, all_restricted_freq, self.clear_freq_range_list[iPeriod], beam_angle, self.channel.raw_export_data['smsep'])
         
         clear_freq_range = []
         for freq in self.clear_freq_range_list[iPeriod]: 
