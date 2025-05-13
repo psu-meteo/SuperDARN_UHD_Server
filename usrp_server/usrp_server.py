@@ -478,6 +478,7 @@ class ClearFrequencyService():
     ANTENNA_SHM_SIZE        = (1 * INT_SIZE)
     CLR_BANDS_SHM_SIZE      = (1 * INT_SIZE * 3)     # TODO: Round to convert freqs to int again 
     SITE_ID_SHM_SIZE        = (3 * CHAR_SIZE)
+    RADAR_ID_SHM_SIZE       = (1 * INT_SIZE)
     ACTIVE_CLIENTS_SHM_SIZE = (1 * INT_SIZE)
 
     RETRY_ATTEMPTS = 3
@@ -493,13 +494,14 @@ class ClearFrequencyService():
     META_DATA_SHM_NAME =        "/meta_data"
     ANTENNA_SHM_NAME =          "/antenna_num"
     CLRFREQ_SHM_NAME =          "/clear_freq"
-    ACTIVE_CLIENTS_SHM_NAME =   "/active_clients"   # For Debugging
     SITE_ID_SHM_NAME =          "/site_id"
+    RADAR_ID_SHM_NAME =         "/radar_id"
+    ACTIVE_CLIENTS_SHM_NAME =   "/active_clients"   # For Debugging
 
     # Semaphore Constants
     SAMPLE_PARAM_NUM =      2
     RESTRICT_PARAM_NUM =    2
-    PARAM_NUM =             9
+    PARAM_NUM =             10
     
     SEM_F_CLIENT =      "/sf_client"               # For reserving client and server roles during data transfer
     SEM_F_SERVER =      "/sf_server"               # And for signalling specific data transfers 
@@ -520,7 +522,7 @@ class ClearFrequencyService():
     cur_antenna_num = ANTENNA_NUM
     old_meta_data = [[], 0, 0.0, 0.0]
     old_smsep = 0
-    log = logging.getLogger('clearFrequency')
+    
     
     def __init__(self, sid = 'lab'):
         # Process Site ID during Sample Send 
@@ -564,6 +566,7 @@ class ClearFrequencyService():
                 self.create_shm_obj(self.ANTENNA_SHM_NAME,          self.ANTENNA_SHM_SIZE       , ),
                 self.create_shm_obj(self.CLRFREQ_SHM_NAME,          self.CLR_BANDS_SHM_SIZE     , self.CLR_BANDS_ELEM_NUM), 
                 self.create_shm_obj(self.SITE_ID_SHM_NAME,          self.SITE_ID_SHM_SIZE       , self.SITE_ID_ELEM_NUM),
+                self.create_shm_obj(self.RADAR_ID_SHM_NAME,         self.RADAR_ID_SHM_SIZE      , ),
                 self.create_shm_obj(self.ACTIVE_CLIENTS_SHM_NAME,   self.ACTIVE_CLIENTS_SHM_SIZE, )
             ]
 
@@ -573,7 +576,6 @@ class ClearFrequencyService():
             ClearFrequencyService.active_clients_fd = None 
             self.initialize_active_clients_counter()
             print("[clearFrequencyService] Done Initializing...\n\n")
-            self.log.debug("clearFrequencyService initialized")
 
         except ValueError:
             print("[ClearFrequencyService] Initialization Failed. Cleaning up SHM Objects and Semaphores...")
@@ -929,7 +931,6 @@ class ClearFrequencyService():
             ## Check for Premapped antenna num
             # Map shared memory object pointer for antenna num
             print(f"Mapping {self.shm_objects[7]['name']}")
-            self.log.debug("[clearFrequencyService] Verifying Antenna and Sample size")
             self.shm_objects[7]['shm_ptr'] = mmap.mmap(self.shm_objects[7]['shm_fd'], self.shm_objects[7]['size'], mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)
             
             # Check if Antenna Num changed, update corresponding values before they're mapped
@@ -951,13 +952,9 @@ class ClearFrequencyService():
                 samples_obj['elem_num'] = len(meta_data['antenna_list']) * int(meta_data['number_of_samples']) * 2
                 samples_obj['size'] = samples_obj['elem_num'] * self.INT_SIZE
                 os.ftruncate(samples_obj['shm_fd'], samples_obj['size'])
-                        
-            self.log.debug("[clearFrequencyService] Verifying Antenna and Sample size done")
-
                 
             # Map shared memory object pointers
             print(f"Mapping Shared Memory for Objects...\n")
-            self.log.debug("[clearFrequencyService] Mapping SHM")
             for obj in self.shm_objects:
                 # Special: Skip Antenna_Num mapping
                 if obj['name'] == '/antenna_num':
@@ -966,7 +963,7 @@ class ClearFrequencyService():
                 obj['shm_ptr'] = mmap.mmap(obj['shm_fd'], obj['size'], mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE) 
     
     
-    def send_samples(self, raw_samples, fcenter=None, meta_data=None):
+    def send_samples(self, raw_samples, radar_id, fcenter=None, meta_data=None):
         """ Waits for client requests, then processes server data, writes client 
             data, and requests server to process new data. When process is 
             terminated, the try/finally block cleans up.
@@ -1056,11 +1053,9 @@ class ClearFrequencyService():
                 self.sf_init['sem'].release()
                 print("[clearFrequencyService] Initialization Semaphore Released ...")
                 print("[clearFrequencyService] Server Initialization Flag raised ...")
-                self.log.debug("[clearFrequencyService] Writing Initializaton data to SHM done")
+
                                 
             if raw_samples is not None:
-                self.log.debug("[clearFrequencyService] Writing Sample data to SHM")
-                
                 print("[clearFrequencyService] Awaiting Sample Semphore Lock...")
                 self.sl_samples['sem'].acquire()
 
@@ -1074,15 +1069,16 @@ class ClearFrequencyService():
                     # General: Write updated input data 
                     if input_data[i] is not None:
                         self.write_data(self.shm_objects[i], input_data[i])
+                        
+                # Write Radar ID
+                self.write_data(self.shm_objects[10], radar_id)
                 
                 self.sl_samples['sem'].release()
                 self.sf_samples['sem'].release()
                 print("[Frequency Client] Done writing data to Shared Memory...")
-                self.log.debug("[clearFrequencyService] Writing Sample data to SHM done")
                 
                 # Request Server 
                 print("[clearFrequencyService] Requesting Server Response...")
-                self.log.debug("[clearFrequencyService] Requesting Server response")
                 self.sf_server['sem'].release()
                 
                         
@@ -1095,7 +1091,7 @@ class ClearFrequencyService():
                 
         return 
                 
-    def request_clr_freq(self, beam_num=None, sample_sep=None, clr_range=None, ):
+    def request_clr_freq(self, radar_id, beam_num=None, sample_sep=None, clr_range=None, ):
         """ Waits for client requests, then processes server data, writes client 
             data, and requests server to process new data. When process is 
             terminated, the try/finally block cleans up.\
@@ -1142,6 +1138,10 @@ class ClearFrequencyService():
                     print(f"[Frequency Client] Data Write: {self.shm_objects[i]['name']}") 
                     self.write_data(self.shm_objects[i], input_data[i - self.SAMPLE_PARAM_NUM])
                 
+            # Write Radar ID
+            print(f"[Frequency Client] Data Write: {self.shm_objects[10]['name']}")
+            self.write_data(self.shm_objects[10], radar_id)
+                
             self.sl_clrfreq['sem'].release()
             print("[clearFrequencyService] ClrFreq Semaphore Released ...")
                                             
@@ -1164,7 +1164,6 @@ class ClearFrequencyService():
             for clr_freq_and_noise in zip(new_clrfreq_data, new_noise_data):
                 print(f"[clearFrequencyService] Clear Freq Band: | {clr_freq_and_noise[0]} (kHz), {clr_freq_and_noise[1]} (N/A) |")
             clr_freq, noise = new_clrfreq_data[0], new_noise_data[0]
-            self.log.debug("[clearFrequencyService] clr_freq recieved...")
             
             self.sl_clrfreq['sem'].release()
                     
@@ -1338,7 +1337,7 @@ class clearFrequencyRawDataManager():
             self.logger.debug('end record_clrfreq_raw_samples')
             
             self.metaData['antenna_list'] = self.antennaList
-            self.CFS.send_samples(self.rawData, int(self.center_freq), meta_data=self.metaData)
+            self.CFS.send_samples(self.rawData, 0, int(self.center_freq), meta_data=self.metaData)
 
             self.logger.debug("recorded clear samples for clear frequency search, antenna list: {}".format(self.antennaList))
     
@@ -1578,7 +1577,7 @@ class scanManager():
         if len(rawData) != len(metaData['antenna_list']):
             self.logger.error("Mismatch in number of ant samples and ant length.")
         self.logger.debug(f"antenna sample sets: {len(rawData)}   antennas: {metaData['antenna_list']}")
-        clearFreq, noise = self.clearFreqService.request_clr_freq(int(beamNo), int(self.channel.raw_export_data['smsep']), clear_freq_range)
+        clearFreq, noise = self.clearFreqService.request_clr_freq(0, int(beamNo), int(self.channel.raw_export_data['smsep']), clear_freq_range)
         
         
         self.logger.debug('end calc_clear_freq_on_raw_samples')
